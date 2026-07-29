@@ -1,0 +1,16 @@
+[package]
+name = "skillkit-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "skillkit"
+path = "src/main.rs"
+
+[dependencies]
+skillkit-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[lints]
+workspace = true

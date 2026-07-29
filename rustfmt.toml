@@ -1,0 +1,8 @@
+# rustfmt 配置（对标 Java Spotless + Eclipse formatter 的统一风格）。
+# 只用 stable 选项，保证 `cargo fmt` 无需 nightly。
+edition = "2021"
+max_width = 100          # 行宽 100，对齐 Java 模板
+tab_spaces = 4
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"

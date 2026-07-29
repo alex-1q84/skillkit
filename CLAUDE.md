@@ -46,6 +46,7 @@ M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免
 - **agent 能力配置驱动**：是否支持 symlink、是否直读 `~/.agents/skills/` 声明在 `config.toml`，新增 agent 只改配置不改代码。
 - **不管 Claude 原生插件**（`~/.claude/plugins/`）**和 `~/.claude/commands/`**：碰会冲突。
 - **项目 local skill 平铺落地**：与 shared 同级落在 `<agent>/skills/<skill>/`，绝不建 `local/` 子目录（Claude Code 只发现一层目录下的 skill，子目录会被跳过）；git 忽略写 `<project>/.git/info/exclude`，不改项目 `.gitignore`。详见 spec §6.3、决策 12。
+- **改完源码必跑 `make format && make lint`**：`format` 应用 rustfmt（会改源码）、`lint` 只检查（fmt --check + clippy `-D warnings`）。提交前确保双绿，否则 CI 会拦。详见 §9。
 
 ## 6. CLI 约定
 
@@ -85,6 +86,17 @@ cargo test                           # 全量测试
 cargo test -p skillkit-core          # 只测 core
 cargo run -p skillkit-cli -- <cmd>   # 跑 CLI（M0 起可用）
 cargo run -p skillkit-server         # 起 web server（M2）
+```
+
+日常走 Makefile 统一入口（CI 与本地同规则）：
+
+```bash
+make setup        # 拉取依赖
+make format       # 应用 rustfmt（会改源码）
+make lint         # 格式校验 + clippy -D warnings（read-only）
+make test         # 全量测试
+make build        # 编译
+make check        # 提交前一站式：format && lint && test
 ```
 
 ## 10. Commit 规范
