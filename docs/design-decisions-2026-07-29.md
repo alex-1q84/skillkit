@@ -31,7 +31,7 @@
 
 **决策**：CLI 直接调用核心库，`serve` 启 web server 也直接调核心库，不引入常驻 daemon。
 
-**理由**：状态实时性靠核心库写状态文件 + web 端 SSE 推送即可保证。daemon 会引入生命周期管理、进程协调等复杂度，对这个工具不必要。CLI 与 web server 并发写配置用文件锁解决。
+**理由**：状态实时性靠核心库写状态文件 + server 端 file watcher 监听变化经 SSE 推送即可保证（CLI 不必通知 server）。daemon 会引入生命周期管理、进程协调等复杂度，对这个工具不必要。CLI 与 web server 并发写配置用文件锁解决。
 
 ## 决策 4：物理存储用 Symlink 池 + 单版本
 
@@ -57,7 +57,7 @@
 **背景**：项目里有的 skill 要入仓库随团队分发，有的要共享但不入仓库。
 
 **决策**：
-- local（不入库）：canonical 集中在 `~/.skm/skills/`，落地到 `<project>/<agent>/skills/local/`（symlink 或 copy），gitignore。
+- local（不入库）：canonical 集中在 `~/.skm/skills/`，与 shared 同级平铺落地到 `<project>/<agent>/skills/<skill>/`（symlink 或 copy），git 忽略走 `<project>/.git/info/exclude`（本地不入库）。
 - shared（入库）：真实文件直接在 `<project>/<agent>/skills/`，git 提交，skillkit 只做只读发现，不安装/升级/卸载。
 
 **理由**：shared skill 既然在 git 里，项目自身（git + 团队约定）已经在管理它，skillkit 重复管是多余，违反最小改动和 YAGNI。skillkit 对 shared 只需能看到清单，方便与 local 对照展示。
@@ -85,7 +85,7 @@
 
 **决策**：canonical 物理存储只有一份，版本锁记录在 registry 和 project 的 `locked_shas`。升级时扫描所有 project 的锁，发现冲突则警告并列出受影响项目。
 
-**理由**：团队一致性靠源仓库锁（团队都从私有 skill 仓库的同一个 tag 安装），不靠每项目本地存不同物理版本。冲突检测保证升级不会默默让锁定旧版本的项目失控。
+**理由**：团队一致性靠源仓库锁（团队都从私有 skill 仓库的同一个 tag 安装），不靠每项目本地存不同物理版本。单版本模型下 `locked_shas` 并非"锁死版本"——canonical 只有一份，升级即全局物理更新；locked_shas 记录的是上次 apply 的基线，作用是让 canonical 变更被感知（apply/upgrade 时比对、提示受影响项目），而非让项目停在旧版。
 
 ## 决策 10：工具命名 skillkit
 
@@ -103,3 +103,16 @@
 **决策**：M0 骨架（source/install/全局 symlink）→ M1 闭环（profile/project/apply）→ M2 GUI → M3 迁移打磨。
 
 **理由**：M1 完成即达成核心目标（CLI 闭环可用），GUI 是锦上添花放在 M2，迁移现有 skill 放 M3。每段独立可验证、可交付。
+
+## 决策 12：local skill 平铺落地，git 忽略用 .git/info/exclude
+
+**背景**：原设计把项目 local skill 落到 `<agent>/skills/local/<skill>/` 子目录，便于一条 `.gitignore` 忽略。但 review 发现 Claude Code 只发现 `.claude/skills/<skill>/SKILL.md` 一层，子目录（含 `local/`）完全不发现（issue #39138），且 Claude Code 不支持自定义 skill 路径（issue #22902 未实现），local 必须平铺。
+
+**决策**：local 与 shared 同级平铺在 `<agent>/skills/<skill>/`；区分靠 skillkit 的落地清单（`installed_skills` 里 scope=local 的）；git 忽略改用 `<project>/.git/info/exclude`（git 天然本地、不入库），apply 动态维护。
+
+**理由**：平铺满足 Claude 发现约束；`.git/info/exclude` 不污染团队 `.gitignore`、不需"忽略自己"的别扭写法、团队成员各自本地维护互不冲突；落地清单本就由 skillkit 管，生成 exclude 是 apply 的自然副产品。
+
+**否定的备选**：
+- 维持 `local/` 子目录：Claude 不发现，直接失效。
+- 平铺 + 项目 `.gitignore` 动态清单：清单入库，团队成员 local 不同导致提交冲突。
+- 取消 local 物理隔离、全部装全局池（方案 B）：消除整套落地复杂度，但放弃 per-project 精确控制，与 spec §2"精确到逐个 skill 指定"目标相悖，未采纳。
