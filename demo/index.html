@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skillkit — GUI 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf7ef;
+    --grid: #ebe4d2;
+    --surface: #ffffff;
+    --surface-2: #f4efe2;
+    --ink: #1c1917;
+    --ink-2: #57534e;
+    --ink-3: #a8a29e;
+    --line: #ddd5c1;
+    --line-2: #e8e1cf;
+    --accent: #b45309;
+    --accent-2: #d97706;
+    --accent-soft: #fef3c7;
+    --teal: #0f766e;
+    --teal-soft: #ccfbf1;
+    --violet: #6d28d9;
+    --violet-soft: #ede9fe;
+    --ok: #15803d;
+    --warn: #b45309;
+    --danger: #b91c1c;
+    --shadow: 0 1px 0 rgba(28,25,23,.04), 0 8px 24px -12px rgba(28,25,23,.18);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--ink);
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 26px 26px;
+    background-position: -1px -1px;
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(250,247,239,.86);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .header-inner {
+    max-width: 1240px; margin: 0 auto;
+    padding: 14px 28px;
+    display: flex; align-items: center; gap: 28px;
+  }
+  .logo {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700; font-size: 18px;
+    letter-spacing: -.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo .mark {
+    width: 22px; height: 22px;
+    background: var(--ink);
+    position: relative;
+    transform: rotate(45deg);
+  }
+  .logo .mark::after {
+    content: ''; position: absolute;
+    inset: 5px; background: var(--accent-2);
+  }
+  .logo span { color: var(--ink); }
+  .logo i { color: var(--accent); font-style: normal; }
+
+  nav.tabs { display: flex; gap: 2px; margin-left: auto; }
+  nav.tabs button {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px; font-weight: 500;
+    letter-spacing: .04em; text-transform: uppercase;
+    background: none; border: none; cursor: pointer;
+    color: var(--ink-2);
+    padding: 8px 14px; border-radius: 6px;
+    transition: all .15s;
+    position: relative;
+  }
+  nav.tabs button:hover { color: var(--ink); background: var(--surface-2); }
+  nav.tabs button.active { color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
+  nav.tabs button.active::after {
+    content: ''; position: absolute; left: 14px; right: 14px; bottom: 3px; height: 2px; background: var(--accent);
+  }
+  .badge-global {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    margin-left: 10px; padding: 3px 8px; border-radius: 4px;
+    background: var(--surface); color: var(--ink-2); border: 1px solid var(--line);
+  }
+
+  /* ---------- main ---------- */
+  main { max-width: 1240px; margin: 0 auto; padding: 32px 28px 80px; }
+  .view { display: none; }
+  .view.active { display: block; animation: fade .35s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .page-head { margin-bottom: 24px; display: flex; align-items: baseline; gap: 14px; }
+  .page-head h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 30px; font-weight: 600; letter-spacing: -.03em;
+  }
+  .page-head .desc { color: var(--ink-2); font-size: 13.5px; }
+  .crumb { font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-3); margin-bottom: 6px; }
+  .crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .crumb a:hover { text-decoration: underline; }
+
+  /* ---------- table ---------- */
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); }
+  th {
+    text-align: left; font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-2); background: var(--surface-2);
+    padding: 11px 16px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--line-2); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #fdfbf5; }
+  td.mono, .cell-id { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+
+  /* ---------- tags ---------- */
+  .tag {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .05em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 4px; display: inline-block;
+  }
+  .tag.global { background: var(--teal-soft); color: var(--teal); }
+  .tag.local { background: var(--accent-soft); color: var(--accent); }
+  .tag.shared { background: var(--violet-soft); color: var(--violet); }
+  .tag.src { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+  .tag.type { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+
+  .pill-btn {
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:500;
+    letter-spacing:.04em; cursor:pointer;
+    padding: 4px 10px; border-radius: 5px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink-2); transition: all .15s;
+  }
+  .pill-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+
+  /* ---------- filters ---------- */
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  .filter {
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px;
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--surface); cursor: pointer; color: var(--ink-2); transition: all .15s;
+  }
+  .filter:hover { border-color: var(--ink-3); }
+  .filter.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  /* ---------- project cards ---------- */
+  .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; cursor: pointer; transition: all .2s; box-shadow: var(--shadow);
+    position: relative; overflow: hidden;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--ink-3); }
+  .card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent); opacity:0; transition: opacity .2s; }
+  .card:hover::before { opacity: 1; }
+  .card h3 { font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; letter-spacing:-.02em; margin-bottom: 4px; }
+  .card .path { font-family:'IBM Plex Mono',monospace; font-size:11.5px; color: var(--ink-3); margin-bottom: 14px; }
+  .card .row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom: 10px; }
+  .card .stat { font-family:'IBM Plex Mono',monospace; font-size:11.5px; color: var(--ink-2); }
+  .card .stat b { color: var(--ink); font-weight:600; }
+  .card .foot { display:flex; justify-content:space-between; align-items:center; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .status-dot { font-family:'IBM Plex Mono',monospace; font-size:11px; display:flex; align-items:center; gap:6px; }
+  .status-dot .d { width:7px; height:7px; border-radius:50%; }
+  .d.ok { background: var(--ok); } .d.warn { background: var(--warn); } .d.danger { background: var(--danger); }
+
+  /* ---------- workbench ---------- */
+  .wb { display: grid; grid-template-columns: 1.15fr .85fr 1fr; gap: 16px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .panel .ph { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2);
+    display:flex; justify-content:space-between; align-items:center; }
+  .panel .ph h4 { font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color: var(--ink-2); }
+  .panel .ph .hint { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color: var(--ink-3); }
+  .panel .pb { padding: 8px; }
+  .panel .pb.tight { padding: 6px 10px; }
+
+  .skill-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 6px; transition: background .12s;
+    font-family:'IBM Plex Mono',monospace; font-size: 12.5px;
+  }
+  .skill-row:hover { background: var(--surface-2); }
+  .skill-row .id { flex: 1; }
+  .skill-row .id .src { color: var(--ink-3); }
+  .skill-row .id .nm { color: var(--ink); }
+  .check {
+    width: 16px; height: 16px; border: 1.5px solid var(--ink-3); border-radius: 4px;
+    cursor: pointer; flex-shrink: 0; position: relative; transition: all .15s; background: var(--surface);
+  }
+  .check.on { background: var(--ink); border-color: var(--ink); }
+  .check.on::after { content:''; position:absolute; left:4px; top:1px; width:5px; height:9px; border:solid var(--bg); border-width:0 2px 2px 0; transform: rotate(40deg); }
+
+  .shared-row {
+    padding: 8px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; color: var(--ink-2);
+    display:flex; align-items:center; gap:8px;
+  }
+  .shared-row .lock { color: var(--ink-3); font-size: 10px; }
+
+  .diff-item {
+    display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px;
+    border-radius: 6px; margin-bottom: 3px; font-family:'IBM Plex Mono',monospace; font-size:12.5px;
+    animation: slidein .3s ease both;
+  }
+  @keyframes slidein { from { opacity:0; transform: translateX(-6px); } to { opacity:1; transform:none; } }
+  .diff-item .sym { font-weight: 700; width: 14px; flex-shrink:0; }
+  .diff-item.sync { background: #f0fdf4; color: var(--ok); }
+  .diff-item.sync .sym { color: var(--ok); }
+  .diff-item.miss { background: #fff7ed; color: var(--warn); }
+  .diff-item.miss .sym { color: var(--warn); }
+  .diff-item.extr { background: #fef2f2; color: var(--danger); }
+  .diff-item.extr .sym { color: var(--danger); }
+  .diff-item.conf { background: var(--violet-soft); color: var(--violet); }
+  .diff-item.conf .sym { color: var(--violet); }
+  .diff-item .body { flex:1; }
+  .diff-item .body .sub { font-size: 10.5px; color: var(--ink-3); margin-top:2px; }
+  .diff-empty { padding: 24px 16px; text-align:center; color: var(--ink-3); font-family:'IBM Plex Mono',monospace; font-size:12px; }
+
+  /* ---------- apply bar ---------- */
+  .applybar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 14px; justify-content: flex-end;
+    padding: 4px 0;
+  }
+  .btn {
+    font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600;
+    letter-spacing:.03em; cursor: pointer; border-radius: 7px;
+    padding: 10px 16px; transition: all .15s; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink-2);
+  }
+  .btn:hover { color: var(--ink); border-color: var(--ink-3); }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); padding: 11px 22px; }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 6px 18px -6px rgba(180,83,9,.5); }
+  .btn.primary:active { transform: translateY(0); }
+  .select-mini {
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px;
+    padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink-2); cursor: pointer;
+  }
+
+  /* ---------- sources / profiles ---------- */
+  .src-card { background: var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow: var(--shadow); margin-bottom: 12px; overflow:hidden; }
+  .src-card .top { display:flex; align-items:center; gap:14px; padding: 16px 20px; }
+  .src-card .top .nm { font-family:'IBM Plex Mono',monospace; font-size:16px; font-weight:600; }
+  .src-card .top .meta { font-family:'IBM Plex Mono',monospace; font-size:12px; color: var(--ink-3); margin-left:auto; }
+  .src-card .kids { padding: 6px 20px 12px; border-top: 1px dashed var(--line); }
+  .src-card .kids .k { font-family:'IBM Plex Mono',monospace; font-size:11.5px; color: var(--ink-2); padding: 3px 0; }
+  .src-card .kids .k::before { content: '· '; color: var(--ink-3); }
+
+  .profile-block { background: var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow: var(--shadow); margin-bottom:14px; }
+  .profile-block .ph2 { padding: 16px 20px; border-bottom: 1px solid var(--line-2); cursor: pointer; }
+  .profile-block .ph2 h3 { font-family:'IBM Plex Mono',monospace; font-size:17px; font-weight:600; }
+  .profile-block .ph2 .d { font-size:13px; color: var(--ink-2); margin-top:3px; }
+  .profile-block .body { padding: 10px 20px 16px; }
+  .profile-block .body .si { font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-2); padding: 4px 0; }
+
+  .foot-note { margin-top: 28px; font-family:'IBM Plex Mono',monospace; font-size:11px; color: var(--ink-3); border-top: 1px dashed var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="logo"><span class="mark"></span><span>skill<i>kit</i></span></div>
+    <nav class="tabs">
+      <button data-view="sources">Sources</button>
+      <button data-view="skills">Skills</button>
+      <button data-view="profiles">Profiles</button>
+      <button data-view="projects" class="active">Projects</button>
+    </nav>
+    <span class="badge-global">原型 · 亮色</span>
+  </div>
+</header>
+
+<main>
+  <!-- SOURCES -->
+  <section class="view" id="view-sources">
+    <div class="page-head">
+      <h1>Sources</h1>
+      <span class="desc">skill 安装源注册表 · 类型 / 地址 / ref</span>
+    </div>
+    <div id="sources-list"></div>
+  </section>
+
+  <!-- SKILLS -->
+  <section class="view" id="view-skills">
+    <div class="page-head">
+      <h1>Skills</h1>
+      <span class="desc">registry 总览 · 全部已安装 skill 元数据</span>
+    </div>
+    <div class="toolbar" id="skills-filter"></div>
+    <table>
+      <thead><tr>
+        <th>id</th><th>scope</th><th>version</th><th>commit_sha</th><th>source</th><th>canonical_path</th><th></th>
+      </tr></thead>
+      <tbody id="skills-body"></tbody>
+    </table>
+  </section>
+
+  <!-- PROFILES -->
+  <section class="view" id="view-profiles">
+    <div class="page-head">
+      <h1>Profiles</h1>
+      <span class="desc">粗分类候选集 · 可复用、可分享</span>
+    </div>
+    <div id="profiles-list"></div>
+  </section>
+
+  <!-- PROJECTS -->
+  <section class="view active" id="view-projects">
+    <div id="projects-root"></div>
+  </section>
+</main>
+
+<script>
+// ============ mock data ============
+const SKILLS = {
+  'skills.sh/frontend-design': { name:'frontend-design', source:'skills.sh', scope:'global', version:'1.2.0', sha:'abc1234', path:'~/.agents/skills/frontend-design' },
+  'skills.sh/dataviz':         { name:'dataviz',         source:'skills.sh', scope:'global', version:'0.9.1', sha:'9ff02ae', path:'~/.agents/skills/dataviz' },
+  'skills.sh/canvas-design':   { name:'canvas-design',   source:'skills.sh', scope:'global', version:'2.0.3', sha:'7d11c90', path:'~/.agents/skills/canvas-design' },
+  'skills.sh/logseq-usage':    { name:'logseq-usage',    source:'skills.sh', scope:'global', version:'1.0.0', sha:'3a8b1f2', path:'~/.agents/skills/logseq-usage' },
+  'skills.sh/old-thing':       { name:'old-thing',       source:'skills.sh', scope:'global', version:'0.4.2', sha:'11ab9cd', path:'~/.agents/skills/old-thing' },
+  'team-private/tdd':          { name:'tdd',             source:'team-private', scope:'local',  version:'0.3.1', sha:'def5678', path:'~/.skm/skills/tdd' },
+  'team-private/api-spec':     { name:'api-spec',        source:'team-private', scope:'local',  version:'1.1.0', sha:'c4f8a12', path:'~/.skm/skills/api-spec' },
+  'team-private/code-review':  { name:'code-review',     source:'team-private', scope:'local',  version:'2.2.0', sha:'8e5d3b1', path:'~/.skm/skills/code-review' },
+};
+
+const SOURCES = [
+  { name:'skills.sh',   type:'skills-sh', detail:'skills.sh 生态', ref:'—', skills:['frontend-design','dataviz','canvas-design','logseq-usage','old-thing'] },
+  { name:'team-private', type:'git',      detail:'git@github.com:org/team-skills.git', ref:'main', skills:['tdd','api-spec','code-review'] },
+  { name:'my-local',     type:'local',    detail:'~/my-skills', ref:'—', skills:[] },
+];
+
+const PROFILES = [
+  { name:'frontend', desc:'前端开发场景的 skill 候选集', skills:['skills.sh/frontend-design','skills.sh/dataviz','skills.sh/canvas-design'] },
+  { name:'base',     desc:'基础通用 skill 基座',         skills:['skills.sh/logseq-usage','team-private/code-review'] },
+];
+
+let PROJECTS = [
+  {
+    id:'mac-config-a1b2c3', name:'mac-config', path:'/Users/mywo/lab/mac-config',
+    agents:['claude-code','cursor'], applied:['frontend','base'],
+    installed:[
+      { id:'skills.sh/frontend-design', checked:true },
+      { id:'skills.sh/dataviz', checked:true },
+      { id:'team-private/tdd', checked:true },
+      { id:'team-private/api-spec', checked:true },
+      { id:'skills.sh/old-thing', checked:false },
+    ],
+    shared:['team-shared/lint','team-shared/git-hooks'],
+    landed:['skills.sh/frontend-design','skills.sh/dataviz','skills.sh/old-thing','team-private/api-spec'],
+    conflicts:{ 'team-private/api-spec':'def5678 → c4f8a12' },
+    uninstalled:['team-private/tdd'],
+  },
+  {
+    id:'skillkit-9f2e10', name:'skillkit', path:'/Users/mywo/lab/skillkit',
+    agents:['claude-code'], applied:['base'],
+    installed:[
+      { id:'skills.sh/logseq-usage', checked:true },
+      { id:'team-private/code-review', checked:true },
+      { id:'skills.sh/old-thing', checked:false },
+    ],
+    shared:[],
+    landed:['skills.sh/logseq-usage'],
+    conflicts:{},
+    uninstalled:['team-private/code-review'],
+  },
+];
+
+// ============ helpers ============
+const $ = s => document.querySelector(s);
+const skillById = id => SKILLS[id] || { name:id.split('/').pop(), source:id.split('/')[0], scope:'local', version:'?', sha:'?', path:'?' };
+const tag = (cls, txt) => `<span class="tag ${cls}">${txt}</span>`;
+const sc = p => p.scope === 'global' ? tag('global','global') : tag('local','local');
+function idCell(id){
+  const s = skillById(id);
+  return `<span class="cell-id"><span class="src">${s.source}/</span><span class="nm">${s.name}</span></span>`;
+}
+
+// ============ routing ============
+const buttons = document.querySelectorAll('nav.tabs button');
+buttons.forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+function switchView(v){
+  buttons.forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
+  $('#view-' + v).classList.add('active');
+  if (v === 'projects') renderProjectList();
+}
+
+// ============ SOURCES view ============
+function renderSources(){
+  $('#sources-list').innerHTML = SOURCES.map(s => `
+    <div class="src-card">
+      <div class="top">
+        <span class="nm">${s.name}</span>
+        ${tag('type', s.type)}
+        <span class="meta">${s.detail}${s.ref!=='—' ? ' · ref='+s.ref : ''} · ${s.skills.length} skills</span>
+      </div>
+      <div class="kids">
+        ${s.skills.map(k => `<div class="k">${k}</div>`).join('') || '<div class="k" style="color:var(--ink-3)">（空）</div>'}
+      </div>
+    </div>`).join('');
+}
+
+// ============ SKILLS view ============
+let skillFilter = 'all';
+function renderSkillsFilter(){
+  const types = [['all','全部'],['global','global'],['local','local'],['skills.sh','skills.sh'],['team-private','team-private']];
+  $('#skills-filter').innerHTML = types.map(([k,l]) =>
+    `<button class="filter ${skillFilter===k?'active':''}" data-f="${k}">${l}</button>`).join('');
+  $('#skills-filter').querySelectorAll('.filter').forEach(b =>
+    b.addEventListener('click', () => { skillFilter = b.dataset.f; renderSkills(); }));
+}
+function renderSkills(){
+  renderSkillsFilter();
+  const rows = Object.entries(SKILLS).filter(([id,s]) => {
+    if (skillFilter==='all') return true;
+    if (skillFilter==='global'||skillFilter==='local') return s.scope===skillFilter;
+    return s.source===skillFilter;
+  });
+  $('#skills-body').innerHTML = rows.map(([id,s]) => `
+    <tr>
+      <td>${idCell(id)}</td>
+      <td>${sc(s)}</td>
+      <td class="mono">${s.version}</td>
+      <td class="mono" style="color:var(--ink-2)">${s.sha}</td>
+      <td>${tag('src', s.source)}</td>
+      <td class="mono" style="color:var(--ink-3);font-size:12px">${s.path}</td>
+      <td><button class="pill-btn">upgrade</button></td>
+    </tr>`).join('');
+}
+
+// ============ PROFILES view ============
+function renderProfiles(){
+  $('#profiles-list').innerHTML = PROFILES.map(p => `
+    <div class="profile-block">
+      <div class="ph2">
+        <h3>${p.name}</h3>
+        <div class="d">${p.desc}</div>
+      </div>
+      <div class="body">
+        ${p.skills.map(id => `<div class="si">${idCell(id)} ${sc(skillById(id))}</div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+// ============ PROJECTS view ============
+function renderProjectList(){
+  $('#projects-root').innerHTML = `
+    <div class="page-head"><h1>Projects</h1><span class="desc">项目实例 · 精确管理每个项目的 skill 落地</span></div>
+    <div class="grid-cards">
+      ${PROJECTS.map(p => {
+        const st = computeStatus(p);
+        const dot = st.missing.length || st.conflictList.length ? 'warn' : (st.extra.length ? 'warn' : 'ok');
+        const label = (st.missing.length+st.extra.length+st.conflictList.length)===0 ? 'in-sync' : 'pending';
+        return `
+        <div class="card" data-pid="${p.id}">
+          <h3>${p.name}</h3>
+          <div class="path">${p.path}</div>
+          <div class="row">${p.agents.map(a=>tag('type',a)).join('')} ${p.applied.map(a=>tag('src','▸ '+a)).join('')}</div>
+          <div class="stat"><b>${p.installed.filter(s=>s.checked).length}</b> installed · <b>${p.shared.length}</b> shared · <b>${p.agents.length}</b> agents</div>
+          <div class="foot">
+            <span class="status-dot"><span class="d ${dot}"></span>${label}</span>
+            <span class="stat">进入工作台 →</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="foot-note">原型 · 勾选与 APPLY 仅模拟状态变化，不触碰真实文件（无 symlink / copy / .git/info/exclude）</div>
+  `;
+  $('#projects-root').querySelectorAll('.card').forEach(c =>
+    c.addEventListener('click', () => renderWorkbench(c.dataset.pid)));
+}
+
+// status: expected = checked; compare to landed
+function computeStatus(p){
+  const expected = p.installed.filter(s=>s.checked).map(s=>s.id);
+  const landed = p.landed;
+  const uninstalled = p.uninstalled || [];
+  const conflicts = p.conflicts || {};
+  const sync = expected.filter(id => landed.includes(id) && !conflicts[id]);
+  const missing = expected.filter(id => !landed.includes(id));
+  const extra = landed.filter(id => !expected.includes(id));
+  const conflictList = Object.entries(conflicts).filter(([id]) => expected.includes(id) || landed.includes(id));
+  return { expected, landed, sync, missing, extra, conflictList, uninstalled };
+}
+
+function renderWorkbench(pid){
+  const p = PROJECTS.find(x => x.id === pid);
+  $('#projects-root').innerHTML = `
+    <div class="crumb"><a id="back">Projects</a> / ${p.name}</div>
+    <div class="page-head">
+      <h1>${p.name}</h1>
+      <span class="desc">${p.path} · agents: ${p.agents.join(', ')} · applied: [${p.applied.join(', ')}]</span>
+    </div>
+    <div class="wb">
+      <div class="panel">
+        <div class="ph"><h4>installed_skills</h4><span class="hint">☑ = 期望落地</span></div>
+        <div class="pb" id="installed-list"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h4>shared</h4><span class="hint">只读 · git 管</span></div>
+        <div class="pb tight" id="shared-list"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h4>status</h4><span class="hint" id="status-hint">apply 后的 diff</span></div>
+        <div class="pb" id="status-list"></div>
+      </div>
+      <div class="applybar">
+        <select class="select-mini" id="profile-select">
+          <option value="">apply-profile ▾</option>
+          ${PROFILES.map(pr=>`<option value="${pr.name}">▸ ${pr.name} (${pr.skills.length})</option>`).join('')}
+        </select>
+        <button class="btn primary" id="apply-btn">▶ APPLY</button>
+      </div>
+    </div>
+    <div class="foot-note">expected = 勾选(☑)的 skill；对比当前落地状态算 missing / extra / conflict。APPLY 模拟幂等落地（spec §10.2）。</div>
+  `;
+  $('#back').addEventListener('click', renderProjectList);
+  renderInstalled(p);
+  renderShared(p);
+  renderStatus(p);
+  $('#profile-select').addEventListener('change', e => {
+    if(!e.target.value) return;
+    const prof = PROFILES.find(pr => pr.name === e.target.value);
+    prof.skills.forEach(id => {
+      const ex = p.installed.find(s => s.id === id);
+      if (ex) ex.checked = true; else p.installed.push({ id, checked:true });
+    });
+    e.target.value = '';
+    renderInstalled(p); renderStatus(p);
+  });
+  $('#apply-btn').addEventListener('click', () => doApply(p));
+}
+
+function renderInstalled(p){
+  $('#installed-list').innerHTML = p.installed.map(s => {
+    const meta = skillById(s.id);
+    return `<div class="skill-row" data-id="${s.id}">
+      <div class="check ${s.checked?'on':''}"></div>
+      <span class="id">${idCell(s.id)}</span>
+      ${sc(meta)}
+    </div>`;
+  }).join('') || '<div class="diff-empty">无候选 · 用 apply-profile 灌入</div>';
+  $('#installed-list').querySelectorAll('.skill-row').forEach(row =>
+    row.addEventListener('click', () => {
+      const target = p.installed.find(s => s.id === row.dataset.id);
+      target.checked = !target.checked;
+      row.querySelector('.check').classList.toggle('on', target.checked);
+      renderStatus(p);
+    }));
+}
+function renderShared(p){
+  $('#shared-list').innerHTML = p.shared.length
+    ? p.shared.map(id => `<div class="shared-row"><span class="lock">▸</span>${id}</div>`).join('')
+    : '<div class="diff-empty">无 shared</div>';
+}
+function renderStatus(p){
+  const st = computeStatus(p);
+  const items = [];
+  st.sync.forEach(id => items.push(diffRow('sync','✓','in-sync', id)));
+  st.missing.forEach(id => {
+    const needInstall = st.uninstalled.includes(id);
+    items.push(diffRow('miss','+', needInstall?'missing · 未 install':'missing', id, needInstall?'该 skill 未安装到 canonical，点此 install':null));
+  });
+  st.extra.forEach(id => items.push(diffRow('extr','−','extra', id, '未勾选，APPLY 将移除落地')));
+  st.conflictList.forEach(([id,chg]) => items.push(diffRow('conf','!','conflict', id, 'sha 漂移：'+chg)));
+  const dirty = st.missing.length + st.extra.length + st.conflictList.length;
+  $('#status-hint').textContent = dirty ? `${dirty} 项待 apply` : '全部 in-sync';
+  $('#status-list').innerHTML = items.length ? items.join('') : '<div class="diff-empty">无 skill</div>';
+}
+function diffRow(cls, sym, label, id, sub){
+  return `<div class="diff-item ${cls}" style="animation-delay:${Math.random()*.08}s">
+    <span class="sym">${sym}</span>
+    <div class="body">${idCell(id)} <span style="color:var(--ink-3);font-size:10.5px">${label}</span>
+    ${sub?`<div class="sub">${sub}</div>`:''}</div>
+  </div>`;
+}
+
+function doApply(p){
+  const st = computeStatus(p);
+  // 幂等落地：landed = 可安装的 expected（未 install 的跳过）；冲突按 canonical 解决
+  p.landed = st.expected.filter(id => !st.uninstalled.includes(id));
+  p.conflicts = {};
+  renderInstalled(p); renderStatus(p);
+  // 反馈：按钮闪一下
+  const btn = $('#apply-btn');
+  const orig = btn.textContent;
+  btn.textContent = '✓ 已落地';
+  btn.style.background = 'var(--ok)';
+  setTimeout(() => { btn.textContent = orig; btn.style.background=''; }, 1200);
+}
+
+// ============ init ============
+renderSources(); renderSkills(); renderProfiles(); renderProjectList();
+</script>
+</body>
+</html>
