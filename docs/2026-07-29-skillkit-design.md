@@ -176,12 +176,19 @@ url = "git@github.com:org/team-skills.git"
 ref = "main"                 # 默认拉取分支或 tag
 
 [[source]]
+name = "dc"
+type = "git"
+url = "ssh://git@bitbucket.rd.800best.com:7999/datawarehouse/datacenter-skills.git"
+ref = "main"
+skills_dir = "skills"        # skill 在仓库的 skills/ 子目录下（一仓库多 skill）；省略=skill 在仓库根
+
+[[source]]
 name = "my-local"
 type = "local"
 path = "~/my-skills"
 ```
 
-source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL，含私有仓库，依赖本地已配置的 SSH key 或 git credential）、`local`（本地路径）。
+source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL，含私有仓库，依赖本地已配置的 SSH key 或 git credential）、`local`（本地路径）。`skills_dir`（可选，git/local 源）：skill 在仓库中的子目录，用于一个仓库含多个 skill 的场景（如团队 `datacenter-skills` 仓库 `skills/` 下有多个 skill）；省略时 skill 内容直接在仓库根。install 时按 `<skills_dir>/<skill-name>` 定位并平铺到 canonical，保持 Claude 可发现的单层结构（避免 `skills/` 中间层）。
 
 ### 8.3 Skill 元数据 — `~/.skm/registry.json`
 
