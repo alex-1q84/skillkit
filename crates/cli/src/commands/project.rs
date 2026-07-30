@@ -1,0 +1,93 @@
+//! project 子命令：调 core 的 Project / apply。
+use clap::{Args, Subcommand};
+use skillkit_core::{config::Config, list_project_ids, paths::Paths, Project};
+use std::path::PathBuf;
+
+#[derive(Args)]
+pub struct ProjectCmd {
+    #[command(subcommand)]
+    cmd: ProjectSub,
+}
+
+#[derive(Subcommand)]
+enum ProjectSub {
+    /// 注册项目（生成随机 8 hex project-id）
+    Add {
+        path: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        agents: Option<Vec<String>>,
+    },
+    /// 重绑定：项目移动/改名后更新 path/name，id 不变
+    Rebind { id: String, path: PathBuf },
+    /// 扫描目录发现项目（只列 path，不自动注册）
+    Scan {
+        dir: PathBuf,
+        #[arg(long, default_value = "3")]
+        depth: u32,
+    },
+    /// 列出已注册项目
+    List,
+    // 后续 task 加：ApplyProfile / AddSkill / RemoveSkill / Apply / Status
+}
+
+pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
+    let paths = Paths::production();
+    match cmd.cmd {
+        ProjectSub::Add { path, agents } => {
+            let abs = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let cfg = Config::load(&paths)?;
+            let agents =
+                agents.unwrap_or_else(|| cfg.agents.iter().map(|a| a.name.clone()).collect());
+            let proj = Project::register(abs, agents);
+            let id = proj.id.clone();
+            proj.save(&paths)?;
+            println!("✓ 已注册项目 {id}");
+        }
+        ProjectSub::Rebind { id, path } => {
+            let mut proj = Project::load(&paths, &id)?;
+            proj.rebind(&path);
+            proj.save(&paths)?;
+            println!("✓ 已重绑定 {id} → {}", proj.path);
+        }
+        ProjectSub::Scan { dir, depth } => {
+            let found = scan_projects(&dir, depth)?;
+            if found.is_empty() {
+                println!("（未发现项目，project scan 只识别含 .git 的目录）");
+            }
+            for p in found {
+                println!("{}", p.display());
+            }
+        }
+        ProjectSub::List => {
+            for id in list_project_ids(&paths)? {
+                let proj = Project::load(&paths, &id)?;
+                println!(
+                    "{:10} {} ({} skills)",
+                    id,
+                    proj.path,
+                    proj.installed_skills.len()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 扫描：找含 .git 的目录（depth 限制）。
+fn scan_projects(dir: &std::path::Path, depth: u32) -> anyhow::Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    if dir.join(".git").exists() {
+        found.push(dir.to_path_buf());
+    }
+    if depth > 0 {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() && !p.starts_with(dir.join(".git")) {
+                    found.extend(scan_projects(&p, depth - 1)?);
+                }
+            }
+        }
+    }
+    Ok(found)
+}
