@@ -52,6 +52,11 @@ impl Config {
         crate::error::atomic_write(&path, &content)?;
         Ok(())
     }
+
+    /// 按 name 查 agent 能力（apply 落地决定 symlink/copy）。
+    pub fn find_agent(&self, name: &str) -> Option<&Agent> {
+        self.agents.iter().find(|a| a.name == name)
+    }
 }
 
 #[cfg(test)]
