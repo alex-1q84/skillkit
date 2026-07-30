@@ -25,9 +25,15 @@ enum ProjectSub {
         #[arg(long, default_value = "3")]
         depth: u32,
     },
+    /// 把 profile 的 skill 批量灌入 installed_skills
+    ApplyProfile { project: String, profile: String },
+    /// 精确加单个 skill
+    AddSkill { project: String, id: String },
+    /// 精确删单个 skill
+    RemoveSkill { project: String, id: String },
     /// 列出已注册项目
     List,
-    // 后续 task 加：ApplyProfile / AddSkill / RemoveSkill / Apply / Status
+    // 后续 task 加：Apply / Status
 }
 
 pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
@@ -57,6 +63,28 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             for p in found {
                 println!("{}", p.display());
             }
+        }
+        ProjectSub::ApplyProfile { project, profile } => {
+            let mut proj = Project::load(&paths, &project)?;
+            let p = skillkit_core::Profile::load(&paths, &profile)?;
+            proj.apply_profile(&profile, &p.skills);
+            proj.save(&paths)?;
+            println!(
+                "✓ {project} 已应用 profile {profile}（{} skills）",
+                proj.installed_skills.len()
+            );
+        }
+        ProjectSub::AddSkill { project, id } => {
+            let mut proj = Project::load(&paths, &project)?;
+            proj.add_skill(&id)?;
+            proj.save(&paths)?;
+            println!("✓ {project} 已加 {id}");
+        }
+        ProjectSub::RemoveSkill { project, id } => {
+            let mut proj = Project::load(&paths, &project)?;
+            proj.remove_skill(&id)?;
+            proj.save(&paths)?;
+            println!("✓ {project} 已移除 {id}");
         }
         ProjectSub::List => {
             for id in list_project_ids(&paths)? {
