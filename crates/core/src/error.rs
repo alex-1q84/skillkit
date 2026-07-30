@@ -34,6 +34,9 @@ pub enum SkillkitError {
 
     #[error("profile 不存在：{name}（先 `skillkit profile create {name}`）")]
     ProfileNotFound { name: String },
+
+    #[error("project 不存在：{id}（先 `skillkit project add <path>` 注册）")]
+    ProjectNotFound { id: String },
 }
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖，避免半写状态。

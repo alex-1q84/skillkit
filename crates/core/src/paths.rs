@@ -54,6 +54,11 @@ impl Paths {
     pub fn profiles_dir(&self) -> PathBuf {
         self.skm_dir().join("profiles")
     }
+
+    /// project 注册表目录（~/.skm/projects/）。
+    pub fn projects_dir(&self) -> PathBuf {
+        self.skm_dir().join("projects")
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +96,10 @@ mod tests {
         assert_eq!(
             p.profiles_dir(),
             PathBuf::from("/tmp/fakehome/.skm/profiles")
+        );
+        assert_eq!(
+            p.projects_dir(),
+            PathBuf::from("/tmp/fakehome/.skm/projects")
         );
     }
 }
