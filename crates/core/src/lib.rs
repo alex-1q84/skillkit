@@ -2,6 +2,7 @@
 pub mod config;
 pub mod error;
 pub mod paths;
+pub mod source;
 
 pub use error::{Result, SkillkitError};
 pub use paths::Paths;
