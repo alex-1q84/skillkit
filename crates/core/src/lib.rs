@@ -1,4 +1,5 @@
 //! skillkit-core：承载全部业务逻辑。CLI 和 server 都调这里，无重复逻辑。
+pub mod apply;
 pub mod config;
 pub mod error;
 pub mod git;
@@ -10,6 +11,7 @@ pub mod registry;
 pub mod source;
 pub mod symlink;
 
+pub use apply::{compute_diff, ApplyDiff, LocalTarget};
 pub use error::{Result, SkillkitError};
 pub use install::{install, uninstall};
 pub use paths::Paths;
