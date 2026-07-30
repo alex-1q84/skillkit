@@ -31,6 +31,9 @@ pub enum SkillkitError {
 
     #[error("canonical 目录创建失败：{0}")]
     CanonicalCreate(PathBuf),
+
+    #[error("profile 不存在：{name}（先 `skillkit profile create {name}`）")]
+    ProfileNotFound { name: String },
 }
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖，避免半写状态。

@@ -49,6 +49,11 @@ impl Paths {
     pub fn config_path(&self) -> PathBuf {
         self.skm_dir().join("config.toml")
     }
+
+    /// profile 注册表目录（~/.skm/profiles/）。
+    pub fn profiles_dir(&self) -> PathBuf {
+        self.skm_dir().join("profiles")
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +87,10 @@ mod tests {
         assert_eq!(
             p.config_path(),
             PathBuf::from("/tmp/fakehome/.skm/config.toml")
+        );
+        assert_eq!(
+            p.profiles_dir(),
+            PathBuf::from("/tmp/fakehome/.skm/profiles")
         );
     }
 }
