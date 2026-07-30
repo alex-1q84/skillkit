@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 
 use commands::install::{InstallCmd, UninstallCmd};
+use commands::profile::ProfileCmd;
 use commands::source::SourceCmd;
 
 #[derive(Parser)]
@@ -20,6 +21,8 @@ enum Cmd {
     Install(InstallCmd),
     /// 卸载 skill
     Uninstall(UninstallCmd),
+    /// profile 候选集管理
+    Profile(ProfileCmd),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -28,6 +31,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Source(cmd) => commands::source::run(cmd)?,
         Cmd::Install(cmd) => commands::install::run_install(cmd)?,
         Cmd::Uninstall(cmd) => commands::install::run_uninstall(cmd)?,
+        Cmd::Profile(cmd) => commands::profile::run(cmd)?,
     }
     Ok(())
 }
