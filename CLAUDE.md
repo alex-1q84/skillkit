@@ -64,6 +64,7 @@ M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免
 - **序列化**用 `serde`：registry/config/profile 用对应格式（json/toml），结构体 `#[derive(Serialize, Deserialize)]`。
 - **日志**用 `tracing`，不裸 `println!`。
 - **文件原子写**：写 registry/projects 等状态文件用「写临时文件 + rename」保证原子性。
+- **core 公开类型一律在 `lib.rs` 完整 re-export**：子模块定义的 pub 类型若不 re-export，crate 内（`crate::T`）和外部（`skillkit_core::T`）都找不到。每 crate 选一种约定统一（短路径 re-export 或全模块路径），不混用——混用是漏 re-export 的温床，只在后续模块编译时才暴露。
 - 命名、注释跟随 Rust 惯例；注释用中文，与文档和 commit 语言一致。
 
 ## 8. 测试约定
@@ -77,6 +78,8 @@ M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免
 - 冲突场景：多项目锁不同版本、dangling symlink、源失效。
 - `--json` schema 锁定测试：防 agent 依赖的结构被无意改动。
 - git 操作用本地 bare repo 真跑，不 mock。
+- **集成测试放对应 crate 的 `tests/`**（如 `crates/core/tests/`），不放 workspace 根——纯 workspace 根（无 `[package]`）的 `tests/` 被 cargo test 静默忽略。
+- **测试里跑 `git commit` 必须带 `-c user.email -c user.name`**，不依赖机器全局 git config（换环境稳定，避免 commit 静默失败）。
 
 ## 9. 常用命令
 
@@ -97,6 +100,7 @@ make lint         # 格式校验 + clippy -D warnings（read-only）
 make test         # 全量测试
 make build        # 编译
 make check        # 提交前一站式：format && lint && test
+make run ARGS="..."  # 跑最新 CLI（check 只 clippy check + test，不产出独立 bin；直接跑 target/debug/skillkit 会拿到旧 bin）
 ```
 
 ## 10. Commit 规范
