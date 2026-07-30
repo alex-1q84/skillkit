@@ -31,9 +31,22 @@ enum ProjectSub {
     AddSkill { project: String, id: String },
     /// 精确删单个 skill
     RemoveSkill { project: String, id: String },
+    /// 幂等落地：按 installed_skills 同步到 agent 目录
+    Apply {
+        project: String,
+        #[arg(long)]
+        frozen: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// 输出 diff（该有/缺/多/冲突）
+    Status {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// 列出已注册项目
     List,
-    // 后续 task 加：Apply / Status
 }
 
 pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
@@ -85,6 +98,43 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             proj.remove_skill(&id)?;
             proj.save(&paths)?;
             println!("✓ {project} 已移除 {id}");
+        }
+        ProjectSub::Apply {
+            project,
+            frozen,
+            json,
+        } => {
+            let mut proj = Project::load(&paths, &project)?;
+            let report = skillkit_core::apply::run_apply(&paths, &mut proj, frozen)?;
+            proj.save(&paths)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "✓ applied：{} created, {} removed, {} recopied, {} warnings",
+                    report.created.len(),
+                    report.removed.len(),
+                    report.recopied.len(),
+                    report.warnings.len()
+                );
+                for w in &report.warnings {
+                    println!("  ⚠ {w}");
+                }
+            }
+        }
+        ProjectSub::Status { project, json } => {
+            let proj = Project::load(&paths, &project)?;
+            let reg = skillkit_core::Registry::load(&paths)?;
+            let diff = skillkit_core::apply::compute_diff(&proj, &reg)?;
+            let status = skillkit_core::apply::build_status(&paths, &proj, &diff)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("expected:  {}", status.expected.join(", "));
+                println!("missing:   {}", status.missing.join(", "));
+                println!("extra:     {}", status.extra.join(", "));
+                println!("conflicts: {}", status.conflicts.join(", "));
+            }
         }
         ProjectSub::List => {
             for id in list_project_ids(&paths)? {

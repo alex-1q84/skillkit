@@ -303,6 +303,47 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
     Ok(report)
 }
 
+/// status 输出：结合 diff.expected 与现状扫描，给具体 id 清单（供 agent 决策）。
+#[derive(Debug, Clone, Serialize)]
+pub struct StatusView {
+    pub expected: Vec<String>,
+    pub missing: Vec<String>,
+    pub extra: Vec<String>,
+    pub conflicts: Vec<String>,
+}
+
+/// 计算 status：expected/missing（结合现状）/extra（现状多出）/conflicts。
+pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Result<StatusView> {
+    let project_root = Path::new(&project.path);
+    let skm_skills = paths.skm_skills_dir();
+    let mut expected = Vec::new();
+    let mut missing = Vec::new();
+    for t in &diff.expected {
+        let skill = t.skill_id.split('/').next_back().unwrap_or(&t.skill_id);
+        let key = format!("{}/{}", t.agent, skill);
+        expected.push(key.clone());
+        let dest = project_root.join(format!(".{}/skills/{}", agent_dir_name(&t.agent), skill));
+        if !dest.exists() && !dest.is_symlink() {
+            missing.push(key);
+        }
+    }
+    let mut extra = Vec::new();
+    for agent in &project.agents {
+        for name in scan_local_landed(project_root, agent, &skm_skills)? {
+            let key = format!("{agent}/{name}");
+            if !expected.contains(&key) {
+                extra.push(key);
+            }
+        }
+    }
+    Ok(StatusView {
+        expected,
+        missing,
+        extra,
+        conflicts: diff.conflicts.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
