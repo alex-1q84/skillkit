@@ -45,10 +45,12 @@ cd /Users/mywo/lab/skillkit
 make check                    # format && lint && test（17 tests 全绿）
 make build                    # cargo build --all
 cargo run -p skillkit-cli -- --help
-# 真实 install 验证（用 HOME=tempdir 不污染 ~/.agents/skills/）：
+# 真实 install 验证（HOME=tempdir 不污染 ~/.agents/skills/）。注意：cargo 自身依赖真实
+# HOME 找 ~/.cargo toolchain，所以先 make build 产出 bin，再用 HOME=tempdir 跑 bin：
+make build
 TESTHOME=$(mktemp -d)
-HOME=$TESTHOME cargo run -p skillkit-cli -- source add dc git <url> --skills-dir skills
-HOME=$TESTHOME cargo run -p skillkit-cli -- install add dc <skill> --scope global
+HOME=$TESTHOME ./target/debug/skillkit source add dc git <url> --skills-dir skills
+HOME=$TESTHOME ./target/debug/skillkit install add dc <skill> --scope global
 ```
 
 ## 2. 本会话累积的改动（按时间倒序）
