@@ -145,9 +145,9 @@ fn expand_tilde(p: &str) -> String {
     p.to_string()
 }
 
-/// 当前时间 ISO 字符串。M0 用固定占位保证测试稳定，后续接真实时间。
+/// 当前时间 ISO 字符串（UTC RFC3339）。
 fn now_iso() -> String {
-    "2026-07-29T00:00:00Z".to_string()
+    chrono::Utc::now().to_rfc3339()
 }
 
 #[cfg(test)]

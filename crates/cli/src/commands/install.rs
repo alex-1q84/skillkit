@@ -11,6 +11,7 @@ pub struct InstallCmd {
 #[derive(Subcommand)]
 enum InstallSub {
     /// 安装 skill：skillkit install add <source> <skill> [--scope global|local]
+    /// （spec §11 的 `install <id>` 简写：id = <source>/<skill>，本实现用 add 子命令显式拆分两个参数）
     Add {
         source: String,
         skill: String,
