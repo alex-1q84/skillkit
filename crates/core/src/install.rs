@@ -50,6 +50,8 @@ pub fn install(
     let mut reg = Registry::load(paths)?;
     reg.upsert(meta.clone());
     reg.save(paths)?;
+    // global skill：install 即建 Claude symlink 桥接（local 留给 M1 的 project apply）
+    crate::symlink::ensure_global_claude(paths, &meta)?;
     Ok(meta)
 }
 

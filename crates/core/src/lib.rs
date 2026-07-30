@@ -6,7 +6,9 @@ pub mod install;
 pub mod paths;
 pub mod registry;
 pub mod source;
+pub mod symlink;
 
 pub use error::{Result, SkillkitError};
 pub use install::{install, uninstall};
 pub use paths::Paths;
+pub use symlink::ensure_global_claude;
