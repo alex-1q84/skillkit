@@ -1,10 +1,10 @@
-# 2026-07-29 → 2026-07-31 skillkit（设计 → M0 → M1 → M2 GUI → source 模型收敛）
+# skillkit 交接（2026-07-29 → 07-31，当前待办：M3 迁移打磨）
 
-> 用途：skillkit 会话关键事实/决策/遗留沉淀。新会话读 §1 + §4 + §7 三段够用；细节回查 §2/§3/§5/§6。
+> 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：source 模型收敛完成（统一走 npx skills，删 SourceType/git.rs，Source 极简 {name, package}，computedHash 版本）。下次接续 **M3 迁移打磨**。
+> **当前阶段**：P3/P4 收尾完成并提交（`c28a3eb`）。下次接续 **M3 迁移打磨**（import-existing → upgrade → Brewfile）。
 
-## 1. 当前状态（2026-07-31，source 模型收敛完成）
+## 1. 当前状态
 
 ### 1.1 命令表面
 
@@ -13,17 +13,19 @@ skillkit source add <package> [--name <别名>]        # 名称默认从 package
 skillkit source list / remove <name>
 skillkit install add <source> <skill> [--scope global|local] [--json]   # 固定源直接装；skills.sh 源走 npx skills find 交互选候选（--json 输出候选数组不安装）
 skillkit uninstall <id>
+skillkit upgrade <id> | --all [--yes] [--json]                          # npx skills update + 重读 computed_hash；冲突列受影响项目，--yes 跳过
+skillkit import-existing [--json] [--dry-run]                           # 扫描存量 skill 目录，可溯重装入池 + 无源 unmanaged 登记
 skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + apply 闭环 + SSE + 默认自动打开浏览器；--token 仅 e2e/localhost 用（默认随机）
 ```
 
 ### 1.2 结构性事实
 
-- **Source 极简 `{name, package: Option<String>}`**：package 是 npx skills source format（github shorthand `owner/repo` / 完整 git url / local path）；`None` = registry 搜索入口（skills.sh）。删 `SourceType` 枚举。
-- **下载全委托 npx skills**：`crates/core/src/npx.rs` 封装 `add/find/update/remove` + skills-lock.json 读 computedHash。`git.rs` 整个删除。
-- **canonical 池子 `~/.skillkit/.agents/skills/`**（原 `~/.skillkit/skills/`）：npx skills project scope 在 `cwd=~/.skillkit/` 直接写（`-a universal --copy -y`）。install 统一落池子，不分 scope。global 双层 symlink：池子 → `~/.agents/skills/`（Cursor 等直读）→ `~/.claude/skills/`（Claude 桥接）。
-- **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256），取代 `commit_sha`。`locked_shas` 值同步。registry 字段改名 computed_hash。
-- **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）。
-- `SkillkitError::Git` → `Tool`。`Cargo.lock` 有未提交改动（会话开始即存在；P4 又加了 `tokio sync` / `tokio-stream sync` features）。
+- **Source 极简 `{name, package: Option<String>}`**：package 是 npx skills source format（github shorthand `owner/repo` / 完整 git url / local path）；`None` = registry 搜索入口（skills.sh）。
+- **下载全委托 npx skills**：`crates/core/src/npx.rs` 封装 `add/find/update/remove` + skills-lock.json 读 computedHash。
+- **canonical 池子 `~/.skillkit/.agents/skills/`**：npx skills project scope 在 `cwd=~/.skillkit/` 直接写（`-a universal --copy -y`）。install 统一落池子，不分 scope。global 双层 symlink：池子 → `~/.agents/skills/`（Cursor 等直读）→ `~/.claude/skills/`（Claude 桥接）。
+- **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256）。registry 字段名 computed_hash，`locked_shas` 值同步。
+- **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）；`--json` 时直接输出候选数组。
+- `SkillkitError::Git` → `Tool`。
 - 测试：60 全绿（core 34 + cli 3 + server 19 + m0_e2e 1 + m1_e2e 3）+ m0 两个 `#[ignore]` 端到端真跑 npx skills（手动跑）+ 前端 e2e 4 用例。clippy `pedantic -D warnings` 零 warning。
 
 ### 1.3 验证 flow
@@ -36,31 +38,17 @@ cargo test -p skillkit-core -- --ignored      # m0 端到端真跑 npx skills（
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
-## 2. 本会话累积的改动（newest first）
+## 2. 最近完成（P3/P4 收尾，commit `c28a3eb`）
 
-15. **SSE watcher 全局单例**（本会话，P4）：sse.rs 改每目录一个常驻 watcher 线程 + broadcast channel（`OnceLock<Mutex<HashMap<PathBuf, broadcast::Sender>>>`），多连接订阅同一 channel，连接断开只 drop receiver 不重建 watcher——修旧实现「每次连接 spawn 永不退出的 watcher 线程，多次刷新累积」。`BroadcastStream` 落后丢事件由 SSE 下次事件刷新兜底。Cargo.toml 补 `tokio sync`、`tokio-stream sync`。测试 60 全绿。
+15. **SSE watcher 全局单例**（P4）：sse.rs 改每目录一个常驻 watcher 线程 + broadcast channel（`OnceLock<Mutex<HashMap<PathBuf, broadcast::Sender>>>`），多连接订阅同一 channel，连接断开只 drop receiver 不重建 watcher——修旧实现「每次连接 spawn 永不退出的 watcher 线程，多次刷新累积」。`BroadcastStream` 落后丢事件由 SSE 下次事件刷新兜底。Cargo.toml 补 `tokio sync`、`tokio-stream sync`。
 
-14. **source 收尾三件**（本会话，P3）：① `install add` 加 `--json`——registry 源输出 find 候选数组 `[{spec,url}]`（不交互不安装，agent 决策用）、固定源输出 SkillMeta JSON；补 3 个 clap 解析测试（cli 测试 0→3）。② demo/index.html SKILLS mock 字段同步 `sha`/`path` → `computed_hash`/`canonical_path`（值改 `~/.skillkit/.agents/skills/<skill>`，清 `~/.skm` 残留），渲染/fallback/冲突文案「sha 漂移」→「hash 漂移」。③ `SourcesStore::load` 旧 schema 检测从 `contains("source_type")` 子串匹配改为解析驱动：`Source` 加 `deny_unknown_fields`，解析失败即备份 `.bak` + 重置默认（覆盖任意坏 TOML）。
+14. **source 收尾三件**（P3）：① `install add` 加 `--json`——registry 源输出 find 候选数组 `[{spec,url}]`（不交互不安装，agent 决策用）、固定源输出 SkillMeta JSON；补 3 个 clap 解析测试（cli 测试 0→3）。② demo/index.html SKILLS mock 字段同步 `sha`/`path` → `computed_hash`/`canonical_path`（值改 `~/.skillkit/.agents/skills/<skill>`，清 `~/.skm` 残留），渲染/fallback/冲突文案「sha 漂移」→「hash 漂移」。③ `SourcesStore::load` 旧 schema 检测从 `contains("source_type")` 子串匹配改为解析驱动：`Source` 加 `deny_unknown_fields`，解析失败即备份 `.bak` + 重置默认（覆盖任意坏 TOML）。
 
-13. **前端 e2e 测试设施**（本会话）：`make e2e`——python playwright（pipx 1.55.0）驱动真实 chromium，4 用例覆盖导航重复回归（删除 source 双通道）/实时预览/默认源/增删闭环。serve 加 `--token` 参数（固定 token 供 e2e，默认随机）。e2e 用 `HOME=$TMP` 隔离 + 固定端口 7417（避 7317），不进 `make check`。`e2e/test_ui.py` + `e2e/fixtures.py`（无 pytest 纯脚本）。文档：`docs/frontend-rules.md` §5、CLAUDE.md §9。**踩坑**：`networkidle` 会被 SSE 长连接拖死（改 `wait_until="load"` + `expect` 轮询）；`/ping` 是公开路由不能拼 token base。测试 52 全绿 + e2e 4 用例过。
+> 更早的改动（M0/M1/M2、e2e 设施、source 模型收敛等）已归档到 §8.1。
 
-12. **Sources GUI 改进 + SSE 片段化**（本会话，前段 commit `04750a7`/`3d6dc3b`）：① `ensure_default` 语义改为「skills.sh 缺失即补回」（覆盖「删了不加回」，修空文件 `sources = []` 时 GUI 空白 bug，决策 14）；② 新增 `derive_source_name`（shorthand/scp-style/url/local path 四形态取末段 + 剥 .git/尾斜杠），CLI `source add <package> [--name]`（**有意的破坏性参数序变更**）、GUI 表单 package 输入实时预览推导名（htmx 调 `/sources/preview` 服务端推导，前端零规则副本；name 手动编辑后停用预览）。③ **SSE 刷新片段化**：修删除 source 后导航重复 bug——各视图 main 内容提成 `fragments/*_main.html`，页面模板薄壳 include，page handler 支持 `?fragment=1` 返回纯 main 内容，SSE 刷新请求它（响应不含 nav，从根上杜绝导航重复）+ 契约测试。④ **前端 AI 约束**：新增 `docs/frontend-rules.md`（Non-Negotiables/htmx 模式/Askama 坑/Red Flags，类比 project-initialization），CLAUDE.md §7.5。决策 15。测试 52 全绿（core 33 + cli + server 19）。
+## 3. 必读背景
 
-11. **source 模型收敛——统一走 npx skills**（前会话，`e918bc0`）：主人 5 轮反馈驱动。删 `SourceType`/`git.rs`；`Source`→`{name, package}`；下载全委托 npx skills（私有 git / local / github 统一 source format）；canonical 池子改 `~/.skillkit/.agents/skills/`；版本 `commit_sha`→`computed_hash`（读 skills-lock.json）；skills.sh 默认源=registry 搜索入口（find 交互选）；`SkillkitError::Git`→`Tool`。CLI `source add <name> <package>`（去类型参数）、`install add <source> <skill> [--scope]`（默认 local）。server SourceForm 单 package 输入框。文档同步（spec §4-§8.5 + §10/§11/§13 ripple、决策纪要追加**决策 13**、CLAUDE.md §5）。决策推理见 `docs/design-decisions-2026-07-29.md` 决策 13。
-
-10. **serve 自动打开浏览器**（前会话，`450a7fd`）：serve 默认启动后用 `open`(macOS)/`xdg-open`(Linux)/`start`(Windows) 打开默认浏览器（标准库 `Command` 手写，无新依赖）；加 `--no-open` flag 供脚本/CI/测试跳过。listener 绑好后才 open，浏览器请求立即连上；open 失败只 warn 不挡 serve。
-
-9. **M2 T10-T15**（前会话）：Projects 视图 + Sources CRUD + Skills install/uninstall + 声明编辑/apply 闭环 + SSE + app.css 产品化。执行中踩的坑见 §3.1。
-
-8. **M2 T1-T9**（前会话）：server 骨架 → token → 静态 → layout → 文件锁 → Sources/Skills/Profiles 视图。
-
-7. **`.skm` → `.skillkit` 改名 + M2 spec/plan**（前会话）。
-
-6-0. M1/M0/工程化/设计（前会话，见 `git log`）。
-
-## 3. 关键背景知识
-
-### 3.4 npx skills 行为（本会话实测，source 重构 / M3 upgrade 必读）
+### 3.1 npx skills 行为（source 重构 / M3 upgrade 必读）
 
 - 下载委托命令：`npx skills add <package> -s <skill> -a universal --copy -y`，在 `cwd=~/.skillkit/` 跑（project scope）→ skill 落 `.agents/skills/<skill>/`，`skills-lock.json` 落 cwd 根。用 `-s` 分开传 package 和 skill（`@skill` 合一格式对 local path 不通用）。
 - **package 支持三种**：github shorthand（`owner/repo`）、完整 git url（`git@`/`https://`/`ssh://`，私有仓库走标准 git 认证——SSH key / git credential）、local path（相对或绝对）。实测 local + github 走通；私有 git 认证失败只是环境无 SSH key，npx 行为正确。
@@ -70,29 +58,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 - npx skills 自带安全扫描（Socket/Snyk）和 source 解析，skillkit 白嫖。
 - 其他命令：`npx skills find/update/remove/use`；`experimental_install`（从 skills-lock.json 恢复）是 M3 可用的重装原语。
 
-### 3.1 M2 执行经验（前会话，扩展 GUI 或 htmx+askama 工作必读）
-
-plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过）：
-
-1. **handler 渲染模式**：不写 `match Tpl{...}.render() {...}`（结构体字面量在 match 头致花括号歧义，rustfmt 报错）。改：`let rendered = Tpl{...}.render();` 再 match，或拆同步 `fn render_xxx(state, token) -> Response` + `render_str` helper。
-2. **写操作调视图**：page handler 第一个参数是 `State<AppState>` extractor，不能从写操作传裸 state 调。拆同步 `fn render_xxx(state: AppState, token)`，page 和写操作都调它。
-3. **重复 key 表单**：`Form<ReorderForm{order: Vec<String>}>` 不行（serde_urlencoded 不支持重复 key→Vec）。改 `body: Bytes` + `form_urlencoded::parse(&body).filter(...)`。
-4. **askama include**：不支持 `{% include "x" with var %}`（共享外层模板上下文）。改外层 for 变量名对齐被 include 模板字段名。
-5. **私有 async fn**：clippy `unused_async` 对私有 async fn 无 await 报错。`render_xxx` 改同步 fn（pub handler 保持 async）。
-6. **re-export 不混用**：core 公开类型在 `lib.rs` 统一 re-export，handler 全用 `skillkit_core::X`。新增公开类型补进 lib.rs（本会话顺带修了 `Source` 漏 re-export 的混用反例）。
-7. **clippy pedantic 坑**：`default_trait_access`（`BTreeMap::new()` 取代 `Default::default()`）、`ignored_unit_patterns`（`Ok(())` 取代 `Ok(_)`）、`case_sensitive_file_extension_comparisons`、`single_match_else`（两臂 match 改 `if matches!`）、`empty_line_after_doc_comments`（doc 注释后不空行）。
-8. **Axum 0.8 路径参数**：`{token}`（非 0.7 的 `:token`）；State/Path 在前，body extractor 最后；State 要 Clone。`{id}` 单段接受 %2F 解码，前端按钮 URL 里 id 含 / 须 handler 预编码（`m.id.replace('/', "%2F")`）。
-9. **尾斜杠 404**：axum 0.8 `/{token}` 严格匹配，`/TOKEN/` 404。额外注册 `/{token}/`。
-10. **askama 不支持方法借用参数**：`contains(&meta.id)` 编译失败。handler 预计算 `Vec<(SkillMeta, bool)>`。
-11. **htmx 片段替换保 id**：写操作返回片段 outerHTML 替换时，片段外层用固定 id（如 `id="status-panel"`），否则替换后 id 丢失。
-12. **SSE 前端**：htmx 2.x 的 sse 扩展拆到独立包，改用浏览器原生 `EventSource` + `htmx.ajax`，零额外依赖。
-13. **Scope serde**：`#[serde(rename_all = "lowercase")]`，json 里 `"global"`/`"local"`。
-
-### 3.2 Axum 0.8 要点
-
-见 3.1-8。
-
-### 3.3 既有 M0/M1 背景（不变量）
+### 3.2 既有 M0/M1 背景（不变量）
 
 - apply 闭环：`compute_diff` → `land_one` → `run_apply` → `build_status`；agent_dir 映射 `claude-code`→`.claude`。install 默认 local scope（global 需显式 `--scope global`，此时池子→agents→claude 双层 symlink 立即可用）。
 - project-id = uuid v4 前 8 hex 大写；`locked_shas` 是上次 apply 的 computed_hash 基线快照（非版本锁）。
@@ -104,18 +70,16 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
-- [ ] `git status` 干净度：npx.rs 新增、git.rs 删除。
+- [ ] `git status` 干净度：工作树干净（P3/P4 改动已提交 c28a3eb）；npx.rs 新增、git.rs 删除。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。
 
 ## 5. 已知遗留 / 待办
 
-1. **M3 迁移打磨**（下次接续，spec §15）：
-   - `skillkit import-existing`：扫描 `~/.codex/skills/`、`~/.cursor/skills/` 等存量 → 识别 + 登记（package 语义：source add 或直接安装）。
-   - `skillkit upgrade <id>`：`npx skills update <skill>` + 重读 skills-lock.json 的 computed_hash 更新 registry；扫描 `locked_shas` 冲突列受影响项目需 `--yes`（spec §10 line 326）。**语义变了：不再 git pull**。
-   - 打包进 mac-config Brewfile（与 cx/rtk 一致）。
+1. **M3 迁移打磨**（已全部完成，commit `fbbedb8` 等）：
+   - ~~`skillkit import-existing`~~：**已完成**——扫描存量 skill 目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）→ 可溯源的卸载后重装进池子 + 无源的登记 unmanaged；`--dry-run` 只输出不写，`--json` 输出 ImportReport。
+   - ~~`skillkit upgrade <id>`~~：**已完成**——`npx skills update <skill>` + 重读 skills-lock.json 的 computed_hash 更新 registry；`--all` 批量（冲突不中断，blocked 列出受影响项目）；扫描 `locked_shas` 冲突列受影响项目需 `--yes`（spec §10 line 326）。
+   - ~~打包进 mac-config Brewfile~~：**已完成**（`just install_skillkit` 构建 + 装进 PATH）。
 2. **基建债**：CI（GitHub Actions `make check`）、README、Cargo.toml `[package]` 元数据（description/license/repository）。
-3. **source 重构收尾**：~~CLI registry 源 install 的 `--json` 候选输出~~（本会话已完成，install add `--json` 输出候选数组）；~~demo SKILLS mock 字段同步~~（已完成，computed_hash/canonical_path）；~~sources.toml 旧 schema 检测~~（已完成，改解析驱动 `deny_unknown_fields`）。余：无。
-4. ~~**SSE 线程保活优化**（可选）~~：**已完成**（全局单例 watcher + broadcast，连接断开不重建 watcher）。
 
 ## 6. 关键文件路径速查
 
@@ -124,7 +88,7 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 ├── CLAUDE.md / Cargo.toml / Makefile / rustfmt.toml
 ├── crates/
 │   ├── core/                  # skillkit-core（lib）—— 业务逻辑
-│   │   ├── src/{lib,paths,error,config,source,registry,npx,install,symlink,profile,project,apply,lock}.rs   # git.rs 已删，npx.rs 新增
+│   │   ├── src/{lib,paths,error,config,source,registry,npx,install,symlink,profile,project,apply,lock}.rs
 │   │   └── tests/{m0_e2e,m1_e2e}.rs            # m0 端到端 #[ignore] 真跑 npx skills
 │   ├── cli/                   # skillkit-cli（bin）
 │   │   └── src/{main, commands/{source,install,profile,project,serve}}.rs
@@ -133,10 +97,10 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 │       ├── templates/{layout,home,sources,skills,profiles,projects,project_workspace}.html + fragments/
 │       ├── static/{htmx.min.js, sortable.min.js, app.css}
 │       └── tests/{common/mod.rs, routes.rs}
-├── demo/index.html            # GUI 设计原型（user-visible，SOURCES mock 已改 package 语义、SKILLS mock 已用 computed_hash/canonical_path）
+├── demo/index.html            # GUI 设计原型（SOURCES mock 用 package 语义、SKILLS mock 用 computed_hash/canonical_path）
 └── docs/
     ├── 2026-07-29-skillkit-design.md          # spec（source 模型收敛后的权威）
-    ├── design-decisions-2026-07-29.md         # 决策 13 = source 收敛推理
+    ├── design-decisions-2026-07-29.md         # 决策 13/14/15（source 收敛/默认源/名称推导）
     ├── superpowers/...                        # M2 spec/plan
     └── sessions/2026-07-29-skillkit-design.md # 本交接
 ```
@@ -158,7 +122,7 @@ cargo test -p skillkit-core -- --ignored       # m0 端到端真跑 npx skills
 make run ARGS="serve --port 7317"              # 起 GUI 走查四视图 + Sources 单输入框
 ```
 
-**必读**：§3.4（npx skills 行为）+ `docs/design-decisions-2026-07-29.md` 决策 13。若涉及 GUI 扩展或新 htmx 端点，按 §3.1 的 13 条坑实现。
+**必读**：§3.1（npx skills 行为）+ `docs/design-decisions-2026-07-29.md` 决策 13。若涉及 GUI 扩展或新 htmx 端点，按 §8.2 的 13 条坑实现。
 
 ### 7.2 焦点：M3 三件事
 
@@ -168,11 +132,50 @@ make run ARGS="serve --port 7317"              # 起 GUI 走查四视图 + Sourc
 
 ### 7.3 优先级
 
-1. M3 三件（import-existing → upgrade → Brewfile）→ 2. 基建债（CI/README/元数据）。3. source 收尾（已完成，见 §2-14：install `--json` 候选输出 + demo mock 同步 + 解析驱动旧 schema 检测）。4. SSE 线程优化（已完成，见 §2-15：全局单例 watcher + broadcast）。
+1. M3 三件（import-existing → upgrade → Brewfile）→ 2. 基建债（CI/README/元数据）。
 
-## 7.x (archive) 历史接续路径
+## 8. (archive) 历史归档
 
-- **M2 完成 → M3**（前会话，source 收敛前）：M2 T1-T15 全完成，四视图 + apply 闭环 + SSE + 视觉。次接 M3 迁移打磨（import-existing / upgrade / Brewfile）。
+以下为已完成的历史改动与背景，只回查用，不在主文展开。当前状态见 §1-§7。
+
+### 8.1 历史改动清单（原 §2 第 13-0 条）
+
+13. **前端 e2e 测试设施**：`make e2e`——python playwright（pipx 1.55.0）驱动真实 chromium，4 用例覆盖导航重复回归（删除 source 双通道）/实时预览/默认源/增删闭环。serve 加 `--token` 参数（固定 token 供 e2e，默认随机）。e2e 用 `HOME=$TMP` 隔离 + 固定端口 7417（避 7317），不进 `make check`。`e2e/test_ui.py` + `e2e/fixtures.py`（无 pytest 纯脚本）。**踩坑**：`networkidle` 会被 SSE 长连接拖死（改 `wait_until="load"` + `expect` 轮询）；`/ping` 是公开路由不能拼 token base。
+
+12. **Sources GUI 改进 + SSE 片段化**：① `ensure_default` 语义改为「skills.sh 缺失即补回」（修空文件 `sources = []` 时 GUI 空白 bug，决策 14）；② 新增 `derive_source_name`（shorthand/scp-style/url/local path 四形态取末段 + 剥 .git/尾斜杠），CLI `source add <package> [--name]`（**有意的破坏性参数序变更**）、GUI 表单 package 输入实时预览推导名（htmx 调 `/sources/preview` 服务端推导；name 手动编辑后停用预览）；③ **SSE 刷新片段化**：修删除 source 后导航重复 bug——各视图 main 内容提成 `fragments/*_main.html`，页面模板薄壳 include，page handler 支持 `?fragment=1` 返回纯 main 内容，SSE 刷新请求它（响应不含 nav）+ 契约测试；④ **前端 AI 约束**：`docs/frontend-rules.md`（Non-Negotiables/htmx 模式/Askama 坑/Red Flags），CLAUDE.md §7.5。决策 15。
+
+11. **source 模型收敛——统一走 npx skills**：主人 5 轮反馈驱动。删 `SourceType`/`git.rs`；`Source`→`{name, package}`；下载全委托 npx skills；canonical 池子改 `~/.skillkit/.agents/skills/`；版本 `commit_sha`→`computed_hash`；skills.sh 默认源=registry 搜索入口（find 交互选）；`SkillkitError::Git`→`Tool`。CLI `source add <name> <package>`（去类型参数）、`install add <source> <skill> [--scope]`（默认 local）。决策 13。
+
+10. **serve 自动打开浏览器**：serve 默认启动后 `open`/`xdg-open`/`start` 打开默认浏览器；`--no-open` flag 供脚本/CI/测试跳过。listener 绑好后才 open；open 失败只 warn 不挡 serve。
+
+9. **M2 T10-T15**：Projects 视图 + Sources CRUD + Skills install/uninstall + 声明编辑/apply 闭环 + SSE + app.css 产品化。
+8. **M2 T1-T9**：server 骨架 → token → 静态 → layout → 文件锁 → Sources/Skills/Profiles 视图。
+7. **`.skm` → `.skillkit` 改名 + M2 spec/plan**。
+6-0. **M1/M0/工程化/设计**（见 `git log`）。
+
+### 8.2 M2 执行经验（htmx+askama 前端工作回查用，13 条坑）
+
+1. **handler 渲染模式**：不写 `match Tpl{...}.render() {...}`（结构体字面量在 match 头致花括号歧义，rustfmt 报错）。改：`let rendered = Tpl{...}.render();` 再 match，或拆同步 `fn render_xxx(state, token) -> Response` + `render_str` helper。
+2. **写操作调视图**：page handler 第一个参数是 `State<AppState>` extractor，不能从写操作传裸 state 调。拆同步 `fn render_xxx(state: AppState, token)`，page 和写操作都调它。
+3. **重复 key 表单**：`Form<ReorderForm{order: Vec<String>}>` 不行（serde_urlencoded 不支持重复 key→Vec）。改 `body: Bytes` + `form_urlencoded::parse(&body).filter(...)`。
+4. **askama include**：不支持 `{% include "x" with var %}`（共享外层模板上下文）。改外层 for 变量名对齐被 include 模板字段名。
+5. **私有 async fn**：clippy `unused_async` 对私有 async fn 无 await 报错。`render_xxx` 改同步 fn（pub handler 保持 async）。
+6. **re-export 不混用**：core 公开类型在 `lib.rs` 统一 re-export，handler 全用 `skillkit_core::X`。新增公开类型补进 lib.rs。
+7. **clippy pedantic 坑**：`default_trait_access`（`BTreeMap::new()` 取代 `Default::default()`）、`ignored_unit_patterns`（`Ok(())` 取代 `Ok(_)`）、`case_sensitive_file_extension_comparisons`、`single_match_else`（两臂 match 改 `if matches!`）、`empty_line_after_doc_comments`（doc 注释后不空行）。
+8. **Axum 0.8 路径参数**：`{token}`（非 0.7 的 `:token`）；State/Path 在前，body extractor 最后；State 要 Clone。`{id}` 单段接受 %2F 解码，前端按钮 URL 里 id 含 / 须 handler 预编码（`m.id.replace('/', "%2F")`）。
+9. **尾斜杠 404**：axum 0.8 `/{token}` 严格匹配，`/TOKEN/` 404。额外注册 `/{token}/`。
+10. **askama 不支持方法借用参数**：`contains(&meta.id)` 编译失败。handler 预计算 `Vec<(SkillMeta, bool)>`。
+11. **htmx 片段替换保 id**：写操作返回片段 outerHTML 替换时，片段外层用固定 id（如 `id="status-panel"`），否则替换后 id 丢失。
+12. **SSE 前端**：htmx 2.x 的 sse 扩展拆到独立包，改用浏览器原生 `EventSource` + `htmx.ajax`，零额外依赖。
+13. **Scope serde**：`#[serde(rename_all = "lowercase")]`，json 里 `"global"`/`"local"`。
+
+### 8.3 Axum 0.8 要点
+
+见 8.2-8。
+
+### 8.4 历史接续路径
+
+- **M2 完成 → M3**（source 收敛前）：M2 T1-T15 全完成，四视图 + apply 闭环 + SSE + 视觉。次接 M3 迁移打磨（import-existing / upgrade / Brewfile）。
 - **M2 T10-T15 阶段（已完成）**：inline 执行 plan Task 10-15，Projects 视图 → 写操作 → apply 闭环 → SSE → 视觉。
 - **M2 T1-T9 阶段（已完成）**：inline 执行 plan Task 1-9，server 骨架 → Profiles 写操作（含 SortableJS）。
 - **M2 设计阶段（已完成）**：brainstorming htmx（取代 React）→ spec → writing-plans 15 task。

@@ -336,9 +336,9 @@ skillkit source list [--json]
 skillkit source remove <name>
 
 # skill 安装到 canonical
-skillkit install add <source> <skill> [--scope global|local]   # global→symlink ~/.agents/skills/, local→入池子等 project apply
+skillkit install add <source> <skill> [--scope global|local] [--json]   # global→symlink ~/.agents/skills/, local→入池子等 project apply；--json 固定源输出 SkillMeta、skills.sh 源输出候选数组
 skillkit uninstall <id>
-skillkit upgrade <id> | --all
+skillkit upgrade <id> | --all [--yes] [--json]  # npx skills update + 重读 computed_hash；冲突列受影响项目，--yes 跳过
 skillkit list [--scope global|local] [--json]
 
 # profile（粗分类候选集）
@@ -358,7 +358,7 @@ skillkit project apply <project>                   # 幂等落地
 skillkit project status <project> [--json]         # 输出该有/缺/多/冲突的 diff
 
 # 迁移
-skillkit import-existing                           # 扫描导入现有 skill（M3）
+skillkit import-existing [--json] [--dry-run]   # 扫描存量 skill 目录，可溯重装入池 + 无源 unmanaged 登记
 
 # web
 skillkit serve [--port 7317]
