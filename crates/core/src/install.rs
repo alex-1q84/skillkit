@@ -62,7 +62,7 @@ pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
         let target = PathBuf::from(&meta.canonical_path);
         if target.exists() {
             std::fs::remove_dir_all(&target)
-                .map_err(|_| SkillkitError::CanonicalCreate(target.clone()))?;
+                .map_err(|_| SkillkitError::RemoveFailed(target.clone()))?;
         }
         let _ = npx::remove(paths, &meta.name); // 同步 lock，失败不阻塞（registry 是事实源）
     }

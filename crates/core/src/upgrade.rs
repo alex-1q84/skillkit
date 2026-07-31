@@ -210,7 +210,7 @@ mod tests {
         let paths = Paths::new(tmp.path().to_path_buf());
         // 拦截真实 npx：`skills@latest update <skill> -y` 往 cwd 写 skills-lock.json，
         // 让 dc/ok 的升级路径在本机/无网环境下也能闭合（其余分支在 npx 之前就返回）。
-        install_fake_npx(&paths);
+        let _guard = install_fake_npx(&paths);
         // managed 且无人锁定 → 正常升级
         install_managed(&paths, "dc/ok", "hashA");
         // managed 但 P1 锁当前 hash → 冲突拦截
@@ -244,7 +244,8 @@ mod tests {
 
     /// 往 PATH 前插一个假 npx：只响应 `skills@latest update <skill> -y`，
     /// 在 cwd（~/.skillkit/）写 skills-lock.json，返回 upgrade 后的新 hash。
-    fn install_fake_npx(paths: &Paths) {
+    /// 用 RAII 守卫包住 PATH 变更，guard 作用域结束后还原，避免污染并行测试。
+    fn install_fake_npx(paths: &Paths) -> PathGuard {
         let bin = paths.skillkit_dir().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let sh = bin.join("npx");
@@ -263,7 +264,22 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let path = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var("PATH", format!("{}:{}", bin.display(), path));
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), old));
+        PathGuard { old }
+    }
+
+    /// RAII 守卫：构造时备份 PATH，drop 时还原（含已删除的情况）。
+    struct PathGuard {
+        old: String,
+    }
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            if self.old.is_empty() {
+                std::env::remove_var("PATH");
+            } else {
+                std::env::set_var("PATH", &self.old);
+            }
+        }
     }
 }

@@ -49,7 +49,7 @@ fn run_one(paths: &Paths, id: &str, yes: bool, json: bool) -> anyhow::Result<()>
         }
         Err(SkillkitError::UpgradeBlocked { id, affected }) => {
             if json {
-                println!(
+                eprintln!(
                     "{}",
                     serde_json::json!({"error": "upgrade_blocked", "id": id, "affected": affected})
                 );

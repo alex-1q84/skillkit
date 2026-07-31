@@ -132,7 +132,7 @@ pub fn read_computed_hash(paths: &Paths, skill: &str) -> Result<String> {
 
 /// 卸载同步：npx skills remove <skill>。失败不阻塞——lock 只是缓存，registry 是事实源。
 pub fn remove(paths: &Paths, skill: &str) -> Result<()> {
-    let _ = npx(paths).args(["remove", skill, "-y"]).output();
+    let _ = npx(paths).args(["remove", skill, "-y"]).output(); // lock 只是缓存，registry 是事实源（已注释），这里静默忽略输出是刻意的
     Ok(())
 }
 

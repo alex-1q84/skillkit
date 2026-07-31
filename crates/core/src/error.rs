@@ -32,6 +32,9 @@ pub enum SkillkitError {
     #[error("canonical 目录创建失败：{0}")]
     CanonicalCreate(PathBuf),
 
+    #[error("canonical 目录删除失败：{0}（权限不足？检查文件占用或手动删除）")]
+    RemoveFailed(PathBuf),
+
     #[error("profile 不存在：{name}（先 `skillkit profile create {name}`）")]
     ProfileNotFound { name: String },
 

@@ -12,11 +12,11 @@ use std::path::Path;
 pub struct ImportReport {
     /// 成功登记（含 unmanaged）的 skill 名。
     pub imported: Vec<String>,
-    /// 以 unmanaged 登记的数量。
+    /// 以 unmanaged 登记的 skill 名称。
     pub unmanaged: Vec<String>,
-    /// 可溯源并重装入池的数量。
+    /// 可溯源并重装入池的 skill 名称。
     pub reinstalled: Vec<String>,
-    /// 跳过的（重复 / 无效 / symlink / 无 SKILL.md / 重装撞占位）。
+    /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装撞占位）。
     pub skipped: Vec<String>,
 }
 
@@ -62,6 +62,9 @@ pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
 
     for (name, canonical, package) in plan {
         if registered.contains(&name) {
+            tracing::warn!(
+                "import 跳过同名 skill {name}（已从其他目录登记过，若实际不同需手工处理）"
+            );
             report.skipped.push(name);
             continue;
         }
