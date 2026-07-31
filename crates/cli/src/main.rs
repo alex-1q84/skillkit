@@ -8,6 +8,7 @@ use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
 use commands::serve::ServeCmd;
 use commands::source::SourceCmd;
+use commands::upgrade::{run as run_upgrade, UpgradeCmd};
 
 #[derive(Parser)]
 #[command(name = "skillkit", about = "AI agent skill 统一管理工具")]
@@ -30,6 +31,8 @@ enum Cmd {
     Profile(ProfileCmd),
     /// project 精确管理
     Project(ProjectCmd),
+    /// 升级 skill 到最新版本
+    Upgrade(UpgradeCmd),
     /// 本地 web GUI
     Serve(ServeCmd),
 }
@@ -45,6 +48,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
         Cmd::Project(cmd) => commands::project::run(cmd)?,
+        Cmd::Upgrade(cmd) => run_upgrade(cmd)?,
         Cmd::Serve(cmd) => commands::serve::run(cmd)?,
     }
     Ok(())
