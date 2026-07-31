@@ -4,7 +4,10 @@
 """
 
 import argparse
+import json
+import os
 import sys
+from pathlib import Path
 
 from playwright.sync_api import expect
 
@@ -29,6 +32,48 @@ def expect_row(page, name, present: bool):
         expect(page.locator(ROWS_SEL).filter(has_text=name)).to_have_count(1)
     else:
         expect(page.locator(ROWS_SEL).filter(has_text=name)).to_have_count(0)
+
+
+def seed_registry(home: str) -> None:
+    """向临时 HOME 写 registry.json：一个 unmanaged + 一个 managed（GUI Skills 用例预置）。
+    canonical 目录不必真实存在——Skills 页只读 registry 渲染。"""
+    registry_dir = Path(home) / ".skillkit"
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "unmanaged/legacy": {
+            "id": "unmanaged/legacy",
+            "name": "legacy",
+            "source": "unmanaged",
+            "scope": "global",
+            "version": None,
+            "computed_hash": None,
+            "installed_at": "2026-08-01T00:00:00Z",
+            "canonical_path": str(Path(home) / ".agents/skills/legacy"),
+        },
+        "dc/real": {
+            "id": "dc/real",
+            "name": "real",
+            "source": "dc",
+            "scope": "local",
+            "version": None,
+            "computed_hash": "a" * 64,
+            "installed_at": "2026-08-01T00:00:00Z",
+            "canonical_path": str(Path(home) / ".skillkit/.agents/skills/real"),
+        },
+    }
+    (registry_dir / "registry.json").write_text(json.dumps({"skills": meta}))
+
+
+def skills_rows(page):
+    """Skills 表行：id + 行内 HTML（含 badge/按钮）。id cell 里 unmanaged 行含 badge 文本，取首段。"""
+    rows = []
+    for r in page.locator(ROWS_SEL).all():
+        id_text = r.locator("td:first-child").inner_text().strip()
+        rows.append({
+            "id": id_text.split()[0] if id_text else id_text,  # 剥掉 "UNMANAGED" badge 文本
+            "html": r.inner_html(),
+        })
+    return rows
 
 
 def test_nav_not_duplicated_after_source_delete(page, base):
@@ -78,11 +123,36 @@ def test_source_add_delete_cycle(page, base):
     assert_nav_single(page)
 
 
+def test_skills_unmanaged_badge(page, base):
+    """Skills 视图：unmanaged skill 显示 badge，managed 不显示（M3 手动验证固化）。"""
+    rows = skills_rows(page)
+    by_id = {r["id"]: r["html"] for r in rows}
+    assert "unmanaged/legacy" in by_id, f"unmanaged skill 未出现：{list(by_id)}"
+    assert "dc/real" in by_id, f"managed skill 未出现：{list(by_id)}"
+    assert "unmanaged" in by_id["unmanaged/legacy"], "unmanaged 行应有 badge"
+    assert "unmanaged" not in by_id["dc/real"], "managed 行不应有 badge"
+    assert_nav_single(page)
+
+
+def test_skills_upgrade_button_only_managed(page, base):
+    """Skills 视图：upgrade 按钮只在 managed 行，unmanaged 不可升级（M3 手动验证固化）。"""
+    rows = skills_rows(page)
+    by_id = {r["id"]: r["html"] for r in rows}
+    assert "/upgrade" in by_id["dc/real"], "managed 行应有 upgrade 按钮"
+    assert "/upgrade" not in by_id["unmanaged/legacy"], "unmanaged 行不应有 upgrade 按钮"
+    # install 表单每行都有（M2 install 能力保留的回归）
+    assert "/install" in by_id["dc/real"], "managed 行应有 install 表单"
+    assert "/install" in by_id["unmanaged/legacy"], "unmanaged 行应有 install 表单"
+    assert_nav_single(page)
+
+
 TESTS = [
-    ("test_nav_not_duplicated_after_source_delete", test_nav_not_duplicated_after_source_delete),
-    ("test_source_name_preview", test_source_name_preview),
-    ("test_default_source_shown", test_default_source_shown),
-    ("test_source_add_delete_cycle", test_source_add_delete_cycle),
+    ("test_nav_not_duplicated_after_source_delete", test_nav_not_duplicated_after_source_delete, "sources"),
+    ("test_source_name_preview", test_source_name_preview, "sources"),
+    ("test_default_source_shown", test_default_source_shown, "sources"),
+    ("test_source_add_delete_cycle", test_source_add_delete_cycle, "sources"),
+    ("test_skills_unmanaged_badge", test_skills_unmanaged_badge, "skills"),
+    ("test_skills_upgrade_button_only_managed", test_skills_upgrade_button_only_managed, "skills"),
 ]
 
 
@@ -97,13 +167,16 @@ def main():
 
     wait_for_serve(args.base)
 
+    # Skills 用例需要 registry 预置（unmanaged + managed），其余用例空 registry 无影响
+    seed_registry(args.home)
+
     play, browser = new_browser()
     failed = []
     try:
-        for name, fn in TESTS:
+        for name, fn, path in TESTS:
             if args.only and name != args.only:
                 continue
-            page = open_page(args.base, "sources", browser)
+            page = open_page(args.base, path, browser)
             try:
                 fn(page, args.base)
                 print(f"  ✓ {name}")

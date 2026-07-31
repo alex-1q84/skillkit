@@ -1,6 +1,6 @@
 # skillkit Makefile（对标 Java monorepo Makefile：setup/format/lint/test/build 统一入口）
 # CI 与本地走同一套规则，避免「本地过 CI 不过」。
-.PHONY: setup format lint test build check run e2e
+.PHONY: setup format lint test build check run e2e e2e-cli
 
 ## 安装/拉取依赖
 setup:
@@ -44,3 +44,7 @@ e2e:
 	trap cleanup EXIT; \
 	HOME="$$HOME_TMP" ./target/debug/skillkit serve --port $(E2E_PORT) --no-open --token $(E2E_TOKEN) & PID_UI=$$!; \
 	$(PY) e2e/test_ui.py --base "$(E2E_BASE)" --home "$$HOME_TMP"
+
+## CLI 全链路端到端（assert_cmd 驱动真实二进制，含 #[ignore] 真跑 npx skills；不进 check）
+e2e-cli:
+	cargo test -p skillkit-cli --test e2e_cli -- --ignored

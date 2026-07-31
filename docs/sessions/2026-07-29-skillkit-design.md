@@ -33,9 +33,10 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 
 ```bash
 cd /Users/mywo/lab/skillkit
-make check                                    # 全绿
-make e2e                                      # 前端端到端（真实 chromium，4 用例；需空闲端口 7417）
-cargo test -p skillkit-core -- --ignored      # m0 端到端真跑 npx skills（local fixture）
+make check                                    # 全绿（cli 8+5 + core 45 + server 21，clippy 零 warning）
+make e2e                                      # GUI 端到端（真实 chromium，6 用例；需空闲端口 7417）
+make e2e-cli                                  # CLI 全链路端到端（assert_cmd + 真跑 npx，5 用例；不进 check）
+cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills（m0 2 + m3 1）
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
