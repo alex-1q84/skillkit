@@ -1,202 +1,157 @@
-# 2026-07-31 skillkit（设计 → review → 工程化 → M0 → M1 完成）
+# 2026-07-29 → 2026-07-31 skillkit（设计 → M0 → M1 → M2 GUI 进行中：T1-T9 完成）
 
-> 用途：把 skillkit 工具会话的关键事实、决策、遗留集中沉淀，便于下次在 skillkit 目录启动新会话时接续。
+> 用途：skillkit 会话关键事实/决策/遗留沉淀。新会话读 §1 + §4 + §7 三段够用；细节回查 §2/§3/§5/§6。
 >
-> **新会话最快入口**：直接读 §1（当前状态）+ §4（验证清单）+ §7（下次接续路径），三段够用；细节再回查 §2/§3/§5/§6。
+> **M2 进行中**：server crate T1-T9 完成（骨架/token/静态/layout/文件锁/Sources·Skills·Profiles 视图 + Profiles 写操作），剩 T10-T15。
 
-## 1. 当前状态（2026-07-31，M1 完成：profile + project + apply 幂等落地闭环，核心 CLI 可用）
+## 1. 当前状态（2026-07-31，M2 GUI 进行中：T1-T9 完成，剩 T10-T15）
 
-### 1.1 命令表面（M0+M1 已实现 source/install/profile/project，M2 补 serve）
+### 1.1 命令表面
 
-已实现（M0+M1）：
 ```
-skillkit source add|list|remove                            # ✅ 安装源管理（含 --skills-dir / --ref）
-skillkit install add <src> <skill> [--scope global|local]  # ✅ 装到 canonical + global 自动建 Claude symlink
-skillkit uninstall <id>                                    # ✅ 清 canonical + registry
-skillkit profile create|add-skill|remove-skill|list        # ✅ 粗分类候选集
-skillkit project add|rebind|scan|list                      # ✅ add 生成 uuid project-id；rebind 重绑定（id 不变）
-skillkit project apply-profile|add-skill|remove-skill      # ✅ 声明编辑 installed_skills
-skillkit project apply [--frozen] [--json]                 # ✅ 幂等落地（Claude symlink / Cursor copy）
-skillkit project status [--json]                           # ✅ {expected, missing, extra, conflicts} id 清单
+skillkit source/install/uninstall/profile/project     # ✅ M0+M1
+skillkit serve [--port 7317]                           # ✅ M2 T1-T9：起 server + Sources/Skills/Profiles 视图可访问
 ```
-待实现（M2-M3，spec §11/§12）：
-```
-skillkit install list|upgrade            # M3
-skillkit serve [--port]                  # M2（本地 web GUI）
-skillkit import-existing                 # M3（扫描导入现有 skill）
-```
-全部命令支持 `--json`（M1 起 status/apply 已支持），供 AI agent 操作。
 
-**命令表面备注**：install 用 `add <source> <skill>` 子命令（spec §11 `install <id>` 的显式拆分形式，已注明）；project-id 用 uuid 短码（非 path sanitize）。
+M2 剩（plan Task 10-15）：Projects 视图、Sources/Skills 写操作、Projects 声明编辑/apply 闭环、SSE、视觉打磨。详见 `docs/superpowers/plans/2026-07-31-skillkit-m2.md`。
 
-### 1.2 结构性事实（不变量 + 当前进度）
+### 1.2 结构性事实
 
-- 项目位置：`/Users/mywo/lab/skillkit`，**已 git init**（与 mac-config 平级的独立项目）。
-- 技术栈：Rust + Axum（M2），单二进制，core + cli + server 三层共享 core，前端 React+Vite 产物 rust-embed 嵌入。无常驻 daemon。
-- **M0+M1 完成**：core 11 模块（paths/error/config/source/registry/git/install/symlink + **profile/project/apply**）+ CLI source/install/profile/project + e2e。**35 tests 全绿**（core 单元 29 + m0_e2e 3 + m1_e2e 3），clippy `pedantic -D warnings` 零 warning。
-- **apply 闭环（M1 核心，spec §10）**：`compute_diff`（expected/conflicts）→ `land_one`（按 agent 能力 symlink/copy + `.skillkit-sha` 标记）→ `run_apply`（global ensure + local 落地 + extra 清理 + locked_shas 更新 + `--frozen`）→ `build_status`（id 清单）。Cursor copy 过期（sha 漂移）自动重 copy；`.git/info/exclude` 维护 skillkit 段。
-- **project-id（M1）**：uuid v4 前 8 hex 短码，独立于 path；`project rebind <id> <new-path>` 支持项目移动/改名（id 不变、path/name 更新）。
-- **skills_dir（M0）**：Source 加 `skills_dir` 字段，支持一个 git/local 源仓库含多个 skill（在 `skills/` 子目录下）。install clone 到临时、取 `<skills_dir>/<skill>` 平铺到 canonical。真实仓库验证：datacenter-skills/logseq 通过。
-- **工程化已就绪**：Cargo workspace（`crates/core` + `crates/cli`）、`rustfmt.toml`（行宽 100）、clippy `pedantic` + `-D warnings`（`[workspace.lints]`）、`Makefile`（setup/format/lint/test/build/check/**run**）、`make check` 全绿。
-- **设计定稿**：spec（review 完成 P0/P1/P2，§8.2 加 skills_dir）+ 决策纪要（12 条）+ `CLAUDE.md`（项目规范，含 M0 踩坑约定：re-export 完整/集成测试位置/git identity/make run）。
-- **GUI demo 定稿**：`demo/index.html`（亮色原型，四大视图 + Projects apply 闭环可交互，M2 产品化）。
-- 存储约束（不变）：`~/.agents/skills/` 只放全局公共 skill、元数据统一 `~/.skillkit/`、单版本、shared 只读、id 引用 DRY、agent 能力配置驱动。
-- 落地（P0 决策）：local skill **平铺**在 `<agent>/skills/<skill>/`（Claude 只发现一层），git 忽略用 `<project>/.git/info/exclude`（不改项目 `.gitignore`）。agent name → 目录映射（claude-code→.claude）。
+- **server crate（M2 新增）**：Axum 0.8 薄壳调 core。`lib.rs`（serve/run/app/AppState/静态/token 中间件）+ `routes/{mod,sources,skills,profiles}.rs` + `templates/`（layout/home/sources/skills/profiles + fragments/profile_skills）+ `static/`（htmx.min.js/sortable.min.js/app.css，rust-embed 嵌）+ `tests/{common/mod.rs, routes.rs}`（8 个 oneshot 测试）。
+- **文件锁（M2 T6）**：`core/lock.rs` 的 `FileLock`（fs2 flock），5 个 save 接入（key：`registry`/`sources`/`config`/`project-{id}`/`profile-{name}`）。读不锁，写 5s 超时报 `LockTimeout`。
+- **配置目录改名**：`~/.skm/` → `~/.skillkit/`（M2 起步，全仓库含代码方法名 `skillkit_dir`/`skillkit_skills_dir`）。
+- **M0+M1 既有**：core 13 模块（+lock）+ CLI source/install/profile/project/serve + e2e。
+- **43 tests 全绿**（core 35 + server 8），clippy `pedantic -D warnings` 零 warning。
+- 存储不变量：`~/.agents/skills/` 通用加载目录（不改）；元数据统一 `~/.skillkit/`；单版本；shared 只读；id 引用 DRY；agent 能力 config 驱动。
 
-### 1.3 install / build / run flow
+### 1.3 验证 flow
 
 ```bash
 cd /Users/mywo/lab/skillkit
-make check                    # format && lint && test（35 tests 全绿）
-make build                    # cargo build --all
-make run ARGS="--help"        # 跑最新 CLI（避免 make check 后旧 bin）
-# apply 真实验证（HOME=tempdir 不污染 ~/.agents/skills；cargo 依赖真实 HOME 找 toolchain，
-# 所以先 make build 产出 bin，再用 HOME=tempdir 跑 bin）：
-make build
-TESTHOME=$(mktemp -d)
-HOME=$TESTHOME ./target/debug/skillkit source add local local <path> --skills-dir skills
-HOME=$TESTHOME ./target/debug/skillkit install add local <skill> --scope local
-HOME=$TESTHOME ./target/debug/skillkit project add <demo>
-HOME=$TESTHOME ./target/debug/skillkit project apply <id>
+make check                              # 43 tests 全绿
+make run ARGS="serve --port 7317"       # 起 GUI（打印 http://127.0.0.1:7317/<token>/）
+# T1-T9：Sources/Skills/Profiles 可访问；Projects 路由待 T10
 ```
 
-## 2. 本会话累积的改动（按时间倒序）
+## 2. 本会话累积的改动（newest first）
 
-7. **M1 实现**（本轮，9 commit `8e1b5a6`→`78fd358` + 计划 `57ce29d` + 修正 `84ab57c`）
-   - 方式：主人定 inline + 严格 TDD 红绿 + 每 task commit。先 writing-plans 做 M1 计划（10 task），review 后执行。
-   - 红绿纪律：每核心 task 先写失败测试 → 看红 → 补实现 → 看绿 → commit。CLI 薄壳 + e2e 靠 clippy + 手动 + 真实仓库验证。
-   - commit：profile(core/cli) → project(core + uuid id + rebind / cli) → 声明编辑 → apply diff → apply 落地+编排（Task 7+8 合并，run_apply 调 land_one 消除 dead_code）→ status/apply CLI → e2e。
-   - 红绿抓到并修的计划 bug：**agent_dir 映射**（agent name "claude-code" → 目录 ".claude"，非 ".claude-code"）、**extra 清理路径**（用 agent_dir_name，非 agent name）、**StatusView 计数→id 清单**（spec §11 agent 决策）、**ApplyDiff 去冗余 missing/extra**、多处 clippy（map_or→is_some_and、manual_let_else、inefficient_to_string→`(*s).to_owned()`、default_trait_access）。
-   - 设计决策（spec 未明，主人确认）：project-id = uuid v4 前 8 hex + rebind；Cursor copy 用 `.skillkit-sha` 标记；install add 保留；status --json 给 id 清单。
-   - 验证：35 tests + clippy 零 warning + 真实 apply 闭环（install local → project apply → .claude/skills symlink → status --json）。
+8. **M2 GUI 实现 T1-T9**（本轮，12 commit `cca11f4`→`a1ff11a` + spec `2c60460` + plan `e63d7f3`）
+   - 方式：主人选 inline 执行（executing-plans），按 plan TDD 红绿 + 每 task commit。
+   - T1-T9：server crate 骨架 → token 中间件（`/{token}/`）→ rust-embed 静态 → Askama layout/home → core 文件锁 → Sources/Skills 视图只读 → Profiles 视图 + add/remove + SortableJS 拖拽。
+   - 执行中发现 plan 几处写法卡（见 §3.1），已现场修正代码；plan 文档只改了 askama include 等几处，其余坑在 §3.1 记录，下会话按此调整 plan Task 10-15 代码。
+   - 验证：43 tests + clippy 零 warning。serve 手动走查留 T15 收尾统一做。
 
-6. **M0 红绿实现 + 项目设置补全**（上一会话，详见 git log）。
-5-0. Rust playbook / 工程化 / M0 计划 / GUI demo / spec review / 初始设计（同前）。
+7. **`.skm` → `.skillkit` 改名 + M2 spec/plan**（`cca11f4` + `2c60460` + `e63d7f3`）
+   - 配置目录自描述化（主人定）；spec §12 React+Vite → htmx+Askama+SortableJS（主人定，砍 web/ 工程、SSE 简化、文件锁进 M2）。
+
+6-0. M1/M0/工程化/设计（同前，见 `git log`）。
 
 ## 3. 关键背景知识
 
-### 3.1 `~/.agents/skills/` 是通用加载目录（最重要的约束）
-- 除 Claude Code 外，Cursor/OpenCode/Codex/Gemini CLI 等大部分 agent 都直接从 `~/.agents/skills/` 加载。
-- 该目录只放全局公共 skill，不能挪用为暂存，不能放元数据文件（会被 agent 误扫描）。元数据统一收 `~/.skillkit/`。
+### 3.1 M2 执行经验（最重要——下会话执行 T10-T15 必读，避免重蹈 plan 坑）
 
-### 3.2 Cursor 不支持 symlink
-- Cursor 无法识别 symlink skill，必须用真实文件。项目 local skill 对 Cursor 用 copy 兜底（`.skillkit-sha` 标记 sha，apply 比对过期重 copy）。全局层面 Cursor 直读 `~/.agents/skills/`。
+plan（`docs/superpowers/plans/2026-07-31-skillkit-m2.md`）Task 10-15 的代码有几处写法执行时会卡，按以下修正：
 
-### 3.3 npx skills 的能力与限制
-- 能力：从 skills.sh 源下载到 `~/.agents/skills/`。限制：安装路径写死，无法 profile 隔离。这是 skillkit 自研核心的根本原因。skills-sh 源 M0 用 git clone 占位。
+1. **handler 渲染模式**：plan 写 `match Tpl{...}.render() {...}`——结构体字面量在 match 头致花括号歧义，rustfmt 报错。改：`let rendered = Tpl{...}.render(); match rendered {...}`。
+2. **写操作调视图**：plan 的 create/add 等调 `page(state, ...)`——page 第一个参数是 `State<AppState>` extractor，不能传裸 state。改：拆同步 `fn render_xxx(state: AppState, token: String) -> Response`，page 和写操作都调它（私有同步 fn，见 5）。
+3. **重复 key 表单**：plan 的 reorder 用 `Form<ReorderForm{order: Vec<String>}>`——serde_urlencoded（axum Form 底层）不支持重复 key→Vec（`order=a&order=b`）。改：`body: Bytes` + `form_urlencoded::parse(&body).filter(|(k,_)| k=="order").map(|(_,v)| v.into_owned()).collect()`（`form_urlencoded` crate，已在 server Cargo.toml）。
+4. **askama include**：plan 写 `{% include "x" with var %}`——askama 不支持 with（共享外层模板上下文）。改：外层 for 变量名对齐被 include 模板字段名（如 `{% for profile in profiles %}` + include 无 with）。已在 plan 修。
+5. **私有 async fn**：clippy `unused_async` 对私有 async fn 无 await 报错。`render_xxx` 改同步 fn（pub handler 保持 async）。
 
-### 3.4 主人现有 skill 分布（迁移基础，M3 用）
-- `~/.agents/skills/`：约 64 个。`~/.claude/skills/`：约 26 真实 + 7 symlink。`~/.codex/skills/`：约 10。`~/.cursor/skills` 与 `skills-cursor` 并存（疑似残留）。`~/.claude/plugins/`：4 个（skillkit 不碰）。
+### 3.2 M2 clippy pedantic 坑（T10-T15 同样适用）
+- `case_sensitive_file_extension_comparisons`：`ends_with(".js")` → `Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("js"))`。
+- `used_underscore_binding`：字段 `_file` 若在 Drop 用则改名 `file`（下划线前缀 + 使用 = 矛盾）。
+- `single_match_else`：两臂 match 改 `if`/`if let`。
+- `suspicious_open_options`：`OpenOptions.create(true)` 要声明 `.truncate(true)`。
+- `unstable_name_collisions`：fs2 `unlock` 用完全限定 `fs2::FileExt::unlock(&file)`。
 
-### 3.5 命名：skillkit（brew + crates.io 双干净，已选定）。
+### 3.3 Axum 0.8 要点
+- 路由参数 `{token}`（非 0.7 的 `:token`）。
+- handler 参数顺序：`State`/`Path` 在前，body extractor（`Form`/`Bytes`）最后。
+- `State` 要 `Clone`（`Paths` 已加 `#[derive(Clone)]`）。
+- 测试用 `tower::ServiceExt::oneshot` 打 router（`tests/routes.rs`），不起真实 TCP。
 
-### 3.6 local skill 平铺落地（P0 决策）
-- Claude Code 只发现 `.claude/skills/<skill>/SKILL.md` 一层，子目录不发现（issue #39138）；不支持自定义 skill 路径（issue #22902）。local 与 shared 同级平铺；git 忽略用 `<project>/.git/info/exclude`，不改 `.gitignore`。
-
-### 3.7 `locked_shas` 是变更基线，非版本锁
-- 单版本模型下 canonical 物理只有一份，locked_shas 锁不住版本。它是上次 apply 的 sha 快照，用于检测 canonical 升级漂移。apply 时发现漂移默认以 canonical 为准更新基线，`--frozen` 报错。
-
-### 3.8 跨进程 SSE + 文件锁（M2）
-- CLI 与 server 两进程，server 用 notify file watcher 监听 `~/.skillkit/` 经 SSE 推送。文件锁粒度到单文件，读不抢锁，写锁带超时。
-
-### 3.9 skills_dir：一仓库多 skill（M0）
-- Source 加 `skills_dir: Option<String>`（None=skill 在仓库根，Some("skills")=在子目录）。install clone 到临时（`std::env::temp_dir()`，core 生产代码不依赖 tempfile dev-dep）取 `<skills_dir>/<skill>` 平铺到 canonical。CLI `source add --skills-dir`（clap 下划线→连字符 long）。真实验证：datacenter-skills/logseq。
-
-### 3.10 apply 落地规则（M1 核心，最关键的实现约束）
-- **agent_dir 映射**：agent name "claude-code" → 项目目录 `.claude`（非 `.claude-code`）；其他 agent（cursor 等）name 直接作目录。`land_one`/`write_exclude`/`scan_local_landed`/`build_status` 统一用 `agent_dir_name(agent)`。**踩坑**：忘记映射会建错目录（.claude-code）导致 Claude 发现不了 + extra 清理删错路径。
-- **local 落地**：Claude（supports_symlink=true）建 symlink `~/.skillkit/skills/<skill>` → `<project>/.claude/skills/<skill>`；Cursor（false）copy + 写 `.skillkit-sha`（apply 比对，过期重 copy）。
-- **global 不 per-project 落地**：只 ensure `~/.claude/skills/<skill>` symlink 在位（复用 `ensure_global_claude`）。
-- **extra 清理**：`scan_local_landed` 找 skillkit-local（symlink 指向 `~/.skillkit/skills/`，或目录含 `.skillkit-sha`），不在 expected 的删（用 agent_dir_name 拼路径）。
-- **`.git/info/exclude`**：skillkit 段（`# >>> skillkit managed >>>` / `<<<` 标记），原子写，列当前 local 落地清单。
-- **shared 同名 / local 已被 git 追踪**：land_one 遇真实目录（symlink 模式）报错警告；已追踪提示 `git rm --cached`（部分覆盖，M3 打磨）。
-
-### 3.11 project-id + rebind（M1）
-- project-id = `uuid::Uuid::new_v4()` 前 8 hex 大写（如 `A1B2C3D4`），**注册时随机生成、独立于 path**，文件名 `<id>.toml`。
-- `Project { id（冻结）, name/path（可变）, agents, applied_profiles, installed_skills, locked_shas }`。
-- `project rebind <id> <new-path>`：更新 path/name，id 不变（支持项目移动/改名）。
+### 3.4 既有 M0/M1 背景（不变量）
+- apply 闭环：`compute_diff` → `land_one` → `run_apply` → `build_status`；agent_dir 映射 `claude-code`→`.claude`。
+- project-id = uuid v4 前 8 hex；`locked_shas` 是上次 apply 基线快照（非版本锁）。
+- skills_dir：一仓库多 skill（Source 加 `skills_dir`）。
 
 ## 4. 验证清单（重载 / 切换后立即跑）
 
-- [ ] `git -C /Users/mywo/lab/skillkit log --oneline -15` 看到 M1 9 commit（最新 `78fd358` m1_e2e）。
-- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（35 tests）。
-- [ ] `make run ARGS="--help"` 显示 source/install/profile/project。
-- [ ] `ls crates/core/src/` 看到 11 模块；`ls crates/core/tests/` 看到 m0_e2e.rs + m1_e2e.rs。
-- [ ] `crates/*/Cargo.toml` 都有 `[lints] workspace = true`；core 依赖含 uuid + chrono。
-- [ ] spec §8.2 有 skills_dir、§10 apply 流程、§15.2 M1 验收。
-- [ ] **回归信号**：活跃设计搜不到 `skills/local`；`cargo clippy --all-targets -- -D warnings` 零 warning；无 `.skillkit/shared.lock`。
-- [ ] **apply 闭环**：install local → project apply → `<project>/.claude/skills/<skill>` symlink；status --json 输出 `{expected, missing, extra, conflicts}`（Vec<String>）。
+- [ ] `git -C /Users/mywo/lab/skillkit log --oneline -15` 看到 M2 T1-T9（最新 `a1ff11a` Profiles）。
+- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（43 tests：core 35 + server 8）。
+- [ ] `make run ARGS="serve --port 7317"` 起 server，浏览器打开打印的 URL（Sources/Skills/Profiles 可访问）。
+- [ ] `ls crates/server/src/routes/` 看到 `sources/skills/profiles + mod`；`ls crates/server/templates/` 看到 layout/home + 四视图模板 + fragments/。
+- [ ] **回归信号**：`cargo clippy --all-targets -- -D warnings` 零 warning；无 `~/.skillkit/.lock/*.lock` 残留（写操作 drop 释放）。
 
 ## 5. 已知遗留 / 待办
 
-1. **M2 GUI server（下一里程碑）**：`skillkit serve` + Axum REST API + SSE（apply 进度推送）+ rust-embed（前端产物嵌入）+ React+Vite（`demo/index.html` 产品化）。spec §12。
-2. **M3 迁移打磨**：`import-existing` 扫描导入现有 skill；install upgrade/list；Cursor copy 一致性完善；打包 mac-config Brewfile。
-3. **基建债（M0 review 提的中优先级，仍未还）**：CI（GitHub Actions 跑 make check）、README、Cargo.toml `[package]` 元数据（description/license/repository/rust-version）。
-4. **local 已被 git 追踪** 提示 `git rm --cached` 仅部分覆盖（land_one 报错，没显式引导命令），M3 打磨。
-5. ~~M1 profile/project/apply~~ ✅ 完成（红绿 + 9 commit）。~~M0~~ ✅。
+1. **M2 剩 T10-T15**（下次接续，plan Task 10-15）：
+   - T10 Projects 视图只读（列表 + 工作台三栏：installed/shared/status）+ core `scan_shared`（apply.rs，扫项目 agents skills 目录下真实目录）。
+   - T11 Sources/Skills 写操作（CRUD + install/uninstall）。
+   - T12 Projects 声明编辑（勾选全量替换 `installed_skills` + status 片段端点）。
+   - T13 Projects apply 闭环（`run_apply` + ApplyReport 片段）。
+   - T14 SSE（notify watcher → changed 事件 → 前端 hx-sse 刷新）。
+   - T15 视觉打磨（app.css 产品化 demo 风格）+ M2 收尾（更新 spec §12/CLAUDE.md §2 + 本 sessions）。
+2. **M3 迁移打磨**：`import-existing` / `install upgrade` / Brewfile 打包。
+3. **基建债**：CI（GitHub Actions `make check`）、README、Cargo.toml `[package]` 元数据。
 
 ## 6. 关键文件路径速查
 
 ```
 /Users/mywo/lab/skillkit/
-├── CLAUDE.md                               # 项目规范（含 M0 踩坑约定）
-├── Cargo.toml / Cargo.lock                 # workspace 根 + [workspace.lints.clippy]
-├── Makefile / rustfmt.toml                 # 统一入口（含 run）+ 格式
+├── CLAUDE.md / Cargo.toml / Makefile / rustfmt.toml
 ├── crates/
-│   ├── core/                               # skillkit-core（lib）— 全部业务逻辑（M0+M1 完成）
-│   │   ├── Cargo.toml                      # uuid + chrono（M1 加）
-│   │   ├── src/
-│   │   │   ├── lib.rs                      # crate 入口，re-export 子模块
-│   │   │   ├── paths.rs                    # Paths（home/skm/agents/claude/skills/projects/profiles）
-│   │   │   ├── error.rs                    # SkillkitError + Result + atomic_write
-│   │   │   ├── config.rs                   # Config + Agent 能力 + find_agent
-│   │   │   ├── source.rs                   # SourceType/Source(含 skills_dir)/SourcesStore
-│   │   │   ├── registry.rs                 # Scope/SkillMeta/Registry
-│   │   │   ├── git.rs                      # git 操作封装（clone/rev-parse）
-│   │   │   ├── install.rs                  # install/uninstall（含 skills_dir 平铺，now_iso 用 chrono）
-│   │   │   ├── symlink.rs                  # 全局 Claude symlink 桥接
-│   │   │   ├── profile.rs                  # Profile/ProfileStore（M1）
-│   │   │   ├── project.rs                  # Project/new_id/register/rebind + list_ids（M1）
-│   │   │   └── apply.rs                    # compute_diff/land_one/run_apply/build_status（M1 核心）
-│   │   └── tests/{m0_e2e,m1_e2e}.rs        # 端到端
-│   └── cli/                                # skillkit-cli（bin: skillkit）— 薄壳
-│       ├── Cargo.toml                      # serde_json（M1 加，--json 输出）
-│       └── src/{main.rs, commands/{source,install,profile,project}.rs}
-├── demo/index.html                         # GUI 亮色原型（M2 产品化）
-└── docs/
-    ├── 2026-07-29-skillkit-design.md       # spec（§8.2 skills_dir，§10 apply）
-    ├── design-decisions-2026-07-29.md      # 决策纪要（12 条）
-    ├── superpowers/plans/2026-07-30-skillkit-m1.md  # M1 计划（已执行完，含执行修正）
-    └── sessions/2026-07-29-skillkit-design.md      # 本交接材料
+│   ├── core/                  # skillkit-core（lib）—— 业务逻辑（M0+M1+M2 文件锁）
+│   │   └── src/{lib,paths,error,config,source,registry,git,install,symlink,profile,project,apply,lock}.rs
+│   ├── cli/                   # skillkit-cli（bin）—— 薄壳
+│   │   └── src/{main, commands/{source,install,profile,project,serve}}.rs
+│   └── server/                # skillkit-server（lib，M2 新增）—— Axum 薄壳
+│       ├── Cargo.toml         # axum0.8 / askama0.13 / rust-embed8 / fs2 / form_urlencoded / uuid / tokio（notify 待 T14 加）
+│       ├── src/{lib.rs, routes/{mod,sources,skills,profiles}.rs}
+│       ├── templates/{layout,home,sources,skills,profiles}.html + fragments/profile_skills.html
+│       ├── static/{htmx.min.js, sortable.min.js, app.css}
+│       └── tests/{common/mod.rs, routes.rs}
+├── docs/
+│   ├── 2026-07-29-skillkit-design.md          # spec（§12 待 T15 改 htmx 定稿）
+│   ├── design-decisions-2026-07-29.md
+│   ├── superpowers/specs/2026-07-31-skillkit-m2-design.md   # M2 spec（htmx 路线）
+│   ├── superpowers/plans/2026-07-31-skillkit-m2.md          # M2 plan（15 task，T1-T9 已执行）
+│   └── sessions/2026-07-29-skillkit-design.md               # 本交接
 ```
 
-## 7. 下次接续工作的最短路径（M2 GUI 阶段）
+## 7. 下次接续工作的最短路径（M2 T10-T15）
 
 ### 7.1 冷启动（新会话第一件事）
 
 ```bash
 cd /Users/mywo/lab/skillkit
-git log --oneline -15                   # 确认 M1 9 commit，最新 78fd358
-make check                              # 35 tests 全绿
-make run ARGS="project --help"          # 确认 project 子命令
+git log --oneline -15                   # 确认 M2 T1-T9（最新 a1ff11a）
+make check                              # 43 tests 全绿
+sed -n '/### Task 10/,/### Task 16/p' docs/superpowers/plans/2026-07-31-skillkit-m2.md  # 读 T10-T15
 ```
 
-验证：新会话能复述 apply 闭环（§3.10：compute_diff→land_one→run_apply→build_status）、agent_dir 映射（claude-code→.claude）、project-id uuid + rebind（§3.11）、skills_dir（§3.9）。
+**必读本文件 §3.1（M2 执行经验）**：plan Task 10-15 代码有 4 处坑（match-字面量 / 写操作调 handler / serde_urlencoded 不支持重复 key→Vec / 私有 async fn），按 §3.1 修正模式实现，否则会卡在 rustfmt/clippy/422。
 
-### 7.2 当前焦点：M2 GUI server
+### 7.2 焦点：T10 Projects 视图 → T15 视觉
 
-spec §12。M2 创建 `crates/server` + `web/`（React+Vite），三个新东西：
-- **`skillkit serve`**：Axum web server，localhost 绑定 + 随机 token 防误访问。
-- **REST API + SSE**：四大视图（Sources/Skills/Profiles/Projects）的数据端点 + SSE 推送（apply 进度、status 变化，复用 §3.8 notify file watcher）。
-- **rust-embed**：前端构建产物嵌入二进制（单二进制，零运行时依赖）。
-- 前端把 `demo/index.html`（M0 定稿原型）产品化为 React+Vite，调 Axum API。
+按 plan Task 10-15 TDD 红绿 + 每 task commit（沿用 T1-T9 节奏：cargo test 验证逻辑 + 攒到节点 make check 查 clippy/format）。关键：
 
-用 `superpowers:writing-plans` 做 M2 计划（前后端拆分，先 server + API 再前端）→ TDD 红绿执行（沿用红绿 + 每 task commit 节奏）。
+- **T10** core 加 `pub fn scan_shared(project_root, agents) -> Vec<String>`（apply.rs，找 agents skills 目录下真实目录、非 symlink、无 `.skillkit-sha`）+ `lib.rs` re-export；`routes/projects.rs`（list + workspace 三栏）。
+- **T11** Sources add/remove + Skills install/uninstall（写操作后返回视图整页，用 §3.1-2 的拆 `render_xxx` 模式）。
+- **T12** Projects 声明编辑：`set_skills`（全量替换 `installed_skills`）+ `status` 片段端点（供 SSE hx-get）。
+- **T13** apply：`skillkit_core::apply::run_apply(&paths, &mut proj, false)` → `ApplyReport` + 刷新 status。
+- **T14** SSE：notify v8 `RecommendedWatcher`（同步，包 `std::thread`）+ `tokio::sync::mpsc` + `axum::response::sse`。前端 hx-sse 需 htmx sse 扩展（额外下 `static/ext/sse.js`）。SSE 自动化测试难，手动验证（spec §10 已注明）。
+- **T15** 收尾：`make check` 全绿 + 手动 `serve` 走通四视图 + 更新 spec §12/CLAUDE.md §2（React→htmx 定稿）+ 本 sessions。
 
 ### 7.3 焦点优先级
-1. M2（GUI server）→ 2. M3（迁移打磨 + 打包）→ 3. 基建债（CI/README/元数据）。
+
+1. T10-T13（Projects 视图 → apply 闭环，核心）→ 2. T14 SSE → 3. T15 视觉 + 收尾 → 4. M3 迁移 → 5. 基建债。
 
 ## 7.x (archive) 历史接续路径
 
-- M1 阶段（已完成）：writing-plans 计划 → 红绿 10 task（profile/project/apply 闭环）。
-- M0 阶段（已完成）：工程化 → 红绿 8 task（core 骨架 + install + symlink）。
-- 设计阶段（已完成）：写 CLAUDE.md → review spec（P0/P1/P2）→ writing-plans M0。
+- **M2 T1-T9 阶段（已完成）**：inline 执行 plan Task 1-9，server 骨架 → Profiles 写操作（含 SortableJS）。
+- **M2 设计阶段（已完成）**：brainstorming htmx（取代 React）→ spec → writing-plans 15 task。
+- **M1 阶段（已完成）**：profile/project/apply 幂等落地闭环（10 TDD task）。
+- **M0 阶段（已完成）**：core 骨架 + install + 全局 Claude symlink。
+- **设计阶段（已完成）**：CLAUDE.md → spec review（P0/P1/P2）→ writing-plans M0。
