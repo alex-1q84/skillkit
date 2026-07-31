@@ -58,6 +58,7 @@ impl Project {
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
+        let _lock = crate::lock::FileLock::acquire(paths, &format!("project-{}", self.id))?;
         let dir = paths.projects_dir();
         std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.toml", self.id));

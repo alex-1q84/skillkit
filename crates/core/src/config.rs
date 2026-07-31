@@ -44,6 +44,7 @@ impl Config {
 
     /// 原子写 config.toml（写临时文件 + rename）。
     pub fn save(&self, paths: &Paths) -> Result<()> {
+        let _lock = crate::lock::FileLock::acquire(paths, "config")?;
         let path = paths.config_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

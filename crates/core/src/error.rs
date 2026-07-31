@@ -37,6 +37,9 @@ pub enum SkillkitError {
 
     #[error("project 不存在：{id}（先 `skillkit project add <path>` 注册）")]
     ProjectNotFound { id: String },
+
+    #[error("文件锁超时：{key} 被其他进程持有（稍后重试，或关闭其他 skillkit 进程）")]
+    LockTimeout { key: String },
 }
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖，避免半写状态。

@@ -26,6 +26,7 @@ impl Profile {
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
+        let _lock = crate::lock::FileLock::acquire(paths, &format!("profile-{}", self.name))?;
         let dir = paths.profiles_dir();
         std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.toml", self.name));

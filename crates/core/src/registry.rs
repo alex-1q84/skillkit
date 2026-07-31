@@ -45,6 +45,7 @@ impl Registry {
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
+        let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
         let path = paths.registry_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

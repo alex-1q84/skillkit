@@ -40,6 +40,7 @@ impl SourcesStore {
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
+        let _lock = crate::lock::FileLock::acquire(paths, "sources")?;
         let path = paths.sources_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
