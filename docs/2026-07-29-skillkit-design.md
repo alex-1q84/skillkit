@@ -43,7 +43,7 @@
 
 ## 3. 总体架构
 
-技术栈：Rust + Axum，编译为单二进制。核心库（`core` crate）承载全部业务逻辑，CLI 和 web server 两个入口共享核心，无重复逻辑。前端用 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽排序），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程，分发仍是单文件。
+技术栈：Rust + Axum，编译为单二进制。核心库（`core` crate）承载全部业务逻辑，CLI 和 web server 两个入口共享核心，无重复逻辑。前端用 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽排序），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程，分发仍是单文件。前端不强制零 JS（可用轻量原生 JS 增强交互），但禁止 React / Vue 等重型前端框架。
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -184,8 +184,8 @@ package = "~/my-skills"
 
 Source 极简成 `{name, package}`：
 
-- `name`：source 的本地别名，用作 skill id 前缀（`<source-name>/<skill-name>`）。
-- `package`：npx skills 的 source format 串——github shorthand（`owner/repo`）、完整 git url（`git@...` / `https://...` / `ssh://...`，含私有仓库，依赖本地 SSH key 或 git credential）、或本地路径。省略时表示 registry 搜索入口（skills.sh 默认源），install 时走 `npx skills find` 解析。
+- `name`：source 的本地别名，用作 skill id 前缀（`<source-name>/<skill-name>`）。**可省略**：新增 source 时只填 package，name 自动从 package 推导（git url 取仓库名、本地路径取目录名），GUI 输入 package 时实时预览推导名，`--name`/name 框可覆盖。
+- `package`：npx skills 的 source format 串——github shorthand（`owner/repo`）、完整 git url（`git@...` / `https://...` / `ssh://...`，含私有仓库，依赖本地 SSH key 或 git credential）、或本地路径。省略时表示 registry 搜索入口（skills.sh 默认源），install 时走 `npx skills find` 解析。**新增 source 必须填 package**；「registry 搜索入口」是 skills.sh 默认源的专属语义，由 `ensure_default` 启动时保证存在。
 
 所有 source 的下载统一走 `npx skills add <package>@<skill>`，skillkit 不区分类型、不自己 git clone/复制。skill 在仓库中的定位（一仓库多 skill）由 npx skills 的 `-s <skill>` 与其 discovery 规则接管，不再需要 `skills_dir`；`ref`（分支/tag）也不再支持——npx skills 不接受指定 ref，版本模型纯 lock-based（见 §8.3 `computed_hash`）。
 
@@ -331,7 +331,7 @@ apply 按 skill 的 scope 分两条路径：
 
 ```bash
 # 源管理
-skillkit source add <name> <type> [url|path] [--ref main]
+skillkit source add <package> [--name <别名>]      # 名称默认从 package 推导（repo 名/目录名）
 skillkit source list [--json]
 skillkit source remove <name>
 
@@ -384,7 +384,7 @@ AI agent 友好性：
 
 技术细节：
 
-- 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源 `rust-embed` 嵌入二进制，无独立前端工程。
+- 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源 `rust-embed` 嵌入二进制，无独立前端工程。**不强制零 JS**：可用轻量原生 JS / htmx 增强交互，但禁止 React / Vue 等重型前端框架，不引入 node 构建链。
 - 后端 Axum + SSE 推送（notify 监听 `~/.skillkit/` 变化，CLI 在另一进程改状态时浏览器视图自动刷新；apply 同步返回结果不走 SSE）。
 - localhost 绑定 + 随机 token 防其他进程误访问，无需登录。
 
@@ -426,7 +426,7 @@ GUI 价值是总览和可视化配置，CLI 价值是 AI agent 操作和脚本�
 
 - core 库 + CLI 框架 + 配置和 registry 读写。
 - source 管理（add/list/remove）。
-- install/uninstall（git clone 到 canonical，skills.sh 源调 npx skills）。
+- install/uninstall（委托 npx skills 下载到 canonical，skills.sh 源走 find 选候选）。
 - 全局 skill 的 Claude symlink 桥接。
 
 交付价值：能装 skill、Claude 能用。

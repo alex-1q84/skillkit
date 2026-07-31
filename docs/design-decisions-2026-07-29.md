@@ -131,3 +131,28 @@
 - 保留三分类型 + 自研 git clone：死区分 + 维护两套下载逻辑，spec 设想的 npx skills 路径从没真用。
 - 隔离收割（临时目录跑 npx skills 再搬到 `~/.skillkit/skills/`）：搬运依赖 npx skills 输出结构，脆弱；npx skills 状态丢失，升级要重走临时流程。
 - skills.sh 默认源指向固定仓库（如 vercel-labs/agent-skills）：skills.sh 是 registry 不是单仓库，固定仓库漏掉生态里其他 package 的 skill。
+
+## 决策 14：skills.sh 默认源缺失即补回
+
+**背景**：`SourcesStore::ensure_default` 原实现只在 sources.toml 文件不存在时种入 skills.sh，但空文件（`sources = []`，用户手动删后保存）会让 GUI/CLI 看不到默认源。
+
+**决策**：`ensure_default` 语义改为「缺失即补回」——CLI main / server serve 每次启动时 load 现有 sources.toml，若列表里没有 `name="skills.sh"` 就补回 `{name: "skills.sh", package: None}`。覆盖原设计「用户可删、删了不加回」的语义。
+
+**理由**：skills.sh 是产品的默认搜索入口，不该因用户删过一次就永久消失；GUI 必须有默认源可展示。用户若改过 skills.sh 的 package，仍尊重（只按 name 判断，不动已存在的条目）。
+
+**代价与竞态**：并发冷启动（CLI 与 serve 同时）可能各 push 一条 skills.sh，但终态收敛为一条（内容相同，后写覆盖），与既有 add 路径的 read-modify-write 竞态同类，不额外处理。
+
+## 决策 15：source name 自动推导（新增只填 package）
+
+**背景**：GUI sources 表单要求用户填 name，但 name 完全可以从 package 推导（git url 取仓库名、本地路径取目录名），徒增心智负担。
+
+**决策**：新增 `derive_source_name(package)` 纯函数（core）：按「shorthand / scp-style / 其它 url / 本地路径」四形态取末段，统一剥尾斜杠 + 一个 `.git` 后缀；空串返回 `None`。CLI `source add` 签名改为 `<package> [--name <别名>]`（**有意的破坏性变更**，位置参数从 name 换成 package）；GUI 表单 package 输入时经 htmx 调 `/sources/preview` 端点实时预填推导名（`input changed delay:300ms`，服务端推导，前端零规则副本），name 框留空则提交时后端推导，用户手动编辑 name 后停用预览（一行 `oninput` 互斥）。
+
+**理由**：对齐「系统承担复杂性」——用户只填 URL，名字自动来，撞名时 `--name`/name 框覆盖。`install.rs` 的 id 契约 `<source-name>/<skill-name>` 不受影响：name 仍存在、仍唯一，只是新增时允许推导默认值。实时预览是主人明确要求（「输入 url 立即显示推导名以便确认」），htmx 走服务端推导不复制规则。
+
+**否定的备选**：
+- 前端实时推导（JS 复制规则）：推导逻辑双份实现会漂移，违背「业务逻辑只在 core」。改用 htmx 调服务端 `/sources/preview`。
+- 提交后刷新才显示真名：用户确认推导名太晚，已改为实时预览。
+- 去掉 name 字段、纯自动推导：撞名场景无法覆盖（两个仓库都叫 skills 时只能换包名绕开），保留可选覆盖成本极低。
+
+**后续提醒**：本次只做新增时推导，不做已有 source 的改名编辑；若未来加「编辑 source name」，必须连带处理 registry 里 `<旧name>/<skill>` 的引用。

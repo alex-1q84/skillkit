@@ -10,6 +10,7 @@ skillkit 是 AI agent skill 的统一管理工具：设定安装源、记录并�
 
 - Rust（edition 2021）+ Axum，单二进制。
 - 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程。
+- **前端不强制零 JS**：可用轻量原生 JS / htmx 增强交互（如实时预览、事件互斥）；但**禁止 React / Vue 等重型前端框架**，不引入 node 构建链，保持单二进制零运行时依赖。
 - 分发：纳入 mac-config Brewfile（与 cx/rtk 工具链一致）。
 
 ## 3. 架构（三层共享 core）

@@ -9,7 +9,7 @@
 ### 1.1 命令表面
 
 ```
-skillkit source add <name> [package]                  # package 省略=registry 搜索入口（skills.sh 默认源）
+skillkit source add <package> [--name <别名>]        # 名称默认从 package 推导（repo 名/目录名），--name 覆盖
 skillkit source list / remove <name>
 skillkit install add <source> <skill> [--scope global|local]   # 固定源直接装；skills.sh 源走 npx skills find 交互选候选
 skillkit uninstall <id>
@@ -22,7 +22,7 @@ skillkit serve [--port 7317] [--no-open]              # 四视图 + apply 闭环
 - **下载全委托 npx skills**：`crates/core/src/npx.rs` 封装 `add/find/update/remove` + skills-lock.json 读 computedHash。`git.rs` 整个删除。
 - **canonical 池子 `~/.skillkit/.agents/skills/`**（原 `~/.skillkit/skills/`）：npx skills project scope 在 `cwd=~/.skillkit/` 直接写（`-a universal --copy -y`）。install 统一落池子，不分 scope。global 双层 symlink：池子 → `~/.agents/skills/`（Cursor 等直读）→ `~/.claude/skills/`（Claude 桥接）。
 - **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256），取代 `commit_sha`。`locked_shas` 值同步。registry 字段改名 computed_hash。
-- **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default` 种子写入（用户可删）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）。
+- **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）。
 - `SkillkitError::Git` → `Tool`。`Cargo.lock` 有未提交改动（会话开始即存在）。
 - 测试：45 全绿（core 31 + cli 3 + server 15）+ m0 两个端到端 `#[ignore]` 真跑 npx skills（手动跑）。clippy `pedantic -D warnings` 零 warning。
 
@@ -37,7 +37,9 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ## 2. 本会话累积的改动（newest first）
 
-11. **source 模型收敛——统一走 npx skills**（本会话，未 commit）：主人 5 轮反馈驱动。删 `SourceType`/`git.rs`；`Source`→`{name, package}`；下载全委托 npx skills（私有 git / local / github 统一 source format）；canonical 池子改 `~/.skillkit/.agents/skills/`；版本 `commit_sha`→`computed_hash`（读 skills-lock.json）；skills.sh 默认源=registry 搜索入口（find 交互选）；`SkillkitError::Git`→`Tool`。CLI `source add <name> <package>`（去类型参数）、`install add <source> <skill> [--scope]`（默认 local）。server SourceForm 单 package 输入框。文档同步（spec §4-§8.5 + §10/§11/§13 ripple、决策纪要追加**决策 13**、CLAUDE.md §5）。决策推理见 `docs/design-decisions-2026-07-29.md` 决策 13。
+12. **Sources GUI 改进**（本会话）：① `ensure_default` 语义改为「skills.sh 缺失即补回」（覆盖「删了不加回」，修空文件 `sources = []` 时 GUI 空白 bug，决策 14）；② 新增 `derive_source_name`（shorthand/scp-style/url/local path 四形态取末段 + 剥 .git/尾斜杠），CLI `source add <package> [--name]`（**有意的破坏性参数序变更**）、GUI 表单 package 输入实时预览推导名（htmx 调 `/sources/preview` 服务端推导，前端零规则副本；name 手动编辑后停用预览）。决策 15。测试 51 全绿（core 33 + cli + server 18）。
+
+11. **source 模型收敛——统一走 npx skills**（前会话，`e918bc0`）：主人 5 轮反馈驱动。删 `SourceType`/`git.rs`；`Source`→`{name, package}`；下载全委托 npx skills（私有 git / local / github 统一 source format）；canonical 池子改 `~/.skillkit/.agents/skills/`；版本 `commit_sha`→`computed_hash`（读 skills-lock.json）；skills.sh 默认源=registry 搜索入口（find 交互选）；`SkillkitError::Git`→`Tool`。CLI `source add <name> <package>`（去类型参数）、`install add <source> <skill> [--scope]`（默认 local）。server SourceForm 单 package 输入框。文档同步（spec §4-§8.5 + §10/§11/§13 ripple、决策纪要追加**决策 13**、CLAUDE.md §5）。决策推理见 `docs/design-decisions-2026-07-29.md` 决策 13。
 
 10. **serve 自动打开浏览器**（前会话，`450a7fd`）：serve 默认启动后用 `open`(macOS)/`xdg-open`(Linux)/`start`(Windows) 打开默认浏览器（标准库 `Command` 手写，无新依赖）；加 `--no-open` flag 供脚本/CI/测试跳过。listener 绑好后才 open，浏览器请求立即连上；open 失败只 warn 不挡 serve。
 
@@ -93,7 +95,7 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 
 - [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 31 + cli + server 15 + clippy `-D warnings` 零 warning）。
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）。
-- [ ] `make run ARGS="serve --port 7317"` 走查：Sources 单 package 输入框、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
+- [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `git status` 干净度：npx.rs 新增、git.rs 删除。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。
 
