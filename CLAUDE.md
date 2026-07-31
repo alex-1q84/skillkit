@@ -67,6 +67,23 @@ M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目�
 - **core 公开类型一律在 `lib.rs` 完整 re-export**：子模块定义的 pub 类型若不 re-export，crate 内（`crate::T`）和外部（`skillkit_core::T`）都找不到。每 crate 选一种约定统一（短路径 re-export 或全模块路径），不混用——混用是漏 re-export 的温床，只在后续模块编译时才暴露。
 - 命名、注释跟随 Rust 惯例；注释用中文，与文档和 commit 语言一致。
 
+## 7.5 前端约定（server crate）
+
+前端规则细化见 `docs/frontend-rules.md`（类比 project-initialization 按语言给 AI 约束）。核心强规则：
+
+| 必须 | 禁止 |
+|------|------|
+| 前端交互优先 htmx 服务端渲染 + 片段 | React / Vue 等重型框架；node 构建链；npm 依赖 |
+| 业务逻辑只在 core，server handler 是薄壳 | 在 handler/template 复制 core 的推导/计算逻辑 |
+| SSE 刷新请求 `?fragment=1` 纯片段（响应不含 nav） | SSE 刷新返回完整页再 select 提取（曾致导航重复） |
+| 写操作（POST/DELETE）返回完整页面 `hx-target="body" hx-swap="outerHTML"` | 写操作返回片段却用 body outerHTML |
+| 片段外层固定 id（局部替换后 id 不丢） | 片段外层 id 随内容变化 |
+| 页面模板薄壳 + include fragment（main 内容只在 fragment） | 页面模板重复 main 内容 |
+| 前端推导规则只在 core（htmx 调服务端点） | 前端复制一份推导逻辑 |
+| 改模板/静态资源后跑 `make check` | 只改不验（Askama 模板错只有 check 能暴露） |
+
+Askama/htmx 具体坑（match 头花括号歧义、include 不传变量、重复 key 表单、`%2F` 编码、尾斜杠 404、原生 EventSource 等）见 `docs/frontend-rules.md` §4。
+
 ## 8. 测试约定
 
 核心原则：**测试验证业务结果（apply 后项目能加载到正确 skill），不验证实现细节（调了哪个内部函数）**。业务逻辑变了测试应失败，否则就是测错了。
