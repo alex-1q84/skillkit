@@ -12,8 +12,11 @@ pub mod sources;
 pub fn protected() -> Router<AppState> {
     Router::new()
         .route("/{token}", get(crate::home))
-        .route("/{token}/sources", get(sources::page))
+        .route("/{token}/sources", get(sources::page).post(sources::add))
+        .route("/{token}/sources/{name}", delete(sources::remove))
         .route("/{token}/skills", get(skills::page))
+        .route("/{token}/skills/{id}/install", post(skills::install))
+        .route("/{token}/skills/{id}", delete(skills::uninstall))
         .route(
             "/{token}/profiles",
             get(profiles::page).post(profiles::create),

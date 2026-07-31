@@ -247,3 +247,73 @@ async fn project_workspace_renders_status() {
     assert!(body.contains("myproj"));
     assert!(body.contains("demo/logseq"));
 }
+
+#[tokio::test]
+async fn source_add_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/sources")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("name=git-src&source_type=git&url=git%40x"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let store = skillkit_core::SourcesStore::load(&state.paths).unwrap();
+    assert!(store.list().iter().any(|s| s.name == "git-src"));
+}
+
+#[tokio::test]
+async fn skill_uninstall_removes_from_registry() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "demo/x".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "demo/x".into(),
+            name: "x".into(),
+            source: "demo".into(),
+            scope: skillkit_core::Scope::Global,
+            version: None,
+            commit_sha: None,
+            installed_at: "2026-07-31".into(),
+            canonical_path: dir
+                .path()
+                .join(".agents/skills/x")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/test-token/skills/demo%2Fx")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Registry::load(&state.paths).unwrap();
+    assert!(after.skills.is_empty());
+}
