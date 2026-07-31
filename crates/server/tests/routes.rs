@@ -415,3 +415,31 @@ async fn project_apply_lands_symlink() {
         "apply 应建 symlink"
     );
 }
+
+#[tokio::test]
+async fn sse_events_endpoint_reachable() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/event-stream"
+    );
+}

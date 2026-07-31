@@ -24,6 +24,11 @@
         new Sortable(el, { animation: 150 });
       });
     });
+    // SSE：CLI 在另一进程改了 ~/.skillkit/ 时，浏览器当前页 main 自动刷新
+    var es = new EventSource('/{{ token }}/events');
+    es.addEventListener('changed', function () {
+      htmx.ajax('GET', location.pathname, { target: 'main', swap: 'outerHTML' });
+    });
   </script>
 </body>
 </html>

@@ -8,6 +8,7 @@ pub mod profiles;
 pub mod projects;
 pub mod skills;
 pub mod sources;
+pub mod sse;
 
 pub fn protected() -> Router<AppState> {
     Router::new()
@@ -35,4 +36,5 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/projects/{id}/skills", post(projects::set_skills))
         .route("/{token}/projects/{id}/status", get(projects::status))
         .route("/{token}/projects/{id}/apply", post(projects::apply))
+        .route("/{token}/events", get(sse::events))
 }
