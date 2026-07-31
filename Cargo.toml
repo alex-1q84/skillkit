@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "crates/server"]
 resolver = "2"
 
 # workspace 级 clippy lints（对标 Java 的 Error Prone / NullAway 静态检查）。
