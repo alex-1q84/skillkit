@@ -18,7 +18,6 @@ async fn ping_returns_pong() {
 #[tokio::test]
 async fn protected_route_rejects_wrong_token() {
     let app = skillkit_server::app(common::test_state());
-    // 匹配 /{token} 路由但 token 错 → require_token 拒绝 → 404
     let resp = app
         .oneshot(
             Request::builder()
@@ -34,7 +33,6 @@ async fn protected_route_rejects_wrong_token() {
 #[tokio::test]
 async fn protected_route_accepts_right_token() {
     let app = skillkit_server::app(common::test_state());
-    // 匹配 /{token} 且 token 正确 → 放行 → home_placeholder 返回 200
     let resp = app
         .oneshot(
             Request::builder()
@@ -68,4 +66,23 @@ async fn static_asset_served_with_content_type() {
             .unwrap(),
         "text/css; charset=utf-8"
     );
+}
+
+#[tokio::test]
+async fn home_renders_layout_with_nav() {
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("/test-token/sources"));
+    assert!(body.contains("/test-token/projects"));
+    assert!(body.contains("htmx.min.js"));
 }

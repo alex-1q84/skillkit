@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>skillkit</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/sortable.min.js"></script>
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/{{ token }}/projects">Projects</a>
+    <a href="/{{ token }}/sources">Sources</a>
+    <a href="/{{ token }}/skills">Skills</a>
+    <a href="/{{ token }}/profiles">Profiles</a>
+  </nav>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

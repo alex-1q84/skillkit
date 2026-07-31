@@ -1,10 +1,11 @@
 //! skillkit-server：Axum web server，调 skillkit-core，供 cli 的 serve 子命令调用。
 
+use askama::Template;
 use axum::{
     extract::{Path, Request, State},
     http::{header, StatusCode},
     middleware::{from_fn_with_state, Next},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -27,7 +28,7 @@ struct Asset;
 pub fn app(state: AppState) -> Router {
     // Axum 0.8 路由参数用 {token}（非 :token）。所有业务挂在 /{token}/ 下，layer 校验 token。
     let protected = Router::new()
-        .route("/{token}", get(home_placeholder))
+        .route("/{token}", get(home))
         .layer(from_fn_with_state(state.clone(), require_token));
 
     Router::new()
@@ -42,9 +43,22 @@ async fn ping() -> &'static str {
     "pong"
 }
 
-/// home 占位：Task 5 换成渲染 layout。这里先返回 200 让 token 测试成立。
-async fn home_placeholder() -> &'static str {
-    "skillkit"
+#[derive(Template)]
+#[template(path = "home.html")]
+struct HomeTpl {
+    token: String,
+}
+
+/// home 页：渲染 layout + nav。Task 7 起各视图 extends layout。
+pub(crate) async fn home(Path(token): Path<String>) -> Response {
+    let rendered = HomeTpl { token }.render();
+    match rendered {
+        Ok(html) => Html(html).into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, "渲染 home 模板失败");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 /// 静态资源（htmx/sortable/css），公开访问不校验 token（localhost 无泄露风险）。
@@ -60,9 +74,13 @@ async fn static_handler(Path(name): Path<String>) -> Response {
 }
 
 fn content_type(name: &str) -> &'static str {
-    if name.ends_with(".js") {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if ext.eq_ignore_ascii_case("js") {
         "text/javascript; charset=utf-8"
-    } else if name.ends_with(".css") {
+    } else if ext.eq_ignore_ascii_case("css") {
         "text/css; charset=utf-8"
     } else {
         "application/octet-stream"
@@ -88,7 +106,10 @@ async fn require_token(State(state): State<AppState>, req: Request, next: Next) 
 pub async fn serve(port: u16) -> anyhow::Result<()> {
     let paths = Paths::production();
     let token = uuid::Uuid::new_v4().simple().to_string();
-    let state = AppState { paths, token: token.clone() };
+    let state = AppState {
+        paths,
+        token: token.clone(),
+    };
     let app = app(state);
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
