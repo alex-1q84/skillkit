@@ -10,7 +10,7 @@
 
 ```
 skillkit source/install/uninstall/profile/project     # ✅ M0+M1
-skillkit serve [--port 7317]                           # ✅ M2：四视图全功能 + apply 闭环 + SSE
+skillkit serve [--port 7317] [--no-open]               # ✅ M2：四视图 + apply 闭环 + SSE，默认自动打开浏览器（--no-open 跳过）
 ```
 
 M2 全完成（plan Task 1-15）：Sources/Skills/Profiles/Projects 四视图 + 写操作 + Projects 声明编辑 → APPLY 闭环 + SSE 跨进程刷新 + app.css 产品化。详见 `docs/superpowers/plans/2026-07-31-skillkit-m2.md`。
@@ -34,12 +34,14 @@ M2 全完成（plan Task 1-15）：Sources/Skills/Profiles/Projects 四视图 + 
 ```bash
 cd /Users/mywo/lab/skillkit
 make check                              # 全绿（core + cli + server 15 routes 测试）
-make run ARGS="serve --port 7317"       # 起 GUI（打印 http://127.0.0.1:7317/<token>/，带尾斜杠可达）
+make run ARGS="serve --port 7317"       # 起 GUI（默认自动打开浏览器；带尾斜杠 URL 可达）
 # 四视图：Sources（增删源）/ Skills（install/uninstall）/ Profiles（create/add/拖拽）/ Projects（勾选 → APPLY → status diff）
 # SSE：CLI 在另一进程改 ~/.skillkit/ 后浏览器视图自动刷新
 ```
 
 ## 2. 本会话累积的改动（newest first）
+
+10. **serve 自动打开浏览器**（本轮，`450a7fd`）：serve 默认启动后用 `open`(macOS)/`xdg-open`(Linux)/`start`(Windows) 打开默认浏览器（标准库 `Command` 手写，无新依赖）；加 `--no-open` flag 供脚本/CI/测试跳过。listener 绑好后才 open，浏览器请求立即连上；open 失败只 warn 不挡 serve。主人确认弹窗生效。
 
 9. **M2 T10-T15**（本轮，6 commit `9fd9fb5`→`016231b`）
    - T10 Projects 视图（list + workspace 三栏只读）+ core `scan_shared` + lib.rs re-export 补全。
