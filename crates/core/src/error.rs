@@ -40,6 +40,9 @@ pub enum SkillkitError {
 
     #[error("文件锁超时：{key} 被其他进程持有（稍后重试，或关闭其他 skillkit 进程）")]
     LockTimeout { key: String },
+
+    #[error("升级 {id} 将影响以下项目的版本基线：{affected:?}，需确认或 --yes")]
+    UpgradeBlocked { id: String, affected: Vec<String> },
 }
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖，避免半写状态。
