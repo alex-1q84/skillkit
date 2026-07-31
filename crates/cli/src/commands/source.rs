@@ -10,11 +10,15 @@ pub struct SourceCmd {
 
 #[derive(Subcommand)]
 enum SourceSub {
-    /// 添加源：skillkit source add <name> [package]（package 省略=registry 搜索入口 skills.sh）
+    /// 添加源：skillkit source add <package> [--name <别名>]
+    /// package 为 npx skills source format（github shorthand / git url / local path）；
+    /// 名称默认从 package 推导（repo 名 / 目录名），--name 覆盖。
     Add {
-        name: String,
-        /// npx skills package（github shorthand / git url / local path）；省略=registry 搜索入口
-        package: Option<String>,
+        /// npx skills package（github shorthand / git url / local path）
+        package: String,
+        /// 源名称（覆盖自动推导）；缺省时取 repo 名 / 目录名
+        #[arg(long)]
+        name: Option<String>,
     },
     /// 列出所有源
     List,
@@ -25,9 +29,22 @@ enum SourceSub {
 pub fn run(cmd: SourceCmd) -> anyhow::Result<()> {
     let paths = Paths::production();
     match cmd.cmd {
-        SourceSub::Add { name, package } => {
+        SourceSub::Add { package, name } => {
+            let name = match name {
+                Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+                _ => match skillkit_core::derive_source_name(&package) {
+                    Some(n) => n,
+                    None => anyhow::bail!("package 不能为空（缺少可推导的名称，可用 --name 指定）"),
+                },
+            };
             let mut store = SourcesStore::load(&paths)?;
-            store.add(Source { name, package })?;
+            if store.get(&name).is_ok() {
+                anyhow::bail!("该名称已被源 {name} 占用（可用 --name 指定别名）");
+            }
+            store.add(Source {
+                name,
+                package: Some(package),
+            })?;
             store.save(&paths)?;
             println!("✓ 已添加源");
         }
