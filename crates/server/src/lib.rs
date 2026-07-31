@@ -102,7 +102,8 @@ async fn require_token(State(state): State<AppState>, req: Request, next: Next) 
 }
 
 /// 启动 web server：绑 127.0.0.1、生成随机 token、打印带 token 的 URL。
-pub async fn serve(port: u16) -> anyhow::Result<()> {
+/// open=true 时用默认浏览器打开（listener 绑好后调，浏览器请求能立即连上）。
+pub async fn serve(port: u16, open: bool) -> anyhow::Result<()> {
     let paths = Paths::production();
     let token = uuid::Uuid::new_v4().simple().to_string();
     let state = AppState {
@@ -112,13 +113,56 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
     let app = app(state);
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    eprintln!("skillkit serve → http://{addr}/{token}/");
+    let url = format!("http://{addr}/{token}/");
+    eprintln!("skillkit serve → {url}");
+    if open {
+        open_in_browser(&url);
+    }
     axum::serve(listener, app).await?;
     Ok(())
 }
 
 /// 同步入口（供 cli 直接调用，内部建 runtime）。
-pub fn run(port: u16) -> anyhow::Result<()> {
+pub fn run(port: u16, open: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(serve(port))
+    runtime.block_on(serve(port, open))
+}
+
+/// 用默认浏览器打开 URL（跨平台；失败只 warn 不影响 serve，用户可手动复制上方 URL）。
+fn open_in_browser(url: &str) {
+    if let Err(e) = try_open_browser(url) {
+        tracing::warn!(error = %e, %url, "无法自动打开浏览器，请手动复制上方 URL");
+    }
+}
+
+fn try_open_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .status()
+            .map(|_| ())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .status()
+            .map(|_| ())
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status()
+            .map(|_| ())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = url;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "当前平台不支持自动打开浏览器",
+        ))
+    }
 }
