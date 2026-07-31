@@ -27,7 +27,7 @@
 ### 目标
 
 - 设定 skill 安装源（skills.sh 生态、私有 git 仓库、本地路径）。
-- 安装 skill 时记录并锁定版本（commit_sha），支持升级，版本信息集中管理。
+- 安装 skill 时记录并锁定版本（computed_hash），支持升级，版本信息集中管理。
 - 按 profile 把 skill 组织成可复用的候选集，支持安装、升级、卸载。
 - 按项目管理：注册或扫描项目，精确到逐个 skill 指定安装，应用 profile，执行幂等落地。
 - 提供本地 web GUI 方便配置和查看全貌（源、skill、profile、项目）。
@@ -71,23 +71,23 @@
 
 ## 4. 与 npx skills 的边界
 
-`npx skills` 仅承担一个职责：从 skills.sh 源下载 skill 到 `~/.agents/skills/`（即下载动作）。其余全部由 skillkit 独立实现：
+skillkit 把所有下载委托给 `npx skills`：skills.sh 生态、私有 git 仓库、本地路径统一走 `npx skills add <package>`，package 格式遵循 npx skills 的 source format（github shorthand / 完整 git url / 本地路径）。skillkit 不自己 git clone 或复制。
 
-- skillkit 调用 `npx skills add <skills.sh 源> -g` 完成下载。
-- 下载后 skillkit 接管：登记到 `~/.skillkit/registry.json`，记录版本，按 profile 落地到各 agent 目录。
-- 非 skills.sh 源（私有 git、本地路径）由 skillkit 自己 `git clone` 或复制到 canonical 存储，不经 npx skills。
+- skillkit 在 `cwd=~/.skillkit/` 跑 `npx skills add <package>@<skill> -a universal --copy -y`（project scope），skill 落 `~/.skillkit/.agents/skills/<skill>/`，`skills-lock.json` 落 `~/.skillkit/`。下载后 npx skills 角色完结。
+- skillkit 接管：读 `skills-lock.json` 的 `computedHash` 记版本，登记 `~/.skillkit/registry.json`，按 scope/profile/project 落地到各 agent 目录。
+- skills.sh 默认源是 registry 搜索入口（无固定 package）：`skillkit install skills.sh/<skill>` 走 `npx skills find <skill>` 解析出 `<owner/repo@skill>` 再 add。
 
-skillkit 不依赖 npx skills 的内部状态，版本记录采用自己的 `registry.json` 格式（参考 Claude 插件 `installed_plugins.json` 的 `version` + `commit_sha` + `installed_at` 字段）。
+两个目录职责分离：`~/.skillkit/.agents/skills/` 是 skillkit 的 canonical 池子（install 落点、npx skills 直接写、单版本）；`~/.agents/skills/` 是 global skill 的 apply 落地点（各 agent 直读）。版本记录在 skillkit 自己的 `registry.json`（`computed_hash` 字段，源自 `skills-lock.json`），不依赖 npx skills 内部状态。
 
 ## 5. Skill 分类与管理职责
 
 skillkit 把 skill 分为三类，管理职责不同：
 
-| 类型 | canonical 存储 | skillkit 角色 |
-|------|------|------|
-| 全局公共 | `~/.agents/skills/` | 全权管理（源、版本、profile、apply） |
-| 项目 local | `~/.skillkit/skills/` | 全权管理（源、版本、profile、apply 到项目 local 目录） |
-| 项目 shared | `<project>/<agent>/skills/` | 只读发现（扫描展示，与 local 对照，不安装/升级/卸载） |
+| 类型 | canonical 池子 | apply 落点 | skillkit 角色 |
+|------|------|------|------|
+| 全局公共 | `~/.skillkit/.agents/skills/` | `~/.agents/skills/`（agent 直读） | 全权管理（源、版本、profile、apply） |
+| 项目 local | `~/.skillkit/.agents/skills/` | `<project>/<agent>/skills/` | 全权管理（源、版本、profile、apply 到项目 local 目录） |
+| 项目 shared | — | `<project>/<agent>/skills/` | 只读发现（扫描展示，与 local 对照，不安装/升级/卸载） |
 
 语义说明：
 
@@ -108,16 +108,17 @@ skillkit 把 skill 分为三类，管理职责不同：
   config.toml                    # agent 列表 + 各 agent 能力 + web 端口
   sources.toml                   # 安装源注册表
   registry.json                  # 所有已安装 skill 元数据，以 id 为 key
-  skills/<skill-name>/           # 项目 local skill 的集中 canonical（单版本）
+  skills-lock.json               # npx skills 生成的版本锁（computedHash），skillkit 读
+  .agents/skills/<skill-name>/   # canonical 池子：所有 skill 集中存储（单版本），npx skills 直接写
   profiles/<name>.toml           # 可复用 profile（声明式，可分享）
   projects/<project-id>.toml     # 项目实例元数据（个人本地，不入库）
   .lock                          # 写时文件锁（按文件粒度：registry 写、各 project 写分别加锁，见 §13）
 
-~/.agents/skills/<skill-name>/   # 全局公共 canonical（Cursor 等直读，零配置）
+~/.agents/skills/<skill-name>/   # global skill apply 落地点（Cursor 等直读；symlink 自池子）
 ~/.claude/skills/<skill-name>    # symlink → ~/.agents/skills/<skill-name>/（仅 Claude 需要桥接）
 ```
 
-项目 local skill 的 canonical 集中放在 `~/.skillkit/skills/` 而非每个项目各放一份，这样同一 skill 被多个项目引用时只占一份磁盘，升级只改一处。
+所有 skill 的 canonical 集中放在 `~/.skillkit/.agents/skills/`（npx skills project scope 直接写入的标准布局），不分 global/local。global skill install 时额外 symlink 到 `~/.agents/skills/`；local skill 等 project apply。同一 skill 被多个项目引用时只占一份磁盘，升级只改一处。
 
 ### 6.3 项目目录布局
 
@@ -125,8 +126,8 @@ local skill 与 shared skill **同级平铺**在 `<agent>/skills/<skill-name>/`�
 
 ```
 <project>/
-  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/skills/<skill-name>/
-  .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skillkit/skills/<skill-name>/
+  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/.agents/skills/<skill-name>/
+  .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skillkit/.agents/skills/<skill-name>/
   .codex/skills/...                   # 同理
 ```
 
@@ -150,11 +151,11 @@ skillkit 不在项目目录写入自己的配置文件（项目元数据全部�
 
 | agent | 直读 `~/.agents/skills/` | 支持 symlink | 全局公共落地 | 项目 local 落地 |
 |-------|:---:|:---:|------|------|
-| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | symlink `<project>/.claude/skills/<skill>` → `~/.skillkit/skills/<skill>` |
-| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skillkit/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
+| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | symlink `<project>/.claude/skills/<skill>` → `~/.skillkit/.agents/skills/<skill>` |
+| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skillkit/.agents/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
 | OpenCode / Codex / Gemini | 是 | 是 | 无需操作（直读） | symlink 或 copy 均可，默认 symlink |
 
-agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 commit_sha 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
+agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 computed_hash 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
 
 ## 8. 数据模型
 
@@ -165,30 +166,28 @@ id 格式为 `<source-name>/<skill-name>`，例如 `skills.sh/frontend-design`�
 ### 8.2 Source（安装源）— `~/.skillkit/sources.toml`
 
 ```toml
-[[source]]
-name = "skills.sh"
-type = "skills-sh"          # 走 npx skills 下载到 ~/.agents/skills/
+[[sources]]
+name = "skills.sh"            # registry 搜索入口（package 省略）
 
-[[source]]
+[[sources]]
 name = "team-private"
-type = "git"
-url = "git@github.com:org/team-skills.git"
-ref = "main"                 # 默认拉取分支或 tag
+package = "git@github.com:org/team-skills.git"
 
-[[source]]
+[[sources]]
 name = "dc"
-type = "git"
-url = "ssh://git@bitbucket.rd.800best.com:7999/datawarehouse/datacenter-skills.git"
-ref = "main"
-skills_dir = "skills"        # skill 在仓库的 skills/ 子目录下（一仓库多 skill）；省略=skill 在仓库根
+package = "ssh://git@bitbucket.rd.800best.com:7999/datawarehouse/datacenter-skills.git"
 
-[[source]]
+[[sources]]
 name = "my-local"
-type = "local"
-path = "~/my-skills"
+package = "~/my-skills"
 ```
 
-source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL，含私有仓库，依赖本地已配置的 SSH key 或 git credential）、`local`（本地路径）。`skills_dir`（可选，git/local 源）：skill 在仓库中的子目录，用于一个仓库含多个 skill 的场景（如团队 `datacenter-skills` 仓库 `skills/` 下有多个 skill）；省略时 skill 内容直接在仓库根。install 时按 `<skills_dir>/<skill-name>` 定位并平铺到 canonical，保持 Claude 可发现的单层结构（避免 `skills/` 中间层）。
+Source 极简成 `{name, package}`：
+
+- `name`：source 的本地别名，用作 skill id 前缀（`<source-name>/<skill-name>`）。
+- `package`：npx skills 的 source format 串——github shorthand（`owner/repo`）、完整 git url（`git@...` / `https://...` / `ssh://...`，含私有仓库，依赖本地 SSH key 或 git credential）、或本地路径。省略时表示 registry 搜索入口（skills.sh 默认源），install 时走 `npx skills find` 解析。
+
+所有 source 的下载统一走 `npx skills add <package>@<skill>`，skillkit 不区分类型、不自己 git clone/复制。skill 在仓库中的定位（一仓库多 skill）由 npx skills 的 `-s <skill>` 与其 discovery 规则接管，不再需要 `skills_dir`；`ref`（分支/tag）也不再支持——npx skills 不接受指定 ref，版本模型纯 lock-based（见 §8.3 `computed_hash`）。
 
 ### 8.3 Skill 元数据 — `~/.skillkit/registry.json`
 
@@ -198,28 +197,26 @@ source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL�
     "name": "frontend-design",
     "source": "skills.sh",
     "scope": "global",
-    "version": "1.2.0",
-    "commit_sha": "abc1234",
+    "computed_hash": "cfbc539377088ca7e44a813b30c306327385bbd973cd7a721e1743f60837dd62",
     "installed_at": "2026-07-29T10:00:00Z",
-    "canonical_path": "~/.agents/skills/frontend-design"
+    "canonical_path": "~/.skillkit/.agents/skills/frontend-design"
   },
   "team-private/tdd": {
     "name": "tdd",
     "source": "team-private",
     "scope": "local",
-    "version": "0.3.1",
-    "commit_sha": "def5678",
+    "computed_hash": "def5678...",
     "installed_at": "2026-07-29T10:05:00Z",
-    "canonical_path": "~/.skillkit/skills/tdd"
+    "canonical_path": "~/.skillkit/.agents/skills/tdd"
   }
 }
 ```
 
 字段说明：
 
-- `scope`：skill 固有属性，`global`（canonical 在 `~/.agents/skills/`）或 `local`（canonical 在 `~/.skillkit/skills/`）。由 `install` 时的 `--scope` 决定，存在 registry，不在 profile/project 重复。同一 skill 在 registry 只有一条记录、scope 固定，不能同时以 global 和 local 两个 scope 存在（单版本模型约束，见第 16 节）。
-- `commit_sha`：版本锁依据，用于冲突检测和可复现安装。
-- `canonical_path`：物理存储位置，apply 时 symlink/copy 的源头。
+- `scope`：落地意图。install 统一下载到 `~/.skillkit/.agents/skills/` 池子（canonical 不分 scope），scope 决定下载后是否立即 global 落地：`global` → 额外把池子 symlink 到 `~/.agents/skills/`（+ Claude `~/.claude/skills/` 桥接），立即可用；`local` → 只入池子，等 `project apply` 落到项目目录。由 install 的 `--scope` 决定（默认 local），存在 registry。
+- `computed_hash`：版本锁依据，源自 `~/.skillkit/skills-lock.json` 里 npx skills 记录的 `computedHash`（skill 内容 SHA-256）。用于冲突检测和升级漂移感知。不再用 git commit_sha（下载委托 npx skills 后 canonical 不是 git repo）。
+- `canonical_path`：物理存储位置，统一在 `~/.skillkit/.agents/skills/<skill>/`（skillkit 池子），apply 时 symlink/copy 的源头。
 
 ### 8.4 Profile（粗分类候选集）— `~/.skillkit/profiles/<name>.toml`
 
@@ -248,14 +245,14 @@ installed_skills = [
 ]
 
 [locked_shas]
-"skills.sh/frontend-design" = "abc1234"
+"skills.sh/frontend-design" = "cfbc539377088ca7e44a813b30c306327385bbd973cd7a721e1743f60837dd62"
 ```
 
 字段说明：
 
 - `applied_profiles`：组织维度，记录项目关联了哪些 profile，用于 GUI 分组展示和批量操作入口。
 - `installed_skills`：apply 的唯一事实依据，精确到每个 skill，是所应用 profile 候选集的子集选择。
-- `locked_shas`：项目上次 apply 时各 skill 的 commit_sha 快照（变更基线）。canonical 升级后与 registry.commit_sha 比对，用于检测漂移和提示受影响项目。**注意：单版本模型下 canonical 物理只有一份，此字段不是多版本锁**——它无法让项目停在旧版本，作用是让 canonical 的变更被感知（见 §10.3）。
+- `locked_shas`：项目上次 apply 时各 skill 的 computed_hash 快照（变更基线）。canonical 升级后与 registry.computed_hash 比对，用于检测漂移和提示受影响项目。**注意：单版本模型下 canonical 物理只有一份，此字段不是多版本锁**——它无法让项目停在旧版本，作用是让 canonical 的变更被感知（见 §10.3）。
 
 ## 9. Profile 与 Project 的分工
 
@@ -295,9 +292,9 @@ apply 按 skill 的 scope 分两条路径：
 输入: project.toml 的 installed_skills + agents
   │
   ▼
-1. 解析 installed_skills，查 registry 得每个 skill 的 scope + canonical_path + commit_sha
+1. 解析 installed_skills，查 registry 得每个 skill 的 scope + canonical_path + computed_hash
    ├─ skill 未安装 → 报错，提示先 skillkit install <id>
-   └─ locked_shas[id] 与 registry.commit_sha 不一致 → 标记版本冲突
+   └─ locked_shas[id] 与 registry.computed_hash 不一致 → 标记版本冲突
   │
   ▼
 2. 计算目标状态：每个 agent 应有哪些 skill 落地
@@ -339,7 +336,7 @@ skillkit source list [--json]
 skillkit source remove <name>
 
 # skill 安装到 canonical
-skillkit install <id> [--scope global|local]      # global→~/.agents/skills/, local→~/.skillkit/skills/
+skillkit install add <source> <skill> [--scope global|local]   # global→symlink ~/.agents/skills/, local→入池子等 project apply
 skillkit uninstall <id>
 skillkit upgrade <id> | --all
 skillkit list [--scope global|local] [--json]
@@ -403,7 +400,7 @@ GUI 价值是总览和可视化配置，CLI 价值是 AI agent 操作和脚本�
 | skill 未安装就 add-skill/apply | 报错并提示 `skillkit install <id>`，绝不静默跳过 |
 | dangling symlink 或 canonical 丢失 | apply 时检测，重建或提示重装 |
 | 版本冲突（多项目锁不同版本） | 列出受影响项目，`--frozen` 报错退出，默认交互决策 |
-| Cursor copy 副本过期 | canonical 内嵌 commit_sha 标记，apply 时比对，过期则重新 copy |
+| Cursor copy 副本过期 | canonical 内嵌 computed_hash 标记，apply 时比对，过期则重新 copy |
 | CLI 与 web server 并发写 | 文件锁粒度到单个文件（registry 一把、每个 project 各一把），互不阻塞；读操作（status/list）不抢锁；写锁带超时，超时按冲突报错而非死等 |
 | 项目目录无写权限 | 报错退出，不降级静默 |
 | local 与 shared 同名 | shared（已在 git）优先，local 跳过落地并警告，列出冲突 skill |

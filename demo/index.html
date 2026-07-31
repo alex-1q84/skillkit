@@ -291,7 +291,7 @@
   <section class="view" id="view-sources">
     <div class="page-head">
       <h1>Sources</h1>
-      <span class="desc">skill 安装源注册表 · 类型 / 地址 / ref</span>
+      <span class="desc">skill 安装源注册表 · name / package</span>
     </div>
     <div id="sources-list"></div>
   </section>
@@ -305,7 +305,7 @@
     <div class="toolbar" id="skills-filter"></div>
     <table>
       <thead><tr>
-        <th>id</th><th>scope</th><th>version</th><th>commit_sha</th><th>source</th><th>canonical_path</th><th></th>
+        <th>id</th><th>scope</th><th>version</th><th>computed_hash</th><th>source</th><th>canonical_path</th><th></th>
       </tr></thead>
       <tbody id="skills-body"></tbody>
     </table>
@@ -340,9 +340,9 @@ const SKILLS = {
 };
 
 const SOURCES = [
-  { name:'skills.sh',   type:'skills-sh', detail:'skills.sh 生态', ref:'—', skills:['frontend-design','dataviz','canvas-design','logseq-usage','old-thing'] },
-  { name:'team-private', type:'git',      detail:'git@github.com:org/team-skills.git', ref:'main', skills:['tdd','api-spec','code-review'] },
-  { name:'my-local',     type:'local',    detail:'~/my-skills', ref:'—', skills:[] },
+  { name:'skills.sh',    package:null,                                  skills:['frontend-design','dataviz','canvas-design','logseq-usage','old-thing'] },
+  { name:'team-private', package:'git@github.com:org/team-skills.git',  skills:['tdd','api-spec','code-review'] },
+  { name:'my-local',     package:'~/my-skills',                          skills:[] },
 ];
 
 const PROFILES = [
@@ -407,8 +407,7 @@ function renderSources(){
     <div class="src-card">
       <div class="top">
         <span class="nm">${s.name}</span>
-        ${tag('type', s.type)}
-        <span class="meta">${s.detail}${s.ref!=='—' ? ' · ref='+s.ref : ''} · ${s.skills.length} skills</span>
+        <span class="meta">${s.package || '（registry 搜索入口）'} · ${s.skills.length} skills</span>
       </div>
       <div class="kids">
         ${s.skills.map(k => `<div class="k">${k}</div>`).join('') || '<div class="k" style="color:var(--ink-3)">（空）</div>'}

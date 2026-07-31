@@ -39,7 +39,7 @@ M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目�
 
 - **`~/.agents/skills/` 只放全局公共 skill**：绝不挪用为项目级暂存，绝不往里写 `.registry.json` 之类元数据文件（会被 Cursor/OpenCode/Codex/Gemini 等误扫描）。违反即污染通用加载目录。
 - **元数据统一收 `~/.skillkit/`**：config / sources / registry / profiles / projects / lock 全在此目录下。
-- **单版本模型**：canonical 物理存储只有一份，版本信息记在 registry 的 `commit_sha` 和 project 的 `locked_shas` 里。不为多版本预先分目录（YAGNI，spec §16 预留升级路径）。
+- **单版本模型**：canonical 物理存储只有一份，版本信息记在 registry 的 `computed_hash` 和 project 的 `locked_shas` 里（源自 npx skills 的 skills-lock.json）。不为多版本预先分目录（YAGNI，spec §16 预留升级路径）。
 - **项目 shared skill 只读发现**：扫描展示即可，不安装/升级/卸载——它由项目 git 自己管。
 - **跨实体用 id 引用**：id = `<source-name>/<skill-name>`，source/scope/version 等信息只在 registry 存一份，profile/project 只存 id 列表（DRY）。
 - **agent 能力配置驱动**：是否支持 symlink、是否直读 `~/.agents/skills/` 声明在 `config.toml`，新增 agent 只改配置不改代码。

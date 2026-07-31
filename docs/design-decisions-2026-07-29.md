@@ -5,6 +5,8 @@
 
 ## 决策 1：独立实现核心，npx skills 只做下载
 
+> ⚠️ 下载环节已被**决策 13**取代：从「skills.sh 走 npx skills + 私有/本地自研 git clone」收敛为「全部委托 npx skills」。核心逻辑（版本/profile/项目/落地）仍由 skillkit 独立实现，此点不变。
+
 **背景**：需要 profile 隔离、项目级管理、跨 agent 同步，这些 npx skills 都不支持。
 
 **决策**：skillkit 独立实现 skill 引擎的全部核心逻辑（版本管理、profile、项目、落地）。npx skills 只保留一个职责——从 skills.sh 源下载 skill 到 `~/.agents/skills/`。
@@ -39,7 +41,7 @@
 
 **决策**：canonical 集中存一份物理副本，agent 目录放 symlink（或对不支持 symlink 的 agent 用 copy）。版本锁作为元数据记录，不为多版本预先实现物理分目录。
 
-**理由**：与现状（opencli-* 的 symlink 模式）一致，零迁移摩擦；单版本 + 元数据锁已能满足"记录和锁定版本"（记录 commit_sha，升级时校验）。skill 是指令集，版本兼容性问题比软件库轻，多版本并存是 YAGNI。
+**理由**：与现状（opencli-* 的 symlink 模式）一致，零迁移摩擦；单版本 + 元数据锁已能满足"记录和锁定版本"（记录 computed_hash，升级时校验）。skill 是指令集，版本兼容性问题比软件库轻，多版本并存是 YAGNI。
 
 **否定的备选**：
 - 多版本并存（canonical 按版本分目录 `~/.skillkit/skills/<skill>/<version>/`）：支持同 skill 多版本并行，但占空间、元数据和升级逻辑复杂，当前无此需求。预留升级路径，未来需要时不破坏现有抽象。
@@ -50,14 +52,14 @@
 
 **决策**：`~/.agents/skills/` 专属全局公共 skill，绝不挪用为项目级暂存，元数据也不放进去。所有 skillkit 元数据统一收 `~/.skillkit/`。
 
-**理由**：挪用通用加载目录会污染其他 agent 的 skill 视图，混淆 local/shared 边界。把全局公共 canonical 选在 `~/.agents/skills/` 本身就让 Cursor 等零配置可用（直接读），只有 Claude 需要 symlink 桥接（Claude 不直接读 .agents）。这一约束也促使项目 local canonical 从"每项目各放一份"改为集中到 `~/.skillkit/skills/`。
+**理由**：挪用通用加载目录会污染其他 agent 的 skill 视图，混淆 local/shared 边界。把全局公共 canonical 选在 `~/.agents/skills/` 本身就让 Cursor 等零配置可用（直接读），只有 Claude 需要 symlink 桥接（Claude 不直接读 .agents）。这一约束也促使项目 local canonical 从"每项目各放一份"改为集中到 `~/.skillkit/.agents/skills/`（npx skills 直接写入的标准布局）。
 
 ## 决策 6：项目 skill 分 local / shared 两类，shared 不由 skillkit 管
 
 **背景**：项目里有的 skill 要入仓库随团队分发，有的要共享但不入仓库。
 
 **决策**：
-- local（不入库）：canonical 集中在 `~/.skillkit/skills/`，与 shared 同级平铺落地到 `<project>/<agent>/skills/<skill>/`（symlink 或 copy），git 忽略走 `<project>/.git/info/exclude`（本地不入库）。
+- local（不入库）：canonical 集中在 `~/.skillkit/.agents/skills/`，与 shared 同级平铺落地到 `<project>/<agent>/skills/<skill>/`（symlink 或 copy），git 忽略走 `<project>/.git/info/exclude`（本地不入库）。
 - shared（入库）：真实文件直接在 `<project>/<agent>/skills/`，git 提交，skillkit 只做只读发现，不安装/升级/卸载。
 
 **理由**：shared skill 既然在 git 里，项目自身（git + 团队约定）已经在管理它，skillkit 重复管是多余，违反最小改动和 YAGNI。skillkit 对 shared 只需能看到清单，方便与 local 对照展示。
@@ -116,3 +118,16 @@
 - 维持 `local/` 子目录：Claude 不发现，直接失效。
 - 平铺 + 项目 `.gitignore` 动态清单：清单入库，团队成员 local 不同导致提交冲突。
 - 取消 local 物理隔离、全部装全局池（方案 B）：消除整套落地复杂度，但放弃 per-project 精确控制，与 spec §2"精确到逐个 skill 指定"目标相悖，未采纳。
+
+## 决策 13：source 模型收敛——统一走 npx skills
+
+**背景**：M0 实现 skills.sh 源时偷懒用 git clone 顶替 npx skills（`install.rs` 把 `SkillsSh` 和 `Git` 合并走 `fetch_git`），`SourceType` 三分（skills-sh/git/local）实际是死区分。自研 git clone 要维护 `git.rs`，而 npx skills 本就支持 github shorthand / git url / local path 三种 source format。
+
+**决策**：所有 source 的下载统一委托 `npx skills add <package>`（package 用 npx skills 的 source format）。skillkit 不再自己 git clone/复制，删 `git.rs`。`Source` 极简成 `{name, package}`，skills.sh 降级为默认预置源（registry 搜索入口，无固定 package）。canonical 池子从 `~/.skillkit/skills/` 改到 `~/.skillkit/.agents/skills/`（npx skills project scope 在 `cwd=~/.skillkit/` 直接写入），`skills-lock.json` 的 `computedHash` 取代 `commit_sha` 做版本锁。
+
+**理由**：消除死区分（SourceType）、删自研下载层（`git.rs` + `fetch_git`/`fetch_local`）、复用 npx skills 的安全扫描和 source 解析。两个目录职责分离：池子（install 落点）vs 落地点（apply 后 agent 直读），不污染 home 根的 `~/.agents/skills/`。代价：删 `ref`/`skills_dir` 字段，不能锁分支/tag，版本纯 lock-based（computedHash + `npx skills update`）——可接受，npx skills 本就不支持指定 ref。
+
+**否定的备选**：
+- 保留三分类型 + 自研 git clone：死区分 + 维护两套下载逻辑，spec 设想的 npx skills 路径从没真用。
+- 隔离收割（临时目录跑 npx skills 再搬到 `~/.skillkit/skills/`）：搬运依赖 npx skills 输出结构，脆弱；npx skills 状态丢失，升级要重走临时流程。
+- skills.sh 默认源指向固定仓库（如 vercel-labs/agent-skills）：skills.sh 是 registry 不是单仓库，固定仓库漏掉生态里其他 package 的 skill。
