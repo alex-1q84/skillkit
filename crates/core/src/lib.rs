@@ -12,6 +12,7 @@ pub mod project;
 pub mod registry;
 pub mod source;
 pub mod symlink;
+pub mod upgrade;
 
 pub use apply::{
     build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, LocalTarget,
@@ -28,3 +29,4 @@ pub use project::{list_ids as list_project_ids, Project};
 pub use registry::{Registry, Scope, SkillMeta};
 pub use source::{derive_source_name, Source, SourcesStore};
 pub use symlink::ensure_global_claude;
+pub use upgrade::{upgrade_all, upgrade_skill, UpgradeReport};
