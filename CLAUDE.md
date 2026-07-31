@@ -9,7 +9,7 @@ skillkit 是 AI agent skill 的统一管理工具：设定安装源、记录并�
 ## 2. 技术栈
 
 - Rust（edition 2021）+ Axum，单二进制。
-- 前端 React + Vite，构建产物经 `rust-embed` 嵌入二进制。
+- 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程。
 - 分发：纳入 mac-config Brewfile（与 cx/rtk 工具链一致）。
 
 ## 3. 架构（三层共享 core）
@@ -26,13 +26,12 @@ skillkit/
   crates/
     core/                 # package: skillkit-core（lib）—— 全部业务逻辑
     cli/                  # package: skillkit-cli，binary name: skillkit —— 薄壳调 core
-    server/               # package: skillkit-server（M2 才创建）—— Axum + rust-embed
-  web/                    # M2 才创建：React + Vite 前端源码
+    server/               # package: skillkit-server（M2 才创建）—— Axum + Askama 模板 + rust-embed 静态
   docs/                   # 设计文档 + sessions/ 交接材料
   CLAUDE.md
 ```
 
-M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免空目录。
+M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目录。
 
 ## 5. 不可违反的约束（代码层硬约束）
 

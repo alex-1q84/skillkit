@@ -43,7 +43,7 @@
 
 ## 3. 总体架构
 
-技术栈：Rust + Axum，编译为单二进制。核心库（`core` crate）承载全部业务逻辑，CLI 和 web server 两个入口共享核心，无重复逻辑。前端用 React + Vite 构建，产物经 `rust-embed` 嵌入二进制，分发仍是单文件。
+技术栈：Rust + Axum，编译为单二进制。核心库（`core` crate）承载全部业务逻辑，CLI 和 web server 两个入口共享核心，无重复逻辑。前端用 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽排序），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程，分发仍是单文件。
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -387,8 +387,8 @@ AI agent 友好性：
 
 技术细节：
 
-- 前端 React + Vite，构建产物 `rust-embed` 嵌入二进制。
-- 后端 Axum REST API + SSE 推送（apply 进度、status 变化实时刷新）。
+- 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源 `rust-embed` 嵌入二进制，无独立前端工程。
+- 后端 Axum + SSE 推送（notify 监听 `~/.skillkit/` 变化，CLI 在另一进程改状态时浏览器视图自动刷新；apply 同步返回结果不走 SSE）。
 - localhost 绑定 + 随机 token 防其他进程误访问，无需登录。
 
 GUI 价值是总览和可视化配置，CLI 价值是 AI agent 操作和脚本化，两者共享 core 库保证数据一致。
