@@ -211,3 +211,39 @@ async fn profile_add_skill_then_reorder_persists() {
     let p = skillkit_core::Profile::load(&state.paths, "fe").unwrap();
     assert_eq!(p.skills, vec!["ab2".to_string(), "ab1".to_string()]);
 }
+
+#[tokio::test]
+async fn project_workspace_renders_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_root = dir.path().join("myproj");
+    std::fs::create_dir_all(&proj_root).unwrap();
+    let proj = skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "myproj".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec!["demo/logseq".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    };
+    proj.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/projects/ABCDEF12")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("myproj"));
+    assert!(body.contains("demo/logseq"));
+}

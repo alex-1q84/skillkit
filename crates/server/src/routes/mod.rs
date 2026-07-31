@@ -5,6 +5,7 @@ use axum::Router;
 use crate::AppState;
 
 pub mod profiles;
+pub mod projects;
 pub mod skills;
 pub mod sources;
 
@@ -26,4 +27,6 @@ pub fn protected() -> Router<AppState> {
             delete(profiles::remove_skill),
         )
         .route("/{token}/profiles/{name}/reorder", post(profiles::reorder))
+        .route("/{token}/projects", get(projects::list))
+        .route("/{token}/projects/{id}", get(projects::workspace))
 }

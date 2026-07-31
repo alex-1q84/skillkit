@@ -215,6 +215,27 @@ fn scan_local_landed(project_root: &Path, agent: &str, skm_skills: &Path) -> Res
     Ok(found)
 }
 
+/// 扫描项目 agents 的 skills 目录下 shared skill（真实目录，非 skillkit 管的 local）。
+/// shared 由项目 git 管理，skillkit 只读展示，不安装/升级/卸载。
+pub fn scan_shared(project_root: &Path, agents: &[String]) -> Vec<String> {
+    let mut found = Vec::new();
+    for agent in agents {
+        let dir = project_root.join(format!(".{}/skills", agent_dir_name(agent)));
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            // 真实目录、非 symlink、无 skillkit-local 标记 → shared
+            if p.is_dir() && !p.is_symlink() && !p.join(".skillkit-sha").exists() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                found.push(format!("{agent}/{name}"));
+            }
+        }
+    }
+    found
+}
+
 /// apply 主流程：global ensure + local 落地 + extra 清理 + locked_shas 更新 + --frozen 冲突。
 pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<ApplyReport> {
     let registry = Registry::load(paths)?;

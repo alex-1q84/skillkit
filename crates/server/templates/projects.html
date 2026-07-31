@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>Projects</h1>
+<ul>
+  {% for p in projects %}
+  <li><a href="/{{ token }}/projects/{{ p.id }}">{{ p.name }}</a> — {{ p.path }} ({{ p.installed_skills.len() }} skills)</li>
+  {% endfor %}
+</ul>
+{% endblock %}

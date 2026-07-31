@@ -12,7 +12,10 @@ pub mod registry;
 pub mod source;
 pub mod symlink;
 
-pub use apply::{compute_diff, ApplyDiff, LocalTarget};
+pub use apply::{
+    build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, LocalTarget,
+    StatusView,
+};
 pub use error::{Result, SkillkitError};
 pub use install::{install, uninstall};
 pub use lock::FileLock;
