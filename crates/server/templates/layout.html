@@ -16,5 +16,14 @@
     <a href="/{{ token }}/profiles">Profiles</a>
   </nav>
   <main>{% block content %}{% endblock %}</main>
+  <script>
+    // 局部 swap 后幂等重初始化 Sortable（data-sortable 标记防重复）
+    document.body.addEventListener('htmx:afterSettle', () => {
+      document.querySelectorAll('.sortable:not([data-sortable])').forEach((el) => {
+        el.setAttribute('data-sortable', '1');
+        new Sortable(el, { animation: 150 });
+      });
+    });
+  </script>
 </body>
 </html>

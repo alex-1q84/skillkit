@@ -157,3 +157,57 @@ async fn skills_page_lists_registry() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(common::body_string(resp).await.contains("demo/skill"));
 }
+
+#[tokio::test]
+async fn profile_add_skill_then_reorder_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: Vec::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    for body in ["id=ab1", "id=ab2"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/test-token/profiles/fe/skills")
+                    .header(
+                        axum::http::header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/profiles/fe/reorder")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("order=ab2&order=ab1"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let p = skillkit_core::Profile::load(&state.paths, "fe").unwrap();
+    assert_eq!(p.skills, vec!["ab2".to_string(), "ab1".to_string()]);
+}

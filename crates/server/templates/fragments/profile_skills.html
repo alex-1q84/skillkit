@@ -1,0 +1,10 @@
+<ul class="sortable" id="skills-{{ profile.name }}"
+    hx-post="/{{ token }}/profiles/{{ profile.name }}/reorder"
+    hx-trigger="end" hx-target="this" hx-swap="outerHTML">
+  {% for id in profile.skills %}
+  <li><input type="hidden" name="order" value="{{ id }}">{{ id }}
+    <button class="x" hx-delete="/{{ token }}/profiles/{{ profile.name }}/skills/{{ id }}"
+            hx-target="closest ul" hx-swap="outerHTML">×</button>
+  </li>
+  {% endfor %}
+</ul>
