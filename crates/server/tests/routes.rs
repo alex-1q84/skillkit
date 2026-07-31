@@ -120,3 +120,40 @@ async fn sources_page_lists_sources() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(common::body_string(resp).await.contains("demo"));
 }
+
+#[tokio::test]
+async fn skills_page_lists_registry() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "demo/skill".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "demo/skill".into(),
+            name: "skill".into(),
+            source: "demo".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            commit_sha: None,
+            installed_at: "2026-07-31".into(),
+            canonical_path: "/x".into(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(common::body_string(resp).await.contains("demo/skill"));
+}
