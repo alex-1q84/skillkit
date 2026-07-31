@@ -24,10 +24,11 @@
         new Sortable(el, { animation: 150 });
       });
     });
-    // SSE：CLI 在另一进程改了 ~/.skillkit/ 时，浏览器当前页 main 自动刷新
+    // SSE：CLI 在另一进程改了 ~/.skillkit/ 时，浏览器当前页 main 自动刷新。
+    // select: 'main' 让 htmx 只提取响应的 main 元素，避免完整页面的 nav 被塞进 main 造成导航重复。
     var es = new EventSource('/{{ token }}/events');
     es.addEventListener('changed', function () {
-      htmx.ajax('GET', location.pathname, { target: 'main', swap: 'outerHTML' });
+      htmx.ajax('GET', location.pathname, { target: 'main', swap: 'outerHTML', select: 'main' });
     });
   </script>
 </body>
