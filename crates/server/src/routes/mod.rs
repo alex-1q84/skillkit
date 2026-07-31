@@ -1,6 +1,7 @@
 //! 受保护路由装配（/{token}/ 前缀）。各视图 handler 在子模块。
 use axum::routing::{delete, get, post};
 use axum::Router;
+use serde::Deserialize;
 
 use crate::AppState;
 
@@ -9,6 +10,19 @@ pub mod projects;
 pub mod skills;
 pub mod sources;
 pub mod sse;
+
+/// 页面 GET 的 query：?fragment=1 时返回纯 main 内容（SSE 刷新用），
+/// 否则返回完整页（含 nav 的 layout）。保证 SSE 刷新响应不含 nav，防导航重复。
+#[derive(Debug, Default, Deserialize)]
+pub struct FragmentQuery {
+    pub fragment: Option<String>,
+}
+
+impl FragmentQuery {
+    pub fn is_fragment(&self) -> bool {
+        self.fragment.as_deref() == Some("1")
+    }
+}
 
 pub fn protected() -> Router<AppState> {
     Router::new()

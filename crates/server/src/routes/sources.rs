@@ -8,6 +8,7 @@ use serde::Deserialize;
 use skillkit_core::source::Source;
 use skillkit_core::SourcesStore;
 
+use crate::routes::FragmentQuery;
 use crate::AppState;
 
 #[derive(Template)]
@@ -17,18 +18,38 @@ pub struct SourcesTpl<'a> {
     pub sources: Vec<Source>,
 }
 
-pub async fn page(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    render_sources(state, token)
+/// 纯 main 内容片段（SSE 刷新用），不含 nav，防导航重复。
+#[derive(Template)]
+#[template(path = "fragments/sources_main.html")]
+pub struct SourcesMainTpl<'a> {
+    pub token: &'a str,
+    pub sources: Vec<Source>,
 }
 
-fn render_sources(state: AppState, token: String) -> Response {
+pub async fn page(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<FragmentQuery>,
+) -> Response {
+    render_sources(state, token, q.is_fragment())
+}
+
+fn render_sources(state: AppState, token: String, fragment: bool) -> Response {
     match SourcesStore::load(&state.paths) {
         Ok(store) => {
-            let rendered = SourcesTpl {
-                token: &token,
-                sources: store.list().to_vec(),
-            }
-            .render();
+            let rendered = if fragment {
+                SourcesMainTpl {
+                    token: &token,
+                    sources: store.list().to_vec(),
+                }
+                .render()
+            } else {
+                SourcesTpl {
+                    token: &token,
+                    sources: store.list().to_vec(),
+                }
+                .render()
+            };
             render_str(rendered)
         }
         Err(e) => {
@@ -92,7 +113,7 @@ pub async fn add(
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    render_sources(state, token)
+    render_sources(state, token, false)
 }
 
 pub async fn remove(
@@ -104,7 +125,7 @@ pub async fn remove(
             if store.remove(&name).is_err() || store.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_sources(state, token)
+            render_sources(state, token, false)
         }
         Err(e) => {
             tracing::error!(error = ?e, "加载 sources 失败");

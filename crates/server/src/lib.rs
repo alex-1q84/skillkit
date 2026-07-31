@@ -2,7 +2,7 @@
 
 use askama::Template;
 use axum::{
-    extract::{Path, Request, State},
+    extract::{Path, Query, Request, State},
     http::{header, StatusCode},
     middleware::{from_fn_with_state, Next},
     response::{Html, IntoResponse, Response},
@@ -13,6 +13,7 @@ use rust_embed::RustEmbed;
 use skillkit_core::Paths;
 
 mod routes;
+use routes::FragmentQuery;
 
 /// 共享状态：注入的路径根 + 随机鉴权 token。
 #[derive(Clone)]
@@ -48,9 +49,18 @@ struct HomeTpl {
     token: String,
 }
 
-/// home 页：渲染 layout + nav。
-pub(crate) async fn home(Path(token): Path<String>) -> Response {
-    let rendered = HomeTpl { token }.render();
+/// 纯 main 内容片段（SSE 刷新用），不含 nav。
+#[derive(Template)]
+#[template(path = "fragments/home_main.html")]
+struct HomeMainTpl;
+
+/// home 页：渲染 layout + nav；?fragment=1 时只返回 main 内容（SSE 刷新用）。
+pub(crate) async fn home(Path(token): Path<String>, Query(q): Query<FragmentQuery>) -> Response {
+    let rendered = if q.is_fragment() {
+        HomeMainTpl.render()
+    } else {
+        HomeTpl { token }.render()
+    };
     match rendered {
         Ok(html) => Html(html).into_response(),
         Err(e) => {

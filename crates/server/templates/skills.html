@@ -1,25 +1,2 @@
 {% extends "layout.html" %}
-{% block content %}
-<h1>Skills</h1>
-<table class="data">
-  <thead><tr><th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th></tr></thead>
-  <tbody>
-  {% for (s, enc) in skills %}
-  <tr>
-    <td>{{ s.id }}</td>
-    <td>{{ s.scope }}</td>
-    <td>{{ s.source }}</td>
-    <td>{{ s.version.as_deref().unwrap_or("-") }}</td>
-    <td>{{ s.computed_hash.as_deref().unwrap_or("-") }}</td>
-    <td>
-      <form class="inline" hx-post="/{{ token }}/skills/{{ enc }}/install" hx-target="body" hx-swap="outerHTML">
-        <select name="scope"><option value="local">local</option><option value="global">global</option></select>
-        <button>install</button>
-      </form>
-      <button class="x" hx-delete="/{{ token }}/skills/{{ enc }}" hx-target="body" hx-swap="outerHTML">×</button>
-    </td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endblock %}
+{% block content %}{% include "fragments/skills_main.html" %}{% endblock %}

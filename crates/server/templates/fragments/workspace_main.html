@@ -1,0 +1,24 @@
+<h1>{{ project.name }}</h1>
+<p>{{ project.path }} · agents: {{ project.agents.join(", ") }}</p>
+
+<div class="workspace">
+  <section class="col">
+    <h2>installed_skills ({{ project.installed_skills.len() }})</h2>
+    <ul>{% for id in project.installed_skills %}<li>{{ id }}</li>{% endfor %}</ul>
+    <form hx-post="/{{ token }}/projects/{{ project.id }}/skills" hx-target="#status-panel" hx-swap="outerHTML">
+      {% for (meta, checked) in all_skills %}
+      <label><input type="checkbox" name="skills" value="{{ meta.id }}"{% if checked %} checked{% endif %}>
+        {{ meta.id }} [{{ meta.scope }}]</label><br>
+      {% endfor %}
+      <button>update</button>
+      <button class="apply" hx-post="/{{ token }}/projects/{{ project.id }}/apply" hx-target="#status-panel" hx-swap="outerHTML">▶ APPLY</button>
+    </form>
+  </section>
+
+  <section class="col">
+    <h2>shared（只读 · git 管）</h2>
+    <ul>{% for s in shared %}<li>{{ s }}</li>{% else %}<li>—</li>{% endfor %}</ul>
+  </section>
+
+  {% include "fragments/status.html" %}
+</div>

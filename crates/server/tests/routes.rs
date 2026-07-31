@@ -118,6 +118,48 @@ async fn sources_page_lists_sources() {
 }
 
 #[tokio::test]
+async fn fragment_response_is_main_content_only() {
+    // 契约：?fragment=1 返回纯 main 内容（不含 nav），SSE 刷新用它，防导航重复。
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    for path in [
+        "/test-token?fragment=1",
+        "/test-token/sources?fragment=1",
+        "/test-token/skills?fragment=1",
+        "/test-token/profiles?fragment=1",
+        "/test-token/projects?fragment=1",
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path} 应 200");
+        let body = common::body_string(resp).await;
+        assert!(!body.contains("<nav"), "{path} 片段不应含导航栏");
+        assert!(
+            !body.contains("htmx.min.js"),
+            "{path} 片段不应含 layout 脚本"
+        );
+    }
+    // 对照：不带 fragment 的正常页含 nav。
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/sources")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(common::body_string(resp).await.contains("<nav"));
+}
+
+#[tokio::test]
 async fn skills_page_lists_registry() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {

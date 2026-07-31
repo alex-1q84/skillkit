@@ -1,7 +1,7 @@
 //! Profiles 视图：列表 + create + add/remove skill + SortableJS 拖拽排序。
 use askama::Template;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
@@ -9,11 +9,20 @@ use form_urlencoded::parse;
 use serde::Deserialize;
 use skillkit_core::Profile;
 
+use crate::routes::FragmentQuery;
 use crate::AppState;
 
 #[derive(Template)]
 #[template(path = "profiles.html")]
 pub struct ProfilesTpl<'a> {
+    pub token: &'a str,
+    pub profiles: Vec<Profile>,
+}
+
+/// 纯 main 内容片段（SSE 刷新用），不含 nav。
+#[derive(Template)]
+#[template(path = "fragments/profiles_main.html")]
+pub struct ProfilesMainTpl<'a> {
     pub token: &'a str,
     pub profiles: Vec<Profile>,
 }
@@ -25,11 +34,15 @@ pub struct ProfileSkillsTpl<'a> {
     pub profile: &'a Profile,
 }
 
-pub async fn page(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    render_profiles(state, token)
+pub async fn page(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<FragmentQuery>,
+) -> Response {
+    render_profiles(state, token, q.is_fragment())
 }
 
-fn render_profiles(state: AppState, token: String) -> Response {
+fn render_profiles(state: AppState, token: String, fragment: bool) -> Response {
     let mut profiles = Vec::new();
     if let Ok(names) = skillkit_core::list_profile_names(&state.paths) {
         for n in names {
@@ -38,11 +51,19 @@ fn render_profiles(state: AppState, token: String) -> Response {
             }
         }
     }
-    let rendered = ProfilesTpl {
-        token: &token,
-        profiles,
-    }
-    .render();
+    let rendered = if fragment {
+        ProfilesMainTpl {
+            token: &token,
+            profiles,
+        }
+        .render()
+    } else {
+        ProfilesTpl {
+            token: &token,
+            profiles,
+        }
+        .render()
+    };
     render_str(rendered)
 }
 
@@ -64,7 +85,7 @@ pub async fn create(
     if p.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    render_profiles(state, token)
+    render_profiles(state, token, false)
 }
 
 #[derive(Deserialize)]

@@ -37,7 +37,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ## 2. 本会话累积的改动（newest first）
 
-12. **Sources GUI 改进**（本会话）：① `ensure_default` 语义改为「skills.sh 缺失即补回」（覆盖「删了不加回」，修空文件 `sources = []` 时 GUI 空白 bug，决策 14）；② 新增 `derive_source_name`（shorthand/scp-style/url/local path 四形态取末段 + 剥 .git/尾斜杠），CLI `source add <package> [--name]`（**有意的破坏性参数序变更**）、GUI 表单 package 输入实时预览推导名（htmx 调 `/sources/preview` 服务端推导，前端零规则副本；name 手动编辑后停用预览）。决策 15。测试 51 全绿（core 33 + cli + server 18）。
+12. **Sources GUI 改进 + SSE 片段化**（本会话）：① `ensure_default` 语义改为「skills.sh 缺失即补回」（覆盖「删了不加回」，修空文件 `sources = []` 时 GUI 空白 bug，决策 14）；② 新增 `derive_source_name`（shorthand/scp-style/url/local path 四形态取末段 + 剥 .git/尾斜杠），CLI `source add <package> [--name]`（**有意的破坏性参数序变更**）、GUI 表单 package 输入实时预览推导名（htmx 调 `/sources/preview` 服务端推导，前端零规则副本；name 手动编辑后停用预览）。③ **SSE 刷新片段化**：修删除 source 后导航重复 bug——各视图 main 内容提成 `fragments/*_main.html`，页面模板薄壳 include，page handler 支持 `?fragment=1` 返回纯 main 内容，SSE 刷新请求它（响应不含 nav，从根上杜绝导航重复）+ 契约测试。决策 15。测试 52 全绿（core 33 + cli + server 19）。
 
 11. **source 模型收敛——统一走 npx skills**（前会话，`e918bc0`）：主人 5 轮反馈驱动。删 `SourceType`/`git.rs`；`Source`→`{name, package}`；下载全委托 npx skills（私有 git / local / github 统一 source format）；canonical 池子改 `~/.skillkit/.agents/skills/`；版本 `commit_sha`→`computed_hash`（读 skills-lock.json）；skills.sh 默认源=registry 搜索入口（find 交互选）；`SkillkitError::Git`→`Tool`。CLI `source add <name> <package>`（去类型参数）、`install add <source> <skill> [--scope]`（默认 local）。server SourceForm 单 package 输入框。文档同步（spec §4-§8.5 + §10/§11/§13 ripple、决策纪要追加**决策 13**、CLAUDE.md §5）。决策推理见 `docs/design-decisions-2026-07-29.md` 决策 13。
 

@@ -1,12 +1,13 @@
 //! Skills 视图：registry 总览 + install/uninstall。
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
 use skillkit_core::{registry::SkillMeta, Registry, Scope, SourcesStore};
 
+use crate::routes::FragmentQuery;
 use crate::AppState;
 
 #[derive(Template)]
@@ -17,11 +18,23 @@ pub struct SkillsTpl<'a> {
     pub skills: Vec<(SkillMeta, String)>,
 }
 
-pub async fn page(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    render_skills(state, token)
+/// 纯 main 内容片段（SSE 刷新用），不含 nav。
+#[derive(Template)]
+#[template(path = "fragments/skills_main.html")]
+pub struct SkillsMainTpl<'a> {
+    pub token: &'a str,
+    pub skills: Vec<(SkillMeta, String)>,
 }
 
-fn render_skills(state: AppState, token: String) -> Response {
+pub async fn page(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<FragmentQuery>,
+) -> Response {
+    render_skills(state, token, q.is_fragment())
+}
+
+fn render_skills(state: AppState, token: String, fragment: bool) -> Response {
     match Registry::load(&state.paths) {
         Ok(reg) => {
             let skills: Vec<(SkillMeta, String)> = reg
@@ -29,11 +42,19 @@ fn render_skills(state: AppState, token: String) -> Response {
                 .values()
                 .map(|m| (m.clone(), m.id.replace('/', "%2F")))
                 .collect();
-            let rendered = SkillsTpl {
-                token: &token,
-                skills,
-            }
-            .render();
+            let rendered = if fragment {
+                SkillsMainTpl {
+                    token: &token,
+                    skills,
+                }
+                .render()
+            } else {
+                SkillsTpl {
+                    token: &token,
+                    skills,
+                }
+                .render()
+            };
             render_str(rendered)
         }
         Err(e) => {
@@ -80,7 +101,7 @@ pub async fn install(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match skillkit_core::install(&state.paths, source, skill, &package, scope) {
-        Ok(_) => render_skills(state, token),
+        Ok(_) => render_skills(state, token, false),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -93,7 +114,7 @@ pub async fn uninstall(
     Path((token, id)): Path<(String, String)>,
 ) -> Response {
     match skillkit_core::uninstall(&state.paths, &id) {
-        Ok(()) => render_skills(state, token),
+        Ok(()) => render_skills(state, token, false),
         Err(e) => {
             tracing::error!(error = ?e, "uninstall 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

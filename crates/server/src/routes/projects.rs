@@ -1,7 +1,7 @@
 //! Projects 视图：列表 + 工作台（声明编辑 + apply 闭环；shared 只读）。
 use askama::Template;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use form_urlencoded::parse;
@@ -11,6 +11,7 @@ use skillkit_core::{
 };
 use std::path::Path as StdPath;
 
+use crate::routes::FragmentQuery;
 use crate::AppState;
 
 #[derive(Template)]
@@ -20,9 +21,29 @@ pub struct ProjectsTpl<'a> {
     pub projects: Vec<Project>,
 }
 
+/// 纯 main 内容片段（SSE 刷新用），不含 nav。
+#[derive(Template)]
+#[template(path = "fragments/projects_main.html")]
+pub struct ProjectsMainTpl<'a> {
+    pub token: &'a str,
+    pub projects: Vec<Project>,
+}
+
 #[derive(Template)]
 #[template(path = "project_workspace.html")]
 pub struct WorkspaceTpl<'a> {
+    pub token: &'a str,
+    pub project: &'a Project,
+    pub status: StatusView,
+    pub shared: Vec<String>,
+    /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
+    pub all_skills: Vec<(SkillMeta, bool)>,
+}
+
+/// 纯 main 内容片段（工作台 SSE 刷新用），不含 nav。
+#[derive(Template)]
+#[template(path = "fragments/workspace_main.html")]
+pub struct WorkspaceMainTpl<'a> {
     pub token: &'a str,
     pub project: &'a Project,
     pub status: StatusView,
@@ -45,7 +66,11 @@ pub struct ApplyResultTpl<'a> {
     pub report: ApplyReport,
 }
 
-pub async fn list(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+pub async fn list(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<FragmentQuery>,
+) -> Response {
     let mut projects = Vec::new();
     if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
         for id in ids {
@@ -54,17 +79,18 @@ pub async fn list(State(state): State<AppState>, Path(token): Path<String>) -> R
             }
         }
     }
-    render_list(token, projects)
+    render_list(token, projects, q.is_fragment())
 }
 
 pub async fn workspace(
     State(state): State<AppState>,
     Path((token, id)): Path<(String, String)>,
+    Query(q): Query<FragmentQuery>,
 ) -> Response {
     let Ok(proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    render_workspace(state, token, proj)
+    render_workspace(state, token, proj, q.is_fragment())
 }
 
 /// 全量替换 installed_skills（工作台勾选提交），返回刷新后的 status 片段。
@@ -126,7 +152,7 @@ pub async fn apply(
     render_str(rendered)
 }
 
-fn render_workspace(state: AppState, token: String, proj: Project) -> Response {
+fn render_workspace(state: AppState, token: String, proj: Project, fragment: bool) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
     let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
         expected: vec![],
@@ -147,14 +173,25 @@ fn render_workspace(state: AppState, token: String, proj: Project) -> Response {
             (m.clone(), installed)
         })
         .collect();
-    let rendered = WorkspaceTpl {
-        token: &token,
-        project: &proj,
-        status,
-        shared,
-        all_skills,
-    }
-    .render();
+    let rendered = if fragment {
+        WorkspaceMainTpl {
+            token: &token,
+            project: &proj,
+            status,
+            shared,
+            all_skills,
+        }
+        .render()
+    } else {
+        WorkspaceTpl {
+            token: &token,
+            project: &proj,
+            status,
+            shared,
+            all_skills,
+        }
+        .render()
+    };
     render_str(rendered)
 }
 
@@ -175,12 +212,20 @@ fn status_fragment(state: AppState, proj: Project) -> Response {
     render_str(rendered)
 }
 
-fn render_list(token: String, projects: Vec<Project>) -> Response {
-    let rendered = ProjectsTpl {
-        token: &token,
-        projects,
-    }
-    .render();
+fn render_list(token: String, projects: Vec<Project>, fragment: bool) -> Response {
+    let rendered = if fragment {
+        ProjectsMainTpl {
+            token: &token,
+            projects,
+        }
+        .render()
+    } else {
+        ProjectsTpl {
+            token: &token,
+            projects,
+        }
+        .render()
+    };
     render_str(rendered)
 }
 
