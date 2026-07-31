@@ -34,6 +34,16 @@ impl Paths {
         self.home.join(".claude").join("skills")
     }
 
+    /// Codex 历史私有目录（import-existing 扫描用；新设计下 agent 直读 ~/.agents/skills/）。
+    pub fn codex_skills_dir(&self) -> PathBuf {
+        self.home.join(".codex").join("skills")
+    }
+
+    /// Cursor 历史私有目录。
+    pub fn cursor_skills_dir(&self) -> PathBuf {
+        self.home.join(".cursor").join("skills")
+    }
+
     /// canonical 池子：所有 skill 集中存储（单版本），npx skills project scope 直接写入。
     pub fn skillkit_skills_dir(&self) -> PathBuf {
         self.skillkit_dir().join(".agents").join("skills")
@@ -101,6 +111,14 @@ mod tests {
         assert_eq!(
             p.projects_dir(),
             PathBuf::from("/tmp/fakehome/.skillkit/projects")
+        );
+        assert_eq!(
+            p.codex_skills_dir(),
+            PathBuf::from("/tmp/fakehome/.codex/skills")
+        );
+        assert_eq!(
+            p.cursor_skills_dir(),
+            PathBuf::from("/tmp/fakehome/.cursor/skills")
         );
     }
 }
