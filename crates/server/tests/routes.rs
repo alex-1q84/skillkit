@@ -14,3 +14,35 @@ async fn ping_returns_pong() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(common::body_string(resp).await, "pong");
 }
+
+#[tokio::test]
+async fn protected_route_rejects_wrong_token() {
+    let app = skillkit_server::app(common::test_state());
+    // 匹配 /{token} 路由但 token 错 → require_token 拒绝 → 404
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/wrong-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn protected_route_accepts_right_token() {
+    let app = skillkit_server::app(common::test_state());
+    // 匹配 /{token} 且 token 正确 → 放行 → home_placeholder 返回 200
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
