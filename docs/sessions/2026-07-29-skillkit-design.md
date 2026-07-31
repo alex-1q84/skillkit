@@ -1,8 +1,8 @@
-# skillkit 交接（2026-07-29 → 07-31，当前待办：M3 迁移打磨）
+# skillkit 交接（2026-07-29 → 08-01，M0-M3 全部完成）
 
 > 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：P3/P4 收尾完成并提交（`c28a3eb`）。下次接续 **M3 迁移打磨**（import-existing → upgrade → Brewfile）。
+> **当前阶段**：M0-M3 全部完成（import-existing / upgrade / unmanaged / justfile 打包，最终 commit `4ccba5c`）。下次接续 **基建债**（CI / README / Cargo.toml 元数据）。
 
 ## 1. 当前状态
 
@@ -26,7 +26,8 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 - **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256）。registry 字段名 computed_hash，`locked_shas` 值同步。
 - **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）；`--json` 时直接输出候选数组。
 - `SkillkitError::Git` → `Tool`。
-- 测试：60 全绿（core 34 + cli 3 + server 19 + m0_e2e 1 + m1_e2e 3）+ m0 两个 `#[ignore]` 端到端真跑 npx skills（手动跑）+ 前端 e2e 4 用例。clippy `pedantic -D warnings` 零 warning。
+- 测试：**78 全绿**（core 45 + cli 8 + server 21 + m0_e2e 1 + m1_e2e 3 + m3_e2e 1）+ 前端 e2e 4 用例。clippy `-D warnings` 零 warning。`#[ignore]` 端到端：m0 2 个 + m3 1 个真跑 npx skills（手动 `-- --ignored` 跑）。
+- **unmanaged skill**（M3）：存量目录无法溯源时以虚拟源 `unmanaged` 登记（`computed_hash=None`、scope=global），不可升级、uninstall 不删目录、GUI 角标标记。`import-existing` 扫描 `~/.agents/skills/` + `~/.claude/skills/`（跳 symlink）+ `~/.codex/skills/` + `~/.cursor/skills/`，可溯源（`.git`+remote）重装入池。
 
 ### 1.3 验证 flow
 
@@ -57,6 +58,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 - `skills-lock.json` 结构：`{version, skills: {<name>: {source, sourceType, skillPath, computedHash}}}`。github 有 `skillPath`，local 没有（source 直接是路径）。computedHash 是版本锁依据。
 - npx skills 自带安全扫描（Socket/Snyk）和 source 解析，skillkit 白嫖。
 - 其他命令：`npx skills find/update/remove/use`；`experimental_install`（从 skills-lock.json 恢复）是 M3 可用的重装原语。
+- **⚠️ `npx skills update` 对 local source skill 静默 no-op（M3 实测）**：local path 源的 skill 无 `skillPath`（lock 里 source 直接是路径），`update` 的 `updatable` 过滤只认有 `skillPath` 的远程源，local 的被归入 legacy 打印「No installed skills found matching」后跳过。结果：`skillkit upgrade` 对 local 源 skill 能跑通流程但 hash 不变（`806cba88 → 806cba88`）。github source 正常。已知限制，不是 skillkit bug。
 
 ### 3.2 既有 M0/M1 背景（不变量）
 
@@ -88,10 +90,10 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ├── CLAUDE.md / Cargo.toml / Makefile / rustfmt.toml
 ├── crates/
 │   ├── core/                  # skillkit-core（lib）—— 业务逻辑
-│   │   ├── src/{lib,paths,error,config,source,registry,npx,install,symlink,profile,project,apply,lock}.rs
-│   │   └── tests/{m0_e2e,m1_e2e}.rs            # m0 端到端 #[ignore] 真跑 npx skills
+│   │   ├── src/{lib,paths,error,config,source,registry,npx,install,import,upgrade,symlink,profile,project,apply,lock}.rs
+│   │   └── tests/{m0_e2e,m1_e2e,m3_e2e}.rs       # 端到端 #[ignore] 真跑 npx skills（m0 2 + m3 1）
 │   ├── cli/                   # skillkit-cli（bin）
-│   │   └── src/{main, commands/{source,install,profile,project,serve}}.rs
+│   │   └── src/{main, commands/{source,install,import,upgrade,profile,project,serve}}.rs
 │   └── server/                # skillkit-server（lib）—— Axum + Askama + rust-embed
 │       ├── src/{lib.rs, routes/{mod,sources,skills,profiles,projects,sse}.rs}
 │       ├── templates/{layout,home,sources,skills,profiles,projects,project_workspace}.html + fragments/
@@ -101,7 +103,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 └── docs/
     ├── 2026-07-29-skillkit-design.md          # spec（source 模型收敛后的权威）
     ├── design-decisions-2026-07-29.md         # 决策 13/14/15（source 收敛/默认源/名称推导）
-    ├── superpowers/...                        # M2 spec/plan
+    ├── superpowers/...                        # M2/M3 spec + plan
     └── sessions/2026-07-29-skillkit-design.md # 本交接
 ```
 
