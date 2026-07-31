@@ -2,6 +2,7 @@
 use std::path::PathBuf;
 
 /// 路径根。生产环境指向真实 $HOME，测试用任意目录注入。
+#[derive(Clone)]
 pub struct Paths {
     home: PathBuf,
 }
