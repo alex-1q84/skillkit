@@ -46,3 +46,26 @@ async fn protected_route_accepts_right_token() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn static_asset_served_with_content_type() {
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/static/app.css")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/css; charset=utf-8"
+    );
+}

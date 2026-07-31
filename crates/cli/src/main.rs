@@ -5,6 +5,7 @@ mod commands;
 use commands::install::{InstallCmd, UninstallCmd};
 use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
+use commands::serve::ServeCmd;
 use commands::source::SourceCmd;
 
 #[derive(Parser)]
@@ -26,6 +27,8 @@ enum Cmd {
     Profile(ProfileCmd),
     /// project 精确管理
     Project(ProjectCmd),
+    /// 本地 web GUI
+    Serve(ServeCmd),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -36,6 +39,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Uninstall(cmd) => commands::install::run_uninstall(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
         Cmd::Project(cmd) => commands::project::run(cmd)?,
+        Cmd::Serve(cmd) => commands::serve::run(cmd)?,
     }
     Ok(())
 }
