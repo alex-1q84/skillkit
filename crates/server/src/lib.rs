@@ -111,12 +111,12 @@ async fn require_token(State(state): State<AppState>, req: Request, next: Next) 
     next.run(req).await
 }
 
-/// 启动 web server：绑 127.0.0.1、生成随机 token、打印带 token 的 URL。
+/// 启动 web server：绑 127.0.0.1、生成 token（固定或随机）、打印带 token 的 URL。
 /// open=true 时用默认浏览器打开（listener 绑好后调，浏览器请求能立即连上）。
-pub async fn serve(port: u16, open: bool) -> anyhow::Result<()> {
+pub async fn serve(port: u16, open: bool, token: Option<String>) -> anyhow::Result<()> {
     let paths = Paths::production();
     skillkit_core::SourcesStore::ensure_default(&paths)?;
-    let token = uuid::Uuid::new_v4().simple().to_string();
+    let token = token.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let state = AppState {
         paths,
         token: token.clone(),
@@ -134,9 +134,9 @@ pub async fn serve(port: u16, open: bool) -> anyhow::Result<()> {
 }
 
 /// 同步入口（供 cli 直接调用，内部建 runtime）。
-pub fn run(port: u16, open: bool) -> anyhow::Result<()> {
+pub fn run(port: u16, open: bool, token: Option<String>) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(serve(port, open))
+    runtime.block_on(serve(port, open, token))
 }
 
 /// 用默认浏览器打开 URL（跨平台；失败只 warn 不影响 serve，用户可手动复制上方 URL）。

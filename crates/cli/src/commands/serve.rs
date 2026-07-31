@@ -9,8 +9,11 @@ pub struct ServeCmd {
     /// 不自动打开浏览器（脚本/CI 用）
     #[arg(long)]
     no_open: bool,
+    /// 固定鉴权 token（默认随机；e2e 用固定值）
+    #[arg(long)]
+    token: Option<String>,
 }
 
 pub fn run(cmd: ServeCmd) -> anyhow::Result<()> {
-    skillkit_server::run(cmd.port, !cmd.no_open)
+    skillkit_server::run(cmd.port, !cmd.no_open, cmd.token)
 }

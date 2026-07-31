@@ -118,6 +118,7 @@ make test         # 全量测试
 make build        # 编译
 make check        # 提交前一站式：format && lint && test
 make run ARGS="..."  # 跑最新 CLI（check 只 clippy check + test，不产出独立 bin；直接跑 target/debug/skillkit 会拿到旧 bin）
+make e2e             # 前端端到端（python playwright + chromium，真实浏览器；需空闲端口，不进 check）
 ```
 
 ## 10. Commit 规范

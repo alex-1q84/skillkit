@@ -12,3 +12,6 @@
 .vscode/
 *.swp
 *.swo
+
+# python e2e 缓存
+e2e/__pycache__/
