@@ -13,7 +13,7 @@ use tempfile::tempdir;
 
 fn install_local_bare(paths: &Paths, id: &str) {
     let skill = id.split('/').next_back().unwrap_or(id);
-    let canon = paths.skm_skills_dir().join(skill);
+    let canon = paths.skillkit_skills_dir().join(skill);
     std::fs::create_dir_all(&canon).unwrap();
     std::fs::write(canon.join("SKILL.md"), "# local\n").unwrap();
     let mut reg = Registry::load(paths).unwrap();

@@ -19,7 +19,7 @@ pub fn install(
 
     let canonical_dir = match scope {
         Scope::Global => paths.agents_skills_dir(),
-        Scope::Local => paths.skm_skills_dir(),
+        Scope::Local => paths.skillkit_skills_dir(),
     };
     let target = canonical_dir.join(skill_name);
     if target.exists() {

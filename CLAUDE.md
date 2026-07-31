@@ -16,7 +16,7 @@ skillkit 是 AI agent skill 的统一管理工具：设定安装源、记录并�
 
 - `core` crate 承载**全部业务逻辑**，CLI 和 server 都只是薄壳，不允许出现重复业务逻辑。
 - 进程模型：**无常驻 daemon**。CLI 直接调 core；`skillkit serve` 启 Axum 也直接调 core。状态实时性靠 core 写状态文件 + web 端 SSE 推送。
-- 并发写：CLI 与 server 同时写 `~/.skm/` 时用文件锁（`~/.skm/.lock`）串行化。
+- 并发写：CLI 与 server 同时写 `~/.skillkit/` 时用文件锁（`~/.skillkit/.lock`）串行化。
 
 ## 4. 目录结构（Cargo workspace）
 
@@ -39,7 +39,7 @@ M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免
 这几条是设计层面的不变量，代码里任何时候都不能破坏：
 
 - **`~/.agents/skills/` 只放全局公共 skill**：绝不挪用为项目级暂存，绝不往里写 `.registry.json` 之类元数据文件（会被 Cursor/OpenCode/Codex/Gemini 等误扫描）。违反即污染通用加载目录。
-- **元数据统一收 `~/.skm/`**：config / sources / registry / profiles / projects / lock 全在此目录下。
+- **元数据统一收 `~/.skillkit/`**：config / sources / registry / profiles / projects / lock 全在此目录下。
 - **单版本模型**：canonical 物理存储只有一份，版本信息记在 registry 的 `commit_sha` 和 project 的 `locked_shas` 里。不为多版本预先分目录（YAGNI，spec §16 预留升级路径）。
 - **项目 shared skill 只读发现**：扫描展示即可，不安装/升级/卸载——它由项目 git 自己管。
 - **跨实体用 id 引用**：id = `<source-name>/<skill-name>`，source/scope/version 等信息只在 registry 存一份，profile/project 只存 id 列表（DRY）。
@@ -72,7 +72,7 @@ M0 只建 `crates/core` + `crates/cli`。`server`、`web` 到 M2 再加，避免
 核心原则：**测试验证业务结果（apply 后项目能加载到正确 skill），不验证实现细节（调了哪个内部函数）**。业务逻辑变了测试应失败，否则就是测错了。
 
 - 单元测试：core 纯逻辑（registry 解析、profile 合并、diff 计算、冲突检测、id/project-id 生成）。
-- 集成测试：`tempfile::tempdir()` 模拟整个 `~/.skm` + `~/.agents` + 项目目录，跑 install → apply 全流程，断言 symlink/copy 正确落地。
+- 集成测试：`tempfile::tempdir()` 模拟整个 `~/.skillkit` + `~/.agents` + 项目目录，跑 install → apply 全流程，断言 symlink/copy 正确落地。
 - 多 agent 路径分别覆盖：Claude（symlink）和 Cursor（copy）两条。
 - 幂等测试：重复 apply 断言零变化。
 - 冲突场景：多项目锁不同版本、dangling symlink、源失效。

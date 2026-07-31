@@ -244,7 +244,7 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
     }
 
     // local 落地
-    let skm_skills = paths.skm_skills_dir();
+    let skm_skills = paths.skillkit_skills_dir();
     for target in &diff.expected {
         let supports_symlink = config
             .find_agent(&target.agent)
@@ -315,7 +315,7 @@ pub struct StatusView {
 /// 计算 status：expected/missing（结合现状）/extra（现状多出）/conflicts。
 pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Result<StatusView> {
     let project_root = Path::new(&project.path);
-    let skm_skills = paths.skm_skills_dir();
+    let skm_skills = paths.skillkit_skills_dir();
     let mut expected = Vec::new();
     let mut missing = Vec::new();
     for t in &diff.expected {
@@ -414,7 +414,7 @@ mod tests {
         let home = tmp.path();
         let project_root = home.join("proj");
         std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
-        let canon = home.join(".skm/skills/logseq");
+        let canon = home.join(".skillkit/skills/logseq");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
         let target = LocalTarget {
@@ -440,7 +440,7 @@ mod tests {
         let home = tmp.path();
         let project_root = home.join("proj");
         std::fs::create_dir_all(&project_root).unwrap();
-        let canon = home.join(".skm/skills/foo");
+        let canon = home.join(".skillkit/skills/foo");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "v1").unwrap();
         let t1 = LocalTarget {
@@ -467,7 +467,7 @@ mod tests {
 
     fn install_local_bare(paths: &Paths, id: &str, sha: &str) {
         let skill = id.split('/').next_back().unwrap_or(id);
-        let canon = paths.skm_skills_dir().join(skill);
+        let canon = paths.skillkit_skills_dir().join(skill);
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
         let mut reg = Registry::load(paths).unwrap();

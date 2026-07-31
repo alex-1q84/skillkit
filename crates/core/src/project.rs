@@ -1,4 +1,4 @@
-//! project（项目实例）—— ~/.skm/projects/<id>.toml。id 注册时随机生成、冻结；
+//! project（项目实例）—— ~/.skillkit/projects/<id>.toml。id 注册时随机生成、冻结；
 //! path/name 可变（rebind 重绑定）。installed_skills 是 apply 唯一依据，
 //! locked_shas 是上次 apply 的基线快照（非版本锁）。
 use crate::error::{atomic_write, Result, SkillkitError};

@@ -65,7 +65,7 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-进程模型：无常驻 daemon。CLI 直接调用 core 库执行；`skillkit serve` 启动 Axum web server，同样直接调用 core 库。CLI 与 web server 是两个独立进程，**状态实时性靠文件监听打通**：任一方写 `~/.skm/` 状态文件后，server 用 file watcher（`notify` crate）感知变化并经 SSE 推给浏览器，不依赖 CLI 主动通知 server、也不引入 daemon 生命周期管理。并发写同一配置时，用文件锁（`~/.skm/` 下的写时锁）避免冲突（锁粒度见 §13）。
+进程模型：无常驻 daemon。CLI 直接调用 core 库执行；`skillkit serve` 启动 Axum web server，同样直接调用 core 库。CLI 与 web server 是两个独立进程，**状态实时性靠文件监听打通**：任一方写 `~/.skillkit/` 状态文件后，server 用 file watcher（`notify` crate）感知变化并经 SSE 推给浏览器，不依赖 CLI 主动通知 server、也不引入 daemon 生命周期管理。并发写同一配置时，用文件锁（`~/.skillkit/` 下的写时锁）避免冲突（锁粒度见 §13）。
 
 选 Rust 的理由：CLI 会被 AI agent 高频调用（每次会话可能多次），单二进制毫秒级启动、零运行时依赖，且能纳入 mac-config 的 Brewfile 统一分发，与现有 cx/rtk 工具链一致。
 
@@ -74,7 +74,7 @@
 `npx skills` 仅承担一个职责：从 skills.sh 源下载 skill 到 `~/.agents/skills/`（即下载动作）。其余全部由 skillkit 独立实现：
 
 - skillkit 调用 `npx skills add <skills.sh 源> -g` 完成下载。
-- 下载后 skillkit 接管：登记到 `~/.skm/registry.json`，记录版本，按 profile 落地到各 agent 目录。
+- 下载后 skillkit 接管：登记到 `~/.skillkit/registry.json`，记录版本，按 profile 落地到各 agent 目录。
 - 非 skills.sh 源（私有 git、本地路径）由 skillkit 自己 `git clone` 或复制到 canonical 存储，不经 npx skills。
 
 skillkit 不依赖 npx skills 的内部状态，版本记录采用自己的 `registry.json` 格式（参考 Claude 插件 `installed_plugins.json` 的 `version` + `commit_sha` + `installed_at` 字段）。
@@ -86,7 +86,7 @@ skillkit 把 skill 分为三类，管理职责不同：
 | 类型 | canonical 存储 | skillkit 角色 |
 |------|------|------|
 | 全局公共 | `~/.agents/skills/` | 全权管理（源、版本、profile、apply） |
-| 项目 local | `~/.skm/skills/` | 全权管理（源、版本、profile、apply 到项目 local 目录） |
+| 项目 local | `~/.skillkit/skills/` | 全权管理（源、版本、profile、apply 到项目 local 目录） |
 | 项目 shared | `<project>/<agent>/skills/` | 只读发现（扫描展示，与 local 对照，不安装/升级/卸载） |
 
 语义说明：
@@ -99,12 +99,12 @@ skillkit 把 skill 分为三类，管理职责不同：
 
 ### 6.1 关键约束
 
-`~/.agents/skills/` 是通用 AI agent skills 加载目录，除 Claude Code 外大部分 agent（Cursor、OpenCode、Codex、Gemini CLI 等）都直接从此目录加载 skill。因此该目录只用于全局公共 skill 的存放，不得挪用为项目级 skill 的暂存区，也不得在里面放元数据文件（避免被 agent 误扫描）。所有 skillkit 元数据统一收在 `~/.skm/` 下。
+`~/.agents/skills/` 是通用 AI agent skills 加载目录，除 Claude Code 外大部分 agent（Cursor、OpenCode、Codex、Gemini CLI 等）都直接从此目录加载 skill。因此该目录只用于全局公共 skill 的存放，不得挪用为项目级 skill 的暂存区，也不得在里面放元数据文件（避免被 agent 误扫描）。所有 skillkit 元数据统一收在 `~/.skillkit/` 下。
 
 ### 6.2 全局布局
 
 ```
-~/.skm/
+~/.skillkit/
   config.toml                    # agent 列表 + 各 agent 能力 + web 端口
   sources.toml                   # 安装源注册表
   registry.json                  # 所有已安装 skill 元数据，以 id 为 key
@@ -117,7 +117,7 @@ skillkit 把 skill 分为三类，管理职责不同：
 ~/.claude/skills/<skill-name>    # symlink → ~/.agents/skills/<skill-name>/（仅 Claude 需要桥接）
 ```
 
-项目 local skill 的 canonical 集中放在 `~/.skm/skills/` 而非每个项目各放一份，这样同一 skill 被多个项目引用时只占一份磁盘，升级只改一处。
+项目 local skill 的 canonical 集中放在 `~/.skillkit/skills/` 而非每个项目各放一份，这样同一 skill 被多个项目引用时只占一份磁盘，升级只改一处。
 
 ### 6.3 项目目录布局
 
@@ -125,8 +125,8 @@ local skill 与 shared skill **同级平铺**在 `<agent>/skills/<skill-name>/`�
 
 ```
 <project>/
-  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skm/skills/<skill-name>/
-  .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skm/skills/<skill-name>/
+  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/skills/<skill-name>/
+  .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skillkit/skills/<skill-name>/
   .codex/skills/...                   # 同理
 ```
 
@@ -138,7 +138,7 @@ local skill 与 shared skill **同级平铺**在 `<agent>/skills/<skill-name>/`�
 .cursor/skills/frontend-design
 ```
 
-skillkit 不在项目目录写入自己的配置文件（项目元数据全部放在 `~/.skm/projects/<project-id>.toml`，保持 local 配置个人本地、不入库）。非 git 项目（无 `.git/info/exclude`）：local 直接平铺，无需忽略。边界：local 与 shared 同名时 shared（已在 git）优先、local 跳过并警告；apply 前若 local 已被 `git add`，exclude 对已追踪文件无效，apply 检测到并提示 `git rm --cached`（见 §13）。
+skillkit 不在项目目录写入自己的配置文件（项目元数据全部放在 `~/.skillkit/projects/<project-id>.toml`，保持 local 配置个人本地、不入库）。非 git 项目（无 `.git/info/exclude`）：local 直接平铺，无需忽略。边界：local 与 shared 同名时 shared（已在 git）优先、local 跳过并警告；apply 前若 local 已被 `git add`，exclude 对已追踪文件无效，apply 检测到并提示 `git rm --cached`（见 §13）。
 
 ### 6.4 project-id 生成规则
 
@@ -150,11 +150,11 @@ skillkit 不在项目目录写入自己的配置文件（项目元数据全部�
 
 | agent | 直读 `~/.agents/skills/` | 支持 symlink | 全局公共落地 | 项目 local 落地 |
 |-------|:---:|:---:|------|------|
-| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | symlink `<project>/.claude/skills/<skill>` → `~/.skm/skills/<skill>` |
-| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skm/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
+| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | symlink `<project>/.claude/skills/<skill>` → `~/.skillkit/skills/<skill>` |
+| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skillkit/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
 | OpenCode / Codex / Gemini | 是 | 是 | 无需操作（直读） | symlink 或 copy 均可，默认 symlink |
 
-agent 列表和能力在 `~/.skm/config.toml` 声明，新增 agent 只改配置不改代码。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 commit_sha 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
+agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 commit_sha 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
 
 ## 8. 数据模型
 
@@ -162,7 +162,7 @@ agent 列表和能力在 `~/.skm/config.toml` 声明，新增 agent 只改配置
 
 id 格式为 `<source-name>/<skill-name>`，例如 `skills.sh/frontend-design`、`team-private/tdd`。这样不同源的同名 skill 不会冲突，且 id 本身可读。id 是 skill 在 profile、project、registry 之间引用的唯一标识。
 
-### 8.2 Source（安装源）— `~/.skm/sources.toml`
+### 8.2 Source（安装源）— `~/.skillkit/sources.toml`
 
 ```toml
 [[source]]
@@ -190,7 +190,7 @@ path = "~/my-skills"
 
 source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL，含私有仓库，依赖本地已配置的 SSH key 或 git credential）、`local`（本地路径）。`skills_dir`（可选，git/local 源）：skill 在仓库中的子目录，用于一个仓库含多个 skill 的场景（如团队 `datacenter-skills` 仓库 `skills/` 下有多个 skill）；省略时 skill 内容直接在仓库根。install 时按 `<skills_dir>/<skill-name>` 定位并平铺到 canonical，保持 Claude 可发现的单层结构（避免 `skills/` 中间层）。
 
-### 8.3 Skill 元数据 — `~/.skm/registry.json`
+### 8.3 Skill 元数据 — `~/.skillkit/registry.json`
 
 ```json
 {
@@ -210,18 +210,18 @@ source 类型三种：`skills-sh`（走 npx skills）、`git`（任意 git URL�
     "version": "0.3.1",
     "commit_sha": "def5678",
     "installed_at": "2026-07-29T10:05:00Z",
-    "canonical_path": "~/.skm/skills/tdd"
+    "canonical_path": "~/.skillkit/skills/tdd"
   }
 }
 ```
 
 字段说明：
 
-- `scope`：skill 固有属性，`global`（canonical 在 `~/.agents/skills/`）或 `local`（canonical 在 `~/.skm/skills/`）。由 `install` 时的 `--scope` 决定，存在 registry，不在 profile/project 重复。同一 skill 在 registry 只有一条记录、scope 固定，不能同时以 global 和 local 两个 scope 存在（单版本模型约束，见第 16 节）。
+- `scope`：skill 固有属性，`global`（canonical 在 `~/.agents/skills/`）或 `local`（canonical 在 `~/.skillkit/skills/`）。由 `install` 时的 `--scope` 决定，存在 registry，不在 profile/project 重复。同一 skill 在 registry 只有一条记录、scope 固定，不能同时以 global 和 local 两个 scope 存在（单版本模型约束，见第 16 节）。
 - `commit_sha`：版本锁依据，用于冲突检测和可复现安装。
 - `canonical_path`：物理存储位置，apply 时 symlink/copy 的源头。
 
-### 8.4 Profile（粗分类候选集）— `~/.skm/profiles/<name>.toml`
+### 8.4 Profile（粗分类候选集）— `~/.skillkit/profiles/<name>.toml`
 
 ```toml
 name = "frontend"
@@ -235,7 +235,7 @@ skills = [
 
 profile 只存 skill id 列表，不重复 source/scope/version 等信息（这些在 registry 里）。profile 是"这类场景可能用到的 skill 清单"，可提交到共享仓库让团队复用。profile 主要承载 local skill 的组合（per-project 生效的部分）；global skill 是全局基座，通常单独 `install` 管理，不依赖 profile 反复引用，但 profile 也允许引用 global skill（apply 时幂等确保其全局存在）。
 
-### 8.5 Project（项目实例）— `~/.skm/projects/<project-id>.toml`
+### 8.5 Project（项目实例）— `~/.skillkit/projects/<project-id>.toml`
 
 ```toml
 name = "mac-config"
@@ -339,7 +339,7 @@ skillkit source list [--json]
 skillkit source remove <name>
 
 # skill 安装到 canonical
-skillkit install <id> [--scope global|local]      # global→~/.agents/skills/, local→~/.skm/skills/
+skillkit install <id> [--scope global|local]      # global→~/.agents/skills/, local→~/.skillkit/skills/
 skillkit uninstall <id>
 skillkit upgrade <id> | --all
 skillkit list [--scope global|local] [--json]
@@ -414,7 +414,7 @@ GUI 价值是总览和可视化配置，CLI 价值是 AI agent 操作和脚本�
 测试验证业务结果（"apply 后项目能加载到正确 skill"），不验证实现细节（"调了 symlink 函数"）。
 
 - 单元测试：core 纯逻辑（registry 解析、profile 合并、diff 计算、冲突检测、id 生成、project-id 生成）。
-- 集成测试：用 tempdir 模拟整个 `~/.skm` + `~/.agents` + 项目目录，跑 install → apply 全流程，断言 symlink/copy 正确落地。
+- 集成测试：用 tempdir 模拟整个 `~/.skillkit` + `~/.agents` + 项目目录，跑 install → apply 全流程，断言 symlink/copy 正确落地。
 - 多 agent 路径：分别覆盖 Claude（symlink）和 Cursor（copy）两条落地路径。
 - 幂等测试：重复 apply 断言零变化、零副作用。
 - 冲突场景：多项目锁不同版本、dangling symlink、源失效。
@@ -465,6 +465,6 @@ GUI 价值是总览和可视化配置，CLI 价值是 AI agent 操作和脚本�
 
 当前不做但预留升级路径的事项：
 
-- 同一 skill 多物理版本并存：若将来确有"项目 A 用 v1、项目 B 用 v2"需求，把 canonical 改为按版本分目录（`~/.skm/skills/<skill-name>/<version>/`），symlink 指向对应版本。现有抽象不破坏。
+- 同一 skill 多物理版本并存：若将来确有"项目 A 用 v1、项目 B 用 v2"需求，把 canonical 改为按版本分目录（`~/.skillkit/skills/<skill-name>/<version>/`），symlink 指向对应版本。现有抽象不破坏。
 - 更多 agent 支持：config.toml 声明 agent 能力即可，不改代码。
 - profile 继承（一个 profile 继承另一个）：目前 YAGNI，需要时再加。

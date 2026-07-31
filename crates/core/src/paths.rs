@@ -19,8 +19,8 @@ impl Paths {
     }
 
     /// 元数据根目录（config/sources/registry/profiles/projects）。
-    pub fn skm_dir(&self) -> PathBuf {
-        self.home.join(".skm")
+    pub fn skillkit_dir(&self) -> PathBuf {
+        self.home.join(".skillkit")
     }
 
     /// 全局公共 skill 的 canonical（Cursor 等直读，Claude 需 symlink 桥接）。
@@ -34,30 +34,30 @@ impl Paths {
     }
 
     /// 项目 local skill 的集中 canonical（M0 装进来，M1 才 per-project 落地）。
-    pub fn skm_skills_dir(&self) -> PathBuf {
-        self.skm_dir().join("skills")
+    pub fn skillkit_skills_dir(&self) -> PathBuf {
+        self.skillkit_dir().join("skills")
     }
 
     pub fn sources_path(&self) -> PathBuf {
-        self.skm_dir().join("sources.toml")
+        self.skillkit_dir().join("sources.toml")
     }
 
     pub fn registry_path(&self) -> PathBuf {
-        self.skm_dir().join("registry.json")
+        self.skillkit_dir().join("registry.json")
     }
 
     pub fn config_path(&self) -> PathBuf {
-        self.skm_dir().join("config.toml")
+        self.skillkit_dir().join("config.toml")
     }
 
-    /// profile 注册表目录（~/.skm/profiles/）。
+    /// profile 注册表目录（~/.skillkit/profiles/）。
     pub fn profiles_dir(&self) -> PathBuf {
-        self.skm_dir().join("profiles")
+        self.skillkit_dir().join("profiles")
     }
 
-    /// project 注册表目录（~/.skm/projects/）。
+    /// project 注册表目录（~/.skillkit/projects/）。
     pub fn projects_dir(&self) -> PathBuf {
-        self.skm_dir().join("projects")
+        self.skillkit_dir().join("projects")
     }
 }
 
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn production_and_injected_share_layout() {
         let p = Paths::new(PathBuf::from("/tmp/fakehome"));
-        assert_eq!(p.skm_dir(), PathBuf::from("/tmp/fakehome/.skm"));
+        assert_eq!(p.skillkit_dir(), PathBuf::from("/tmp/fakehome/.skillkit"));
         assert_eq!(
             p.agents_skills_dir(),
             PathBuf::from("/tmp/fakehome/.agents/skills")
@@ -78,28 +78,28 @@ mod tests {
             PathBuf::from("/tmp/fakehome/.claude/skills")
         );
         assert_eq!(
-            p.skm_skills_dir(),
-            PathBuf::from("/tmp/fakehome/.skm/skills")
+            p.skillkit_skills_dir(),
+            PathBuf::from("/tmp/fakehome/.skillkit/skills")
         );
         assert_eq!(
             p.sources_path(),
-            PathBuf::from("/tmp/fakehome/.skm/sources.toml")
+            PathBuf::from("/tmp/fakehome/.skillkit/sources.toml")
         );
         assert_eq!(
             p.registry_path(),
-            PathBuf::from("/tmp/fakehome/.skm/registry.json")
+            PathBuf::from("/tmp/fakehome/.skillkit/registry.json")
         );
         assert_eq!(
             p.config_path(),
-            PathBuf::from("/tmp/fakehome/.skm/config.toml")
+            PathBuf::from("/tmp/fakehome/.skillkit/config.toml")
         );
         assert_eq!(
             p.profiles_dir(),
-            PathBuf::from("/tmp/fakehome/.skm/profiles")
+            PathBuf::from("/tmp/fakehome/.skillkit/profiles")
         );
         assert_eq!(
             p.projects_dir(),
-            PathBuf::from("/tmp/fakehome/.skm/projects")
+            PathBuf::from("/tmp/fakehome/.skillkit/projects")
         );
     }
 }

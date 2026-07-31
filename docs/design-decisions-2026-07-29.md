@@ -42,27 +42,27 @@
 **理由**：与现状（opencli-* 的 symlink 模式）一致，零迁移摩擦；单版本 + 元数据锁已能满足"记录和锁定版本"（记录 commit_sha，升级时校验）。skill 是指令集，版本兼容性问题比软件库轻，多版本并存是 YAGNI。
 
 **否定的备选**：
-- 多版本并存（canonical 按版本分目录 `~/.skm/skills/<skill>/<version>/`）：支持同 skill 多版本并行，但占空间、元数据和升级逻辑复杂，当前无此需求。预留升级路径，未来需要时不破坏现有抽象。
+- 多版本并存（canonical 按版本分目录 `~/.skillkit/skills/<skill>/<version>/`）：支持同 skill 多版本并行，但占空间、元数据和升级逻辑复杂，当前无此需求。预留升级路径，未来需要时不破坏现有抽象。
 
 ## 决策 5：`~/.agents/skills/` 只放全局公共 skill
 
 **背景**：发现 `~/.agents/skills/` 是通用 AI agent 加载目录，Cursor、OpenCode、Codex、Gemini 等除 Claude 外的大部分 agent 都直接从此目录加载。
 
-**决策**：`~/.agents/skills/` 专属全局公共 skill，绝不挪用为项目级暂存，元数据也不放进去。所有 skillkit 元数据统一收 `~/.skm/`。
+**决策**：`~/.agents/skills/` 专属全局公共 skill，绝不挪用为项目级暂存，元数据也不放进去。所有 skillkit 元数据统一收 `~/.skillkit/`。
 
-**理由**：挪用通用加载目录会污染其他 agent 的 skill 视图，混淆 local/shared 边界。把全局公共 canonical 选在 `~/.agents/skills/` 本身就让 Cursor 等零配置可用（直接读），只有 Claude 需要 symlink 桥接（Claude 不直接读 .agents）。这一约束也促使项目 local canonical 从"每项目各放一份"改为集中到 `~/.skm/skills/`。
+**理由**：挪用通用加载目录会污染其他 agent 的 skill 视图，混淆 local/shared 边界。把全局公共 canonical 选在 `~/.agents/skills/` 本身就让 Cursor 等零配置可用（直接读），只有 Claude 需要 symlink 桥接（Claude 不直接读 .agents）。这一约束也促使项目 local canonical 从"每项目各放一份"改为集中到 `~/.skillkit/skills/`。
 
 ## 决策 6：项目 skill 分 local / shared 两类，shared 不由 skillkit 管
 
 **背景**：项目里有的 skill 要入仓库随团队分发，有的要共享但不入仓库。
 
 **决策**：
-- local（不入库）：canonical 集中在 `~/.skm/skills/`，与 shared 同级平铺落地到 `<project>/<agent>/skills/<skill>/`（symlink 或 copy），git 忽略走 `<project>/.git/info/exclude`（本地不入库）。
+- local（不入库）：canonical 集中在 `~/.skillkit/skills/`，与 shared 同级平铺落地到 `<project>/<agent>/skills/<skill>/`（symlink 或 copy），git 忽略走 `<project>/.git/info/exclude`（本地不入库）。
 - shared（入库）：真实文件直接在 `<project>/<agent>/skills/`，git 提交，skillkit 只做只读发现，不安装/升级/卸载。
 
 **理由**：shared skill 既然在 git 里，项目自身（git + 团队约定）已经在管理它，skillkit 重复管是多余，违反最小改动和 YAGNI。skillkit 对 shared 只需能看到清单，方便与 local 对照展示。
 
-**演进**：早期设想用 `.skm/shared.lock` 锁文件管理 shared 的版本，明确放弃——shared 由 git 管，不需要第二个版本管理器。
+**演进**：早期设想用 `.skillkit/shared.lock` 锁文件管理 shared 的版本，明确放弃——shared 由 git 管，不需要第二个版本管理器。
 
 ## 决策 7：registry 用 id 引用，profile 退成粗分类，project 做精确选择
 
@@ -77,7 +77,7 @@
 
 ## 决策 8：按 agent 能力选落地策略
 
-**决策**：在 `~/.skm/config.toml` 声明每个 agent 的能力（是否支持 symlink、是否直读 `~/.agents/skills/`），apply 时据此选落地方式。Claude 用 symlink，Cursor 不支持 symlink 用 copy 兜底，OpenCode/Codex/Gemini 全局层面直读无需操作。
+**决策**：在 `~/.skillkit/config.toml` 声明每个 agent 的能力（是否支持 symlink、是否直读 `~/.agents/skills/`），apply 时据此选落地方式。Claude 用 symlink，Cursor 不支持 symlink 用 copy 兜底，OpenCode/Codex/Gemini 全局层面直读无需操作。
 
 **理由**：Cursor 不支持 symlink 是硬约束，但它直读 `.agents/skills/`，所以全局公共 skill 对它零配置；只有项目 local skill 需要用 copy 兜底。把能力声明放配置，新增 agent 不改代码。
 

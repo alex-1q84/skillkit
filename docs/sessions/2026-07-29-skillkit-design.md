@@ -40,7 +40,7 @@ skillkit import-existing                 # M3（扫描导入现有 skill）
 - **工程化已就绪**：Cargo workspace（`crates/core` + `crates/cli`）、`rustfmt.toml`（行宽 100）、clippy `pedantic` + `-D warnings`（`[workspace.lints]`）、`Makefile`（setup/format/lint/test/build/check/**run**）、`make check` 全绿。
 - **设计定稿**：spec（review 完成 P0/P1/P2，§8.2 加 skills_dir）+ 决策纪要（12 条）+ `CLAUDE.md`（项目规范，含 M0 踩坑约定：re-export 完整/集成测试位置/git identity/make run）。
 - **GUI demo 定稿**：`demo/index.html`（亮色原型，四大视图 + Projects apply 闭环可交互，M2 产品化）。
-- 存储约束（不变）：`~/.agents/skills/` 只放全局公共 skill、元数据统一 `~/.skm/`、单版本、shared 只读、id 引用 DRY、agent 能力配置驱动。
+- 存储约束（不变）：`~/.agents/skills/` 只放全局公共 skill、元数据统一 `~/.skillkit/`、单版本、shared 只读、id 引用 DRY、agent 能力配置驱动。
 - 落地（P0 决策）：local skill **平铺**在 `<agent>/skills/<skill>/`（Claude 只发现一层），git 忽略用 `<project>/.git/info/exclude`（不改项目 `.gitignore`）。agent name → 目录映射（claude-code→.claude）。
 
 ### 1.3 install / build / run flow
@@ -77,7 +77,7 @@ HOME=$TESTHOME ./target/debug/skillkit project apply <id>
 
 ### 3.1 `~/.agents/skills/` 是通用加载目录（最重要的约束）
 - 除 Claude Code 外，Cursor/OpenCode/Codex/Gemini CLI 等大部分 agent 都直接从 `~/.agents/skills/` 加载。
-- 该目录只放全局公共 skill，不能挪用为暂存，不能放元数据文件（会被 agent 误扫描）。元数据统一收 `~/.skm/`。
+- 该目录只放全局公共 skill，不能挪用为暂存，不能放元数据文件（会被 agent 误扫描）。元数据统一收 `~/.skillkit/`。
 
 ### 3.2 Cursor 不支持 symlink
 - Cursor 无法识别 symlink skill，必须用真实文件。项目 local skill 对 Cursor 用 copy 兜底（`.skillkit-sha` 标记 sha，apply 比对过期重 copy）。全局层面 Cursor 直读 `~/.agents/skills/`。
@@ -97,16 +97,16 @@ HOME=$TESTHOME ./target/debug/skillkit project apply <id>
 - 单版本模型下 canonical 物理只有一份，locked_shas 锁不住版本。它是上次 apply 的 sha 快照，用于检测 canonical 升级漂移。apply 时发现漂移默认以 canonical 为准更新基线，`--frozen` 报错。
 
 ### 3.8 跨进程 SSE + 文件锁（M2）
-- CLI 与 server 两进程，server 用 notify file watcher 监听 `~/.skm/` 经 SSE 推送。文件锁粒度到单文件，读不抢锁，写锁带超时。
+- CLI 与 server 两进程，server 用 notify file watcher 监听 `~/.skillkit/` 经 SSE 推送。文件锁粒度到单文件，读不抢锁，写锁带超时。
 
 ### 3.9 skills_dir：一仓库多 skill（M0）
 - Source 加 `skills_dir: Option<String>`（None=skill 在仓库根，Some("skills")=在子目录）。install clone 到临时（`std::env::temp_dir()`，core 生产代码不依赖 tempfile dev-dep）取 `<skills_dir>/<skill>` 平铺到 canonical。CLI `source add --skills-dir`（clap 下划线→连字符 long）。真实验证：datacenter-skills/logseq。
 
 ### 3.10 apply 落地规则（M1 核心，最关键的实现约束）
 - **agent_dir 映射**：agent name "claude-code" → 项目目录 `.claude`（非 `.claude-code`）；其他 agent（cursor 等）name 直接作目录。`land_one`/`write_exclude`/`scan_local_landed`/`build_status` 统一用 `agent_dir_name(agent)`。**踩坑**：忘记映射会建错目录（.claude-code）导致 Claude 发现不了 + extra 清理删错路径。
-- **local 落地**：Claude（supports_symlink=true）建 symlink `~/.skm/skills/<skill>` → `<project>/.claude/skills/<skill>`；Cursor（false）copy + 写 `.skillkit-sha`（apply 比对，过期重 copy）。
+- **local 落地**：Claude（supports_symlink=true）建 symlink `~/.skillkit/skills/<skill>` → `<project>/.claude/skills/<skill>`；Cursor（false）copy + 写 `.skillkit-sha`（apply 比对，过期重 copy）。
 - **global 不 per-project 落地**：只 ensure `~/.claude/skills/<skill>` symlink 在位（复用 `ensure_global_claude`）。
-- **extra 清理**：`scan_local_landed` 找 skillkit-local（symlink 指向 `~/.skm/skills/`，或目录含 `.skillkit-sha`），不在 expected 的删（用 agent_dir_name 拼路径）。
+- **extra 清理**：`scan_local_landed` 找 skillkit-local（symlink 指向 `~/.skillkit/skills/`，或目录含 `.skillkit-sha`），不在 expected 的删（用 agent_dir_name 拼路径）。
 - **`.git/info/exclude`**：skillkit 段（`# >>> skillkit managed >>>` / `<<<` 标记），原子写，列当前 local 落地清单。
 - **shared 同名 / local 已被 git 追踪**：land_one 遇真实目录（symlink 模式）报错警告；已追踪提示 `git rm --cached`（部分覆盖，M3 打磨）。
 
@@ -123,7 +123,7 @@ HOME=$TESTHOME ./target/debug/skillkit project apply <id>
 - [ ] `ls crates/core/src/` 看到 11 模块；`ls crates/core/tests/` 看到 m0_e2e.rs + m1_e2e.rs。
 - [ ] `crates/*/Cargo.toml` 都有 `[lints] workspace = true`；core 依赖含 uuid + chrono。
 - [ ] spec §8.2 有 skills_dir、§10 apply 流程、§15.2 M1 验收。
-- [ ] **回归信号**：活跃设计搜不到 `skills/local`；`cargo clippy --all-targets -- -D warnings` 零 warning；无 `.skm/shared.lock`。
+- [ ] **回归信号**：活跃设计搜不到 `skills/local`；`cargo clippy --all-targets -- -D warnings` 零 warning；无 `.skillkit/shared.lock`。
 - [ ] **apply 闭环**：install local → project apply → `<project>/.claude/skills/<skill>` symlink；status --json 输出 `{expected, missing, extra, conflicts}`（Vec<String>）。
 
 ## 5. 已知遗留 / 待办

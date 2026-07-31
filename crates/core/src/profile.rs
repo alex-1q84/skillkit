@@ -1,4 +1,4 @@
-//! profile（粗分类候选集）—— ~/.skm/profiles/<name>.toml，只存 skill id 列表（DRY）。
+//! profile（粗分类候选集）—— ~/.skillkit/profiles/<name>.toml，只存 skill id 列表（DRY）。
 //! source/scope/version 等信息只在 registry 存一份，profile 不重复。
 use crate::error::{atomic_write, Result, SkillkitError};
 use crate::paths::Paths;
