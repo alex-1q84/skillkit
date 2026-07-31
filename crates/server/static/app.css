@@ -1,1 +1,226 @@
-/* skillkit GUI 样式（Task 15 产品化） */
+/* skillkit GUI —— 提炼 demo 亮色风格（米色 + 网格 + 琥珀 accent），系统字体不依赖外网。
+   覆盖 layout/templates 用到的 class：topnav / data / card / sortable / workspace / col / status / apply / apply-result / warn / hint / x / row / inline。 */
+:root {
+  --bg: #faf7ef;
+  --grid: #ebe4d2;
+  --surface: #ffffff;
+  --surface-2: #f4efe2;
+  --ink: #1c1917;
+  --ink-2: #57534e;
+  --ink-3: #a8a29e;
+  --line: #ddd5c1;
+  --line-2: #e8e1cf;
+  --accent: #b45309;
+  --accent-2: #d97706;
+  --accent-soft: #fef3c7;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --shadow: 0 1px 0 rgba(28, 25, 23, .04), 0 8px 24px -12px rgba(28, 25, 23, .18);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--sans);
+  color: var(--ink);
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 26px 26px;
+  background-position: -1px -1px;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---------- topnav ---------- */
+.topnav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(250, 247, 239, .86);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  display: flex; gap: 2px;
+  padding: 10px 28px;
+}
+.topnav a {
+  font-family: var(--mono);
+  font-size: 12.5px; font-weight: 500;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink-2);
+  text-decoration: none;
+  padding: 8px 14px; border-radius: 6px;
+  transition: all .15s;
+}
+.topnav a:hover { color: var(--ink); background: var(--surface-2); }
+
+/* ---------- main ---------- */
+main { max-width: 1240px; margin: 0 auto; padding: 28px; }
+h1 {
+  font-family: var(--mono);
+  font-size: 26px; font-weight: 600; letter-spacing: -.02em;
+  margin-bottom: 18px;
+}
+h2 {
+  font-family: var(--mono);
+  font-size: 13px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+p { margin-bottom: 8px; }
+.hint { color: var(--ink-3); font-size: 12.5px; }
+a { color: var(--accent); }
+
+/* ---------- 表格（sources/skills） ---------- */
+table.data {
+  width: 100%; border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+table.data th {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-weight: 500;
+  letter-spacing: .04em; text-transform: uppercase;
+  font-size: 11px;
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+table.data td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-2);
+  vertical-align: middle;
+}
+table.data tr:last-child td { border-bottom: none; }
+table.data tr:hover td { background: var(--surface-2); }
+
+/* ---------- 表单 ---------- */
+form.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+form.inline { display: inline-flex; gap: 6px; align-items: center; }
+input, select {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+input:focus, select:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+button {
+  font-family: var(--mono);
+  font-size: 12px; font-weight: 500;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all .12s;
+}
+button:hover { background: var(--surface-2); border-color: var(--ink-3); }
+button.apply {
+  background: var(--ink); color: var(--bg);
+  border-color: var(--ink);
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+button.apply:hover { background: var(--accent); border-color: var(--accent); }
+button.x {
+  padding: 3px 9px;
+  color: var(--danger);
+  border-color: transparent;
+  background: none;
+  font-size: 13px;
+  line-height: 1;
+}
+button.x:hover { background: var(--danger); color: var(--surface); }
+label { font-family: var(--mono); font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
+
+/* ---------- 卡片（profiles） ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+}
+.card h2 { color: var(--ink); font-size: 15px; text-transform: none; letter-spacing: -.01em; }
+
+/* ---------- sortable 拖拽列表（profile skills） ---------- */
+ul.sortable {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 4px;
+}
+ul.sortable li {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  cursor: grab;
+}
+ul.sortable li:active { cursor: grabbing; }
+
+/* ---------- workspace 三栏（projects 工作台） ---------- */
+.workspace {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+section.col {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+section.col ul {
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+section.col ul li {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line-2);
+}
+section.col ul li:last-child { border-bottom: none; }
+
+/* ---------- status / apply 结果 ---------- */
+pre.status {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  white-space: pre-wrap;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+.apply-result p { font-family: var(--mono); font-size: 13px; }
+.apply-result a { display: inline-block; margin-top: 8px; }
+.warn { color: var(--warn); font-family: var(--mono); font-size: 12.5px; }
+
+/* ---------- projects 列表 ---------- */
+main > ul { list-style: none; font-family: var(--mono); font-size: 13px; }
+main > ul li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+main > ul li a { font-weight: 500; }
+
+/* ---------- htmx 请求中轻提示 ---------- */
+.htmx-request button { opacity: .6; pointer-events: none; }

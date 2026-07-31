@@ -443,3 +443,19 @@ async fn sse_events_endpoint_reachable() {
         "text/event-stream"
     );
 }
+
+#[tokio::test]
+async fn home_trailing_slash_reachable() {
+    // serve 打印的 URL 是 /{token}/（带尾斜杠），必须可达，否则主人点开即 404。
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}

@@ -13,6 +13,7 @@ pub mod sse;
 pub fn protected() -> Router<AppState> {
     Router::new()
         .route("/{token}", get(crate::home))
+        .route("/{token}/", get(crate::home))
         .route("/{token}/sources", get(sources::page).post(sources::add))
         .route("/{token}/sources/{name}", delete(sources::remove))
         .route("/{token}/skills", get(skills::page))
