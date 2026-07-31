@@ -1,10 +1,12 @@
-//! Projects 视图：列表 + 工作台（installed/shared/status 三栏只读；操作在 Task 12/13）。
+//! Projects 视图：列表 + 工作台（声明编辑 + status 片段；apply 在 Task 13、shared 只读）。
 use askama::Template;
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
+use form_urlencoded::parse;
 use skillkit_core::{
-    build_status, compute_diff, scan_shared, ApplyDiff, Project, Registry, StatusView,
+    build_status, compute_diff, scan_shared, ApplyDiff, Project, Registry, SkillMeta, StatusView,
 };
 use std::path::Path as StdPath;
 
@@ -24,6 +26,14 @@ pub struct WorkspaceTpl<'a> {
     pub project: &'a Project,
     pub status: StatusView,
     pub shared: Vec<String>,
+    /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
+    pub all_skills: Vec<(SkillMeta, bool)>,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/status.html")]
+pub struct StatusTpl {
+    pub status: StatusView,
 }
 
 pub async fn list(State(state): State<AppState>, Path(token): Path<String>) -> Response {
@@ -45,6 +55,42 @@ pub async fn workspace(
     let Ok(proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    render_workspace(state, token, proj)
+}
+
+/// 全量替换 installed_skills（工作台勾选提交），返回刷新后的 status 片段。
+/// 重复 key（skills=a&skills=b）serde_urlencoded 不支持，用 form_urlencoded 手动收集。
+pub async fn set_skills(
+    State(state): State<AppState>,
+    Path((_token, id)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    let skills: Vec<String> = parse(&body)
+        .filter(|(k, _)| k.as_ref() == "skills")
+        .map(|(_, v)| v.into_owned())
+        .collect();
+    let Ok(mut proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    proj.installed_skills = skills;
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    status_fragment(state, proj)
+}
+
+/// status 片段端点（SSE 触发 hx-get 刷新用，Task 14 接入）。
+pub async fn status(
+    State(state): State<AppState>,
+    Path((_token, id)): Path<(String, String)>,
+) -> Response {
+    let Ok(proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    status_fragment(state, proj)
+}
+
+fn render_workspace(state: AppState, token: String, proj: Project) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
     let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
         expected: vec![],
@@ -57,13 +103,39 @@ pub async fn workspace(
         conflicts: vec![],
     });
     let shared = scan_shared(StdPath::new(&proj.path), &proj.agents);
+    let all_skills: Vec<(SkillMeta, bool)> = reg
+        .skills
+        .values()
+        .map(|m| {
+            let installed = proj.installed_skills.iter().any(|s| s == &m.id);
+            (m.clone(), installed)
+        })
+        .collect();
     let rendered = WorkspaceTpl {
         token: &token,
         project: &proj,
         status,
         shared,
+        all_skills,
     }
     .render();
+    render_str(rendered)
+}
+
+/// 计算 status 并渲染 fragments/status.html（供 set_skills 返回 + SSE hx-get 刷新）。
+fn status_fragment(state: AppState, proj: Project) -> Response {
+    let reg = Registry::load(&state.paths).unwrap_or_default();
+    let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
+        expected: vec![],
+        conflicts: vec![],
+    });
+    let status = build_status(&state.paths, &proj, &diff).unwrap_or(StatusView {
+        expected: vec![],
+        missing: vec![],
+        extra: vec![],
+        conflicts: vec![],
+    });
+    let rendered = StatusTpl { status }.render();
     render_str(rendered)
 }
 

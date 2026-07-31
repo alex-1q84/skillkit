@@ -317,3 +317,44 @@ async fn skill_uninstall_removes_from_registry() {
     let after = skillkit_core::Registry::load(&state.paths).unwrap();
     assert!(after.skills.is_empty());
 }
+
+#[tokio::test]
+async fn project_set_skills_replaces_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj = skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "p".into(),
+        path: dir.path().join("p").to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec!["old/x".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    };
+    proj.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/skills")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("skills=new%2Fa&skills=new%2Fb"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert_eq!(
+        after.installed_skills,
+        vec!["new/a".to_string(), "new/b".to_string()]
+    );
+}
