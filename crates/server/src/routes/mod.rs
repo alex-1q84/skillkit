@@ -15,6 +15,7 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}", get(crate::home))
         .route("/{token}/", get(crate::home))
         .route("/{token}/sources", get(sources::page).post(sources::add))
+        .route("/{token}/sources/preview", get(sources::preview))
         .route("/{token}/sources/{name}", delete(sources::remove))
         .route("/{token}/skills", get(skills::page))
         .route("/{token}/skills/{id}/install", post(skills::install))

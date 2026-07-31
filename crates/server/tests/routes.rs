@@ -245,7 +245,7 @@ async fn project_workspace_renders_status() {
 }
 
 #[tokio::test]
-async fn source_add_persists() {
+async fn source_add_persists_with_derived_name() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {
         paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
@@ -261,14 +261,108 @@ async fn source_add_persists() {
                     axum::http::header::CONTENT_TYPE,
                     "application/x-www-form-urlencoded",
                 )
-                .body(Body::from("name=git-src&package=git%40x"))
+                .body(Body::from("package=git%40example/x.git"))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let store = skillkit_core::SourcesStore::load(&state.paths).unwrap();
-    assert!(store.list().iter().any(|s| s.name == "git-src"));
+    // 不传 name → 从 package 推导（git@example/x.git → x）
+    assert!(store.list().iter().any(|s| s.name == "x"));
+}
+
+#[tokio::test]
+async fn source_add_with_explicit_name_overrides_derivation() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/sources")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("name=my-private&package=git%40example/x.git"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let store = skillkit_core::SourcesStore::load(&state.paths).unwrap();
+    assert!(store.list().iter().any(|s| s.name == "my-private"));
+}
+
+#[tokio::test]
+async fn source_add_rejects_empty_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/sources")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("package="))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    // 未写入任何 source
+    assert!(skillkit_core::SourcesStore::load(&state.paths)
+        .unwrap()
+        .list()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn source_preview_derives_name_from_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/sources/preview?package=git%40github.com%3Aorg%2Fteam-skills.git")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    // 服务端推导出 team-skills 并预填进 name input
+    assert!(body.contains(r#"value="team-skills""#));
+    // 空 package → 空 value
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/sources/preview?package=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(common::body_string(resp).await.contains(r#"value=""#));
 }
 
 #[tokio::test]

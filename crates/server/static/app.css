@@ -146,6 +146,12 @@ button.x {
 button.x:hover { background: var(--danger); color: var(--surface); }
 label { font-family: var(--mono); font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
 
+/* ---------- source 新增表单：url 加长 + name 常显，与下方列表协调 ---------- */
+.source-add { display: flex; gap: 6px; align-items: center; }
+.source-add .src-package { flex: 1; min-width: 300px; }
+.source-add .src-name { width: 180px; color: var(--ink-2); }
+.source-add .src-name::placeholder { color: var(--ink-3); }
+
 /* ---------- 卡片（profiles） ---------- */
 .card {
   background: var(--surface);

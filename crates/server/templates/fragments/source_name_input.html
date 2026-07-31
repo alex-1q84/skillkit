@@ -1,0 +1,2 @@
+<input class="src-name" id="src-name" name="name" placeholder="name（留空自动推导）" value="{{ value }}"
+       oninput="var p=this.form.querySelector('.src-package'); if(this.value){p.removeAttribute('hx-trigger')}else{p.setAttribute('hx-trigger', p.dataset.trigger)}">

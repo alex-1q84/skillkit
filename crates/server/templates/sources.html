@@ -1,9 +1,15 @@
 {% extends "layout.html" %}
 {% block content %}
 <h1>Sources</h1>
-<form class="row" hx-post="/{{ token }}/sources" hx-target="body" hx-swap="outerHTML">
-  <input name="name" placeholder="name" required>
-  <input name="package" placeholder="package（git url / local path / owner-repo；省略=skills.sh）">
+<form class="row source-add" hx-post="/{{ token }}/sources" hx-target="body" hx-swap="outerHTML">
+  <input class="src-package" name="package" placeholder="package：GitHub owner/repo · git url · 本地路径"
+         required
+         hx-get="/{{ token }}/sources/preview" hx-trigger="input changed delay:300ms" hx-include="this" hx-target="#src-name-wrap" hx-swap="innerHTML"
+         data-trigger="input changed delay:300ms">
+  <span id="src-name-wrap">
+    <input class="src-name" id="src-name" name="name" placeholder="name（留空自动推导）"
+           oninput="var p=this.form.querySelector('.src-package'); if(this.value){p.removeAttribute('hx-trigger')}else{p.setAttribute('hx-trigger', p.dataset.trigger)}">
+  </span>
   <button>add</button>
 </form>
 <table class="data">
