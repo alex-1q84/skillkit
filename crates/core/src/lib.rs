@@ -2,6 +2,7 @@
 pub mod apply;
 pub mod config;
 pub mod error;
+pub mod import;
 pub mod install;
 pub mod lock;
 pub mod npx;
@@ -17,6 +18,7 @@ pub use apply::{
     StatusView,
 };
 pub use error::{Result, SkillkitError};
+pub use import::{import_existing, ImportReport};
 pub use install::{install, uninstall};
 pub use lock::FileLock;
 pub use npx::Candidate;
