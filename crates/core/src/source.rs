@@ -6,6 +6,7 @@ use crate::paths::Paths;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Source {
     pub name: String,
     /// npx skills source format（github shorthand / git url / local path）；None=registry 搜索入口。
@@ -25,12 +26,19 @@ impl SourcesStore {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&path)?;
-        // 旧 schema（含 source_type 字段）不兼容：备份后视为空（项目未发布，无线上数据）。
-        if content.contains("source_type") {
-            let _ = std::fs::rename(&path, path.with_extension("toml.bak"));
-            return Ok(Self::default());
+        // 旧 schema（含 source_type/url 字段）被 deny_unknown_fields 挡下：解析失败即备份后视为空
+        // （项目未发布，无线上数据，直接 reset 比迁移成本低）。
+        match toml::from_str::<Self>(&content) {
+            Ok(store) => Ok(store),
+            Err(e) => {
+                tracing::warn!(
+                    error = ?e, path = %path.display(),
+                    "sources.toml 解析失败，按旧 schema 处理：备份 .bak 后重置为默认源"
+                );
+                let _ = std::fs::rename(&path, path.with_extension("toml.bak"));
+                Ok(Self::default())
+            }
         }
-        Ok(toml::from_str(&content)?)
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
@@ -253,6 +261,7 @@ mod tests {
 
     #[test]
     fn legacy_schema_backed_up_and_reset() {
+        // 旧 schema（source_type/url 字段）被 deny_unknown_fields 挡下 → 备份 .bak + 重置为空。
         let p = paths();
         std::fs::create_dir_all(p.skillkit_dir()).unwrap();
         std::fs::write(
@@ -260,6 +269,17 @@ mod tests {
             "[[sources]]\nname=\"old\"\nsource_type=\"git\"\nurl=\"x\"\n",
         )
         .unwrap();
+        let store = SourcesStore::load(&p).unwrap();
+        assert!(store.list().is_empty());
+        assert!(p.sources_path().with_extension("toml.bak").exists());
+    }
+
+    #[test]
+    fn malformed_toml_backed_up_and_reset() {
+        // 非旧 schema 的坏 TOML 同样解析失败 → 备份重置，不 panic、不吞错误。
+        let p = paths();
+        std::fs::create_dir_all(p.skillkit_dir()).unwrap();
+        std::fs::write(p.sources_path(), "not-toml [[[ ").unwrap();
         let store = SourcesStore::load(&p).unwrap();
         assert!(store.list().is_empty());
         assert!(p.sources_path().with_extension("toml.bak").exists());

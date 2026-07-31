@@ -329,14 +329,14 @@
 <script>
 // ============ mock data ============
 const SKILLS = {
-  'skills.sh/frontend-design': { name:'frontend-design', source:'skills.sh', scope:'global', version:'1.2.0', sha:'abc1234', path:'~/.agents/skills/frontend-design' },
-  'skills.sh/dataviz':         { name:'dataviz',         source:'skills.sh', scope:'global', version:'0.9.1', sha:'9ff02ae', path:'~/.agents/skills/dataviz' },
-  'skills.sh/canvas-design':   { name:'canvas-design',   source:'skills.sh', scope:'global', version:'2.0.3', sha:'7d11c90', path:'~/.agents/skills/canvas-design' },
-  'skills.sh/logseq-usage':    { name:'logseq-usage',    source:'skills.sh', scope:'global', version:'1.0.0', sha:'3a8b1f2', path:'~/.agents/skills/logseq-usage' },
-  'skills.sh/old-thing':       { name:'old-thing',       source:'skills.sh', scope:'global', version:'0.4.2', sha:'11ab9cd', path:'~/.agents/skills/old-thing' },
-  'team-private/tdd':          { name:'tdd',             source:'team-private', scope:'local',  version:'0.3.1', sha:'def5678', path:'~/.skm/skills/tdd' },
-  'team-private/api-spec':     { name:'api-spec',        source:'team-private', scope:'local',  version:'1.1.0', sha:'c4f8a12', path:'~/.skm/skills/api-spec' },
-  'team-private/code-review':  { name:'code-review',     source:'team-private', scope:'local',  version:'2.2.0', sha:'8e5d3b1', path:'~/.skm/skills/code-review' },
+  'skills.sh/frontend-design': { name:'frontend-design', source:'skills.sh', scope:'global', version:'1.2.0', computed_hash:'abc1234', canonical_path:'~/.skillkit/.agents/skills/frontend-design' },
+  'skills.sh/dataviz':         { name:'dataviz',         source:'skills.sh', scope:'global', version:'0.9.1', computed_hash:'9ff02ae', canonical_path:'~/.skillkit/.agents/skills/dataviz' },
+  'skills.sh/canvas-design':   { name:'canvas-design',   source:'skills.sh', scope:'global', version:'2.0.3', computed_hash:'7d11c90', canonical_path:'~/.skillkit/.agents/skills/canvas-design' },
+  'skills.sh/logseq-usage':    { name:'logseq-usage',    source:'skills.sh', scope:'global', version:'1.0.0', computed_hash:'3a8b1f2', canonical_path:'~/.skillkit/.agents/skills/logseq-usage' },
+  'skills.sh/old-thing':       { name:'old-thing',       source:'skills.sh', scope:'global', version:'0.4.2', computed_hash:'11ab9cd', canonical_path:'~/.skillkit/.agents/skills/old-thing' },
+  'team-private/tdd':          { name:'tdd',             source:'team-private', scope:'local',  version:'0.3.1', computed_hash:'def5678', canonical_path:'~/.skillkit/.agents/skills/tdd' },
+  'team-private/api-spec':     { name:'api-spec',        source:'team-private', scope:'local',  version:'1.1.0', computed_hash:'c4f8a12', canonical_path:'~/.skillkit/.agents/skills/api-spec' },
+  'team-private/code-review':  { name:'code-review',     source:'team-private', scope:'local',  version:'2.2.0', computed_hash:'8e5d3b1', canonical_path:'~/.skillkit/.agents/skills/code-review' },
 };
 
 const SOURCES = [
@@ -363,8 +363,7 @@ let PROJECTS = [
     ],
     shared:['team-shared/lint','team-shared/git-hooks'],
     landed:['skills.sh/frontend-design','skills.sh/dataviz','skills.sh/old-thing','team-private/api-spec'],
-    conflicts:{ 'team-private/api-spec':'def5678 → c4f8a12' },
-    uninstalled:['team-private/tdd'],
+    conflicts:{ 'team-private/api-spec':'def5678 → c4f8a12' },    uninstalled:['team-private/tdd'],
   },
   {
     id:'skillkit-9f2e10', name:'skillkit', path:'/Users/mywo/lab/skillkit',
@@ -383,7 +382,7 @@ let PROJECTS = [
 
 // ============ helpers ============
 const $ = s => document.querySelector(s);
-const skillById = id => SKILLS[id] || { name:id.split('/').pop(), source:id.split('/')[0], scope:'local', version:'?', sha:'?', path:'?' };
+const skillById = id => SKILLS[id] || { name:id.split('/').pop(), source:id.split('/')[0], scope:'local', version:'?', computed_hash:'?', canonical_path:'?' };
 const tag = (cls, txt) => `<span class="tag ${cls}">${txt}</span>`;
 const sc = p => p.scope === 'global' ? tag('global','global') : tag('local','local');
 function idCell(id){
@@ -436,9 +435,9 @@ function renderSkills(){
       <td>${idCell(id)}</td>
       <td>${sc(s)}</td>
       <td class="mono">${s.version}</td>
-      <td class="mono" style="color:var(--ink-2)">${s.sha}</td>
+      <td class="mono" style="color:var(--ink-2)">${s.computed_hash}</td>
       <td>${tag('src', s.source)}</td>
-      <td class="mono" style="color:var(--ink-3);font-size:12px">${s.path}</td>
+      <td class="mono" style="color:var(--ink-3);font-size:12px">${s.canonical_path}</td>
       <td><button class="pill-btn">upgrade</button></td>
     </tr>`).join('');
 }
@@ -577,7 +576,7 @@ function renderStatus(p){
     items.push(diffRow('miss','+', needInstall?'missing · 未 install':'missing', id, needInstall?'该 skill 未安装到 canonical，点此 install':null));
   });
   st.extra.forEach(id => items.push(diffRow('extr','−','extra', id, '未勾选，APPLY 将移除落地')));
-  st.conflictList.forEach(([id,chg]) => items.push(diffRow('conf','!','conflict', id, 'sha 漂移：'+chg)));
+  st.conflictList.forEach(([id,chg]) => items.push(diffRow('conf','!','conflict', id, 'hash 漂移：'+chg)));
   const dirty = st.missing.length + st.extra.length + st.conflictList.length;
   $('#status-hint').textContent = dirty ? `${dirty} 项待 apply` : '全部 in-sync';
   $('#status-list').innerHTML = items.length ? items.join('') : '<div class="diff-empty">无 skill</div>';

@@ -11,7 +11,7 @@
 ```
 skillkit source add <package> [--name <别名>]        # 名称默认从 package 推导（repo 名/目录名），--name 覆盖
 skillkit source list / remove <name>
-skillkit install add <source> <skill> [--scope global|local]   # 固定源直接装；skills.sh 源走 npx skills find 交互选候选
+skillkit install add <source> <skill> [--scope global|local] [--json]   # 固定源直接装；skills.sh 源走 npx skills find 交互选候选（--json 输出候选数组不安装）
 skillkit uninstall <id>
 skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + apply 闭环 + SSE + 默认自动打开浏览器；--token 仅 e2e/localhost 用（默认随机）
 ```
@@ -23,8 +23,8 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 - **canonical 池子 `~/.skillkit/.agents/skills/`**（原 `~/.skillkit/skills/`）：npx skills project scope 在 `cwd=~/.skillkit/` 直接写（`-a universal --copy -y`）。install 统一落池子，不分 scope。global 双层 symlink：池子 → `~/.agents/skills/`（Cursor 等直读）→ `~/.claude/skills/`（Claude 桥接）。
 - **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256），取代 `commit_sha`。`locked_shas` 值同步。registry 字段改名 computed_hash。
 - **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）。
-- `SkillkitError::Git` → `Tool`。`Cargo.lock` 有未提交改动（会话开始即存在）。
-- 测试：45 全绿（core 31 + cli 3 + server 15）+ m0 两个端到端 `#[ignore]` 真跑 npx skills（手动跑）。clippy `pedantic -D warnings` 零 warning。
+- `SkillkitError::Git` → `Tool`。`Cargo.lock` 有未提交改动（会话开始即存在；P4 又加了 `tokio sync` / `tokio-stream sync` features）。
+- 测试：60 全绿（core 34 + cli 3 + server 19 + m0_e2e 1 + m1_e2e 3）+ m0 两个 `#[ignore]` 端到端真跑 npx skills（手动跑）+ 前端 e2e 4 用例。clippy `pedantic -D warnings` 零 warning。
 
 ### 1.3 验证 flow
 
@@ -37,6 +37,10 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
 ## 2. 本会话累积的改动（newest first）
+
+15. **SSE watcher 全局单例**（本会话，P4）：sse.rs 改每目录一个常驻 watcher 线程 + broadcast channel（`OnceLock<Mutex<HashMap<PathBuf, broadcast::Sender>>>`），多连接订阅同一 channel，连接断开只 drop receiver 不重建 watcher——修旧实现「每次连接 spawn 永不退出的 watcher 线程，多次刷新累积」。`BroadcastStream` 落后丢事件由 SSE 下次事件刷新兜底。Cargo.toml 补 `tokio sync`、`tokio-stream sync`。测试 60 全绿。
+
+14. **source 收尾三件**（本会话，P3）：① `install add` 加 `--json`——registry 源输出 find 候选数组 `[{spec,url}]`（不交互不安装，agent 决策用）、固定源输出 SkillMeta JSON；补 3 个 clap 解析测试（cli 测试 0→3）。② demo/index.html SKILLS mock 字段同步 `sha`/`path` → `computed_hash`/`canonical_path`（值改 `~/.skillkit/.agents/skills/<skill>`，清 `~/.skm` 残留），渲染/fallback/冲突文案「sha 漂移」→「hash 漂移」。③ `SourcesStore::load` 旧 schema 检测从 `contains("source_type")` 子串匹配改为解析驱动：`Source` 加 `deny_unknown_fields`，解析失败即备份 `.bak` + 重置默认（覆盖任意坏 TOML）。
 
 13. **前端 e2e 测试设施**（本会话）：`make e2e`——python playwright（pipx 1.55.0）驱动真实 chromium，4 用例覆盖导航重复回归（删除 source 双通道）/实时预览/默认源/增删闭环。serve 加 `--token` 参数（固定 token 供 e2e，默认随机）。e2e 用 `HOME=$TMP` 隔离 + 固定端口 7417（避 7317），不进 `make check`。`e2e/test_ui.py` + `e2e/fixtures.py`（无 pytest 纯脚本）。文档：`docs/frontend-rules.md` §5、CLAUDE.md §9。**踩坑**：`networkidle` 会被 SSE 长连接拖死（改 `wait_until="load"` + `expect` 轮询）；`/ping` 是公开路由不能拼 token base。测试 52 全绿 + e2e 4 用例过。
 
@@ -96,9 +100,10 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 
 ## 4. 验证清单（重载 / 切换后立即跑）
 
-- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 31 + cli + server 15 + clippy `-D warnings` 零 warning）。
+- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 34 + cli 3 + server 19 + clippy `-D warnings` 零 warning）。
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
+- [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
 - [ ] `git status` 干净度：npx.rs 新增、git.rs 删除。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。
 
@@ -109,8 +114,8 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
    - `skillkit upgrade <id>`：`npx skills update <skill>` + 重读 skills-lock.json 的 computed_hash 更新 registry；扫描 `locked_shas` 冲突列受影响项目需 `--yes`（spec §10 line 326）。**语义变了：不再 git pull**。
    - 打包进 mac-config Brewfile（与 cx/rtk 一致）。
 2. **基建债**：CI（GitHub Actions `make check`）、README、Cargo.toml `[package]` 元数据（description/license/repository）。
-3. **source 重构收尾**：CLI registry 源 install 的 `--json` 候选输出未做（现仅交互选）；demo SKILLS mock 的 sha/path 字段未全同步（原型低优先）；sources.toml 旧 schema 检测用 `contains("source_type")` 较糙（项目未发布，可接受）。
-4. **SSE 线程保活优化**（可选）：notify watcher 在 SSE 连接断开后不退出，多次刷新累积线程。本地短时 serve 可接受，长跑需绑定 stream 生命周期。
+3. **source 重构收尾**：~~CLI registry 源 install 的 `--json` 候选输出~~（本会话已完成，install add `--json` 输出候选数组）；~~demo SKILLS mock 字段同步~~（已完成，computed_hash/canonical_path）；~~sources.toml 旧 schema 检测~~（已完成，改解析驱动 `deny_unknown_fields`）。余：无。
+4. ~~**SSE 线程保活优化**（可选）~~：**已完成**（全局单例 watcher + broadcast，连接断开不重建 watcher）。
 
 ## 6. 关键文件路径速查
 
@@ -128,7 +133,7 @@ plan 的代码有几处写法执行时会卡，修正模式（T1-T15 验证过�
 │       ├── templates/{layout,home,sources,skills,profiles,projects,project_workspace}.html + fragments/
 │       ├── static/{htmx.min.js, sortable.min.js, app.css}
 │       └── tests/{common/mod.rs, routes.rs}
-├── demo/index.html            # GUI 设计原型（user-visible，SOURCES mock 已改 package 语义）
+├── demo/index.html            # GUI 设计原型（user-visible，SOURCES mock 已改 package 语义、SKILLS mock 已用 computed_hash/canonical_path）
 └── docs/
     ├── 2026-07-29-skillkit-design.md          # spec（source 模型收敛后的权威）
     ├── design-decisions-2026-07-29.md         # 决策 13 = source 收敛推理
@@ -163,7 +168,7 @@ make run ARGS="serve --port 7317"              # 起 GUI 走查四视图 + Sourc
 
 ### 7.3 优先级
 
-1. M3 三件（import-existing → upgrade → Brewfile）→ 2. 基建债（CI/README/元数据）→ 3. source 收尾（--json 候选）→ 4. SSE 线程优化（可选）。
+1. M3 三件（import-existing → upgrade → Brewfile）→ 2. 基建债（CI/README/元数据）。3. source 收尾（已完成，见 §2-14：install `--json` 候选输出 + demo mock 同步 + 解析驱动旧 schema 检测）。4. SSE 线程优化（已完成，见 §2-15：全局单例 watcher + broadcast）。
 
 ## 7.x (archive) 历史接续路径
 
