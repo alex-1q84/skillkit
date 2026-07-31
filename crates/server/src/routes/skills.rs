@@ -1,4 +1,4 @@
-//! Skills 视图：registry 总览 + install/uninstall。
+//! Skills 视图：registry 总览 + install/upgrade/uninstall。
 use askama::Template;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

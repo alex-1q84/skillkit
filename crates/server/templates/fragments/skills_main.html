@@ -10,6 +10,10 @@
     <td>{{ s.version.as_deref().unwrap_or("-") }}</td>
     <td>{{ s.computed_hash.as_deref().unwrap_or("-") }}</td>
     <td>
+      <form class="inline" hx-post="/{{ token }}/skills/{{ enc }}/install" hx-target="body" hx-swap="outerHTML">
+        <select name="scope"><option value="local">local</option><option value="global">global</option></select>
+        <button>install</button>
+      </form>
       {% if s.computed_hash.is_some() %}
       <button class="u" hx-post="/{{ token }}/skills/{{ enc }}/upgrade" hx-target="body" hx-swap="outerHTML">upgrade</button>
       {% endif %}
