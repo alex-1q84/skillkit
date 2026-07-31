@@ -34,4 +34,5 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/projects/{id}", get(projects::workspace))
         .route("/{token}/projects/{id}/skills", post(projects::set_skills))
         .route("/{token}/projects/{id}/status", get(projects::status))
+        .route("/{token}/projects/{id}/apply", post(projects::apply))
 }

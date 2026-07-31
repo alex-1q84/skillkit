@@ -358,3 +358,60 @@ async fn project_set_skills_replaces_installed() {
         vec!["new/a".to_string(), "new/b".to_string()]
     );
 }
+
+#[tokio::test]
+async fn project_apply_lands_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let canon = dir.path().join(".skillkit/skills/logseq");
+    std::fs::create_dir_all(&canon).unwrap();
+    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "dc/logseq".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/logseq".into(),
+            name: "logseq".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            commit_sha: Some("sha1".into()),
+            installed_at: "2026-07-31".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+    let proj_root = dir.path().join("proj");
+    std::fs::create_dir_all(proj_root.join(".git/info")).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "proj".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec!["dc/logseq".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/apply")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        proj_root.join(".claude/skills/logseq").is_symlink(),
+        "apply 应建 symlink"
+    );
+}

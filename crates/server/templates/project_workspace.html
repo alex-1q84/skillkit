@@ -13,6 +13,7 @@
         {{ meta.id }} [{{ meta.scope }}]</label><br>
       {% endfor %}
       <button>update</button>
+      <button class="apply" hx-post="/{{ token }}/projects/{{ project.id }}/apply" hx-target="#status-panel" hx-swap="outerHTML">▶ APPLY</button>
     </form>
   </section>
 

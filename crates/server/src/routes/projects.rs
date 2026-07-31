@@ -1,4 +1,4 @@
-//! Projects 视图：列表 + 工作台（声明编辑 + status 片段；apply 在 Task 13、shared 只读）。
+//! Projects 视图：列表 + 工作台（声明编辑 + apply 闭环；shared 只读）。
 use askama::Template;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -6,7 +6,8 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use form_urlencoded::parse;
 use skillkit_core::{
-    build_status, compute_diff, scan_shared, ApplyDiff, Project, Registry, SkillMeta, StatusView,
+    build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, Project, Registry,
+    SkillMeta, StatusView,
 };
 use std::path::Path as StdPath;
 
@@ -34,6 +35,14 @@ pub struct WorkspaceTpl<'a> {
 #[template(path = "fragments/status.html")]
 pub struct StatusTpl {
     pub status: StatusView,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/apply_result.html")]
+pub struct ApplyResultTpl<'a> {
+    pub token: &'a str,
+    pub project_id: &'a str,
+    pub report: ApplyReport,
 }
 
 pub async fn list(State(state): State<AppState>, Path(token): Path<String>) -> Response {
@@ -88,6 +97,33 @@ pub async fn status(
         return StatusCode::NOT_FOUND.into_response();
     };
     status_fragment(state, proj)
+}
+
+/// apply：调 core run_apply 落地，保存 locked_shas，返回 apply 结果片段。
+pub async fn apply(
+    State(state): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+) -> Response {
+    let Ok(mut proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let report = match run_apply(&state.paths, &mut proj, false) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = ?e, "apply 失败");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let rendered = ApplyResultTpl {
+        token: &token,
+        project_id: &id,
+        report,
+    }
+    .render();
+    render_str(rendered)
 }
 
 fn render_workspace(state: AppState, token: String, proj: Project) -> Response {
