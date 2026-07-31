@@ -68,6 +68,7 @@ pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
         if let Some(pkg) = package {
             if dry_run {
                 report.reinstalled.push(name.clone());
+                registered.insert(name.clone());
                 report.imported.push(name);
                 continue;
             }
@@ -98,6 +99,7 @@ pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
             registered.insert(name.clone());
             report.unmanaged.push(name.clone());
         } else {
+            registered.insert(name.clone());
             report.unmanaged.push(name.clone());
         }
         report.imported.push(name);
@@ -248,6 +250,25 @@ mod tests {
             Registry::load(&paths).unwrap().skills.is_empty(),
             "dry-run 不写 registry"
         );
+    }
+
+    #[test]
+    fn import_dry_run_dedups_same_name_across_dirs() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // 迁移场景：同名 skill 同时存在于 agents 与 claude 两处
+        make_skill(&paths.agents_skills_dir(), "foo");
+        make_skill(&paths.claude_skills_dir(), "foo");
+
+        let report = import_existing(&paths, true).unwrap();
+
+        // dry-run 与真实运行一致：第一个登记为 unmanaged，第二个跳过
+        assert_eq!(
+            report.unmanaged.iter().filter(|n| *n == "foo").count(),
+            1,
+            "同名跨目录 dry-run 只报一次 unmanaged"
+        );
+        assert!(report.skipped.contains(&"foo".to_string()));
     }
 
     #[test]
