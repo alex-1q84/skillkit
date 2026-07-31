@@ -12,6 +12,8 @@ use axum::{
 use rust_embed::RustEmbed;
 use skillkit_core::Paths;
 
+mod routes;
+
 /// 共享状态：注入的路径根 + 随机鉴权 token。
 #[derive(Clone)]
 pub struct AppState {
@@ -26,11 +28,8 @@ struct Asset;
 
 /// 装配 router（测试用 oneshot 打它，serve 用它起真实 server）。
 pub fn app(state: AppState) -> Router {
-    // Axum 0.8 路由参数用 {token}（非 :token）。所有业务挂在 /{token}/ 下，layer 校验 token。
-    let protected = Router::new()
-        .route("/{token}", get(home))
-        .layer(from_fn_with_state(state.clone(), require_token));
-
+    // 受保护路由（/{token}/ 业务）在 routes::protected 装配，layer 校验 token。
+    let protected = routes::protected().layer(from_fn_with_state(state.clone(), require_token));
     Router::new()
         .route("/ping", get(ping))
         .route("/static/{file}", get(static_handler))
@@ -49,7 +48,7 @@ struct HomeTpl {
     token: String,
 }
 
-/// home 页：渲染 layout + nav。Task 7 起各视图 extends layout。
+/// home 页：渲染 layout + nav。
 pub(crate) async fn home(Path(token): Path<String>) -> Response {
     let rendered = HomeTpl { token }.render();
     match rendered {

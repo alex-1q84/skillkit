@@ -86,3 +86,37 @@ async fn home_renders_layout_with_nav() {
     assert!(body.contains("/test-token/projects"));
     assert!(body.contains("htmx.min.js"));
 }
+
+#[tokio::test]
+async fn sources_page_lists_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut store = skillkit_core::SourcesStore::default();
+    store
+        .add(skillkit_core::source::Source {
+            name: "demo".into(),
+            source_type: skillkit_core::source::SourceType::Git,
+            url: Some("git@example/x.git".into()),
+            path: None,
+            ref_: None,
+            skills_dir: None,
+        })
+        .unwrap();
+    store.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/sources")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(common::body_string(resp).await.contains("demo"));
+}

@@ -20,4 +20,5 @@ pub use paths::Paths;
 pub use profile::{list_names as list_profile_names, Profile};
 pub use project::{list_ids as list_project_ids, Project};
 pub use registry::{Registry, Scope, SkillMeta};
+pub use source::SourcesStore;
 pub use symlink::ensure_global_claude;

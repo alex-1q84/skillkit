@@ -11,6 +11,16 @@ pub enum SourceType {
     Local,
 }
 
+impl std::fmt::Display for SourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SkillsSh => write!(f, "skills-sh"),
+            Self::Git => write!(f, "git"),
+            Self::Local => write!(f, "local"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub name: String,
