@@ -46,18 +46,43 @@ pub fn upgrade_skill(paths: &Paths, id: &str, yes: bool) -> Result<UpgradeReport
     })
 }
 
-/// 升级全部 registry skill。unmanaged / 未安装 / 冲突 / 下载失败的跳过并 warn，不中断。
-pub fn upgrade_all(paths: &Paths, yes: bool) -> Result<Vec<UpgradeReport>> {
+/// --all 升级结果：upgraded 成功的 + blocked 冲突未升的。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpgradeAllReport {
+    pub upgraded: Vec<UpgradeReport>,
+    /// 冲突被拦截的 skill（id + 受影响项目），未升级。
+    pub blocked: Vec<UpgradeBlockedInfo>,
+}
+
+/// 单个被冲突拦截的 skill。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpgradeBlockedInfo {
+    pub id: String,
+    /// 锁了当前 hash、升级后版本基线会漂移的项目。
+    pub affected: Vec<String>,
+}
+
+/// 升级全部 registry skill。
+///
+/// - 成功的进 `upgraded`
+/// - 冲突（UpgradeBlocked）的进 `blocked`，不升级也不中断
+/// - unmanaged / 未安装 / 下载失败等其余错误 warn 后跳过（--all 的预期语义，不列出）
+/// - 任一单点失败都不中断整个批量升级
+pub fn upgrade_all(paths: &Paths, yes: bool) -> Result<UpgradeAllReport> {
     let reg = Registry::load(paths)?;
     let ids: Vec<String> = reg.skills.keys().cloned().collect();
-    let mut reports = Vec::new();
+    let mut upgraded = Vec::new();
+    let mut blocked = Vec::new();
     for id in ids {
         match upgrade_skill(paths, &id, yes) {
-            Ok(r) => reports.push(r),
+            Ok(r) => upgraded.push(r),
+            Err(SkillkitError::UpgradeBlocked { id, affected }) => {
+                blocked.push(UpgradeBlockedInfo { id, affected });
+            }
             Err(e) => tracing::warn!(error = ?e, "upgrade 跳过 {id}"),
         }
     }
-    Ok(reports)
+    Ok(UpgradeAllReport { upgraded, blocked })
 }
 
 /// 找「升级后受影响」的项目：locked_shas[id] == old_hash（当前同步，升级后会漂移）。
@@ -177,5 +202,68 @@ mod tests {
         save_project(&paths, "P3", &[("dc/foo", "other")]);
         let affected = find_affected_projects(&paths, "dc/foo", "oldhash").unwrap();
         assert_eq!(affected, vec!["P1".to_string()]);
+    }
+
+    #[test]
+    fn upgrade_all_collects_blocked_and_skips_unmanaged() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // 拦截真实 npx：`skills@latest update <skill> -y` 往 cwd 写 skills-lock.json，
+        // 让 dc/ok 的升级路径在本机/无网环境下也能闭合（其余分支在 npx 之前就返回）。
+        install_fake_npx(&paths);
+        // managed 且无人锁定 → 正常升级
+        install_managed(&paths, "dc/ok", "hashA");
+        // managed 但 P1 锁当前 hash → 冲突拦截
+        install_managed(&paths, "dc/conflict", "hashB");
+        save_project(&paths, "P1", &[("dc/conflict", "hashB")]);
+        save_project(&paths, "P2", &[("dc/conflict", "other")]);
+        // unmanaged → 无版本锁，warn 跳过
+        install_unmanaged(&paths, "unm");
+
+        let all = upgrade_all(&paths, false).unwrap();
+        assert_eq!(all.upgraded.len(), 1, "只有 dc/ok 成功升级");
+        assert_eq!(all.upgraded[0].id, "dc/ok");
+        assert_eq!(all.blocked.len(), 1, "dc/conflict 被拦截且列出");
+        assert_eq!(all.blocked[0].id, "dc/conflict");
+        assert_eq!(all.blocked[0].affected, vec!["P1".to_string()]);
+        assert!(
+            !all.upgraded.iter().any(|r| r.id == "unmanaged/unm"),
+            "unmanaged 跳过，不进 upgraded"
+        );
+        assert!(
+            !all.blocked.iter().any(|b| b.id == "unmanaged/unm"),
+            "unmanaged 跳过，不进 blocked"
+        );
+        // 升级落库：registry 已换成 fake npx 写回的新 hash
+        let reg = Registry::load(&paths).unwrap();
+        assert_eq!(
+            reg.get("dc/ok").unwrap().computed_hash.as_deref(),
+            Some("hashnew")
+        );
+    }
+
+    /// 往 PATH 前插一个假 npx：只响应 `skills@latest update <skill> -y`，
+    /// 在 cwd（~/.skillkit/）写 skills-lock.json，返回 upgrade 后的新 hash。
+    fn install_fake_npx(paths: &Paths) {
+        let bin = paths.skillkit_dir().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let sh = bin.join("npx");
+        std::fs::write(
+            &sh,
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"skills@latest\" ] && [ \"$2\" = \"update\" ]; then\n\
+             \x20 printf '{\"skills\": {\"%s\": {\"computedHash\": \"hashnew\"}}}' \"$3\" > skills-lock.json\n\
+             \x20 exit 0\n\
+             fi\n\
+             exit 1\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), path));
     }
 }

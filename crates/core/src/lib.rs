@@ -29,4 +29,6 @@ pub use project::{list_ids as list_project_ids, Project};
 pub use registry::{Registry, Scope, SkillMeta};
 pub use source::{derive_source_name, Source, SourcesStore};
 pub use symlink::ensure_global_claude;
-pub use upgrade::{upgrade_all, upgrade_skill, UpgradeReport};
+pub use upgrade::{
+    upgrade_all, upgrade_skill, UpgradeAllReport, UpgradeBlockedInfo, UpgradeReport,
+};

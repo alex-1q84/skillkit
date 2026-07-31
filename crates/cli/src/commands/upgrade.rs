@@ -1,5 +1,6 @@
 //! upgrade 子命令：skillkit upgrade <id> | --all [--yes] [--json]。
-//! 冲突时 core 返回 UpgradeBlocked，人类模式打印受影响项目并 y/n 交互确认；--json 输出错误 JSON。
+//! 单挑冲突时 core 返回 UpgradeBlocked，人类模式打印受影响项目并 y/n 交互确认；--json 输出错误 JSON。
+//! --all 冲突不中断也不静默：升级可升级的，被拦截的进 blocked 列出受影响项目（不交互）。
 use clap::Parser;
 use skillkit_core::{paths::Paths, SkillkitError};
 
@@ -74,12 +75,12 @@ fn run_one(paths: &Paths, id: &str, yes: bool, json: bool) -> anyhow::Result<()>
 }
 
 fn run_all(paths: &Paths, yes: bool, json: bool) -> anyhow::Result<()> {
-    let reports = skillkit_core::upgrade_all(paths, yes)?;
+    let all = skillkit_core::upgrade_all(paths, yes)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&reports)?);
+        println!("{}", serde_json::to_string_pretty(&all)?);
     } else {
-        println!("已升级 {} 个 skill", reports.len());
-        for r in &reports {
+        println!("已升级 {} 个 skill", all.upgraded.len());
+        for r in &all.upgraded {
             println!(
                 "  ✓ {} {} → {}",
                 r.id,
@@ -89,6 +90,15 @@ fn run_all(paths: &Paths, yes: bool, json: bool) -> anyhow::Result<()> {
             for p in &r.affected_projects {
                 println!("    ⚠ 项目 {p} 需重新 apply");
             }
+        }
+        // 冲突拦截不静默：列出受影响项目，并给出下一步（反馈引导行动）
+        for b in &all.blocked {
+            println!(
+                "⚠ 跳过 {}：升级将影响项目 {}（如需升级请 skillkit upgrade {}）",
+                b.id,
+                b.affected.join(", "),
+                b.id
+            );
         }
     }
     Ok(())
