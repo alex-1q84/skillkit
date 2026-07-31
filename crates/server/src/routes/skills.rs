@@ -122,6 +122,20 @@ pub async fn uninstall(
     }
 }
 
+pub async fn upgrade(
+    State(state): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+) -> Response {
+    // GUI 场景已显式点击升级，yes=true 不二次确认
+    match skillkit_core::upgrade_skill(&state.paths, &id, true) {
+        Ok(_) => render_skills(state, token, false),
+        Err(e) => {
+            tracing::error!(error = ?e, "upgrade 失败：{id}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 fn render_str(rendered: askama::Result<String>) -> Response {
     match rendered {
         Ok(html) => Html(html).into_response(),

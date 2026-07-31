@@ -591,3 +591,67 @@ async fn home_trailing_slash_reachable() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn skill_upgrade_endpoint_returns_500_on_unmanaged() {
+    // unmanaged skill（computed_hash=None）无法升级，端点应返回 500 且不 panic。
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "unmanaged/foo".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: skillkit_core::Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: "2026-07-31".into(),
+            canonical_path: dir
+                .path()
+                .join(".agents/skills/foo")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/unmanaged%2Ffoo/upgrade")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn skill_upgrade_endpoint_returns_500_on_unknown() {
+    // 未安装 skill upgrade → SkillNotInstalled → 500（core 报错，handler 不 panic）
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/nope%2Fx/upgrade")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}

@@ -34,6 +34,7 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/skills", get(skills::page))
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
+        .route("/{token}/skills/{id}/upgrade", post(skills::upgrade))
         .route(
             "/{token}/profiles",
             get(profiles::page).post(profiles::create),
