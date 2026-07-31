@@ -1,5 +1,5 @@
 //! 已安装 skill 元数据（registry.json），以 id 为 key。单版本模型：canonical 物理
-//! 只有一份，版本信息记在 commit_sha，registry 不存多版本。
+//! 只有一份，版本信息记在 computed_hash（源自 skills-lock.json），registry 不存多版本。
 use crate::error::{Result, SkillkitError};
 use crate::paths::Paths;
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ pub struct SkillMeta {
     pub source: String,
     pub scope: Scope,
     pub version: Option<String>,
-    pub commit_sha: Option<String>,
+    pub computed_hash: Option<String>,
     pub installed_at: String,
     pub canonical_path: String,
 }
@@ -98,7 +98,7 @@ mod tests {
             source: id.split('/').next().unwrap_or("").into(),
             scope,
             version: Some("1.0.0".into()),
-            commit_sha: Some("abc123".into()),
+            computed_hash: Some("abc123".into()),
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: format!("~/.agents/skills/{}", id.split('/').nth(1).unwrap_or(id)),
         }

@@ -105,6 +105,7 @@ async fn require_token(State(state): State<AppState>, req: Request, next: Next) 
 /// open=true 时用默认浏览器打开（listener 绑好后调，浏览器请求能立即连上）。
 pub async fn serve(port: u16, open: bool) -> anyhow::Result<()> {
     let paths = Paths::production();
+    skillkit_core::SourcesStore::ensure_default(&paths)?;
     let token = uuid::Uuid::new_v4().simple().to_string();
     let state = AppState {
         paths,

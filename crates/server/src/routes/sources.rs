@@ -1,11 +1,11 @@
-//! Sources 视图：展示安装源注册表 + 增删。
+//! Sources 视图：展示安装源注册表 + 增删。Source 极简 {name, package}。
 use askama::Template;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
-use skillkit_core::source::{Source, SourceType};
+use skillkit_core::source::Source;
 use skillkit_core::SourcesStore;
 
 use crate::AppState;
@@ -41,12 +41,7 @@ fn render_sources(state: AppState, token: String) -> Response {
 #[derive(Deserialize)]
 pub struct SourceForm {
     name: String,
-    source_type: String,
-    url: Option<String>,
-    path: Option<String>,
-    #[serde(rename = "ref")]
-    ref_: Option<String>,
-    skills_dir: Option<String>,
+    package: Option<String>,
 }
 
 pub async fn add(
@@ -54,18 +49,9 @@ pub async fn add(
     Path(token): Path<String>,
     Form(f): Form<SourceForm>,
 ) -> Response {
-    let source_type = match f.source_type.as_str() {
-        "git" => SourceType::Git,
-        "local" => SourceType::Local,
-        _ => SourceType::SkillsSh,
-    };
     let src = Source {
         name: f.name,
-        source_type,
-        url: f.url,
-        path: f.path,
-        ref_: f.ref_,
-        skills_dir: f.skills_dir,
+        package: f.package.filter(|s| !s.is_empty()),
     };
     match SourcesStore::load(&state.paths) {
         Ok(mut store) => {

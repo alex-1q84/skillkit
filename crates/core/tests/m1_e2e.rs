@@ -23,7 +23,7 @@ fn install_local_bare(paths: &Paths, id: &str) {
         source: id.split('/').next().unwrap_or("").into(),
         scope: Scope::Local,
         version: None,
-        commit_sha: Some("sha1".into()),
+        computed_hash: Some("sha1".into()),
         installed_at: "2026-07-29T00:00:00Z".into(),
         canonical_path: canon.to_string_lossy().into_owned(),
     });
@@ -94,8 +94,8 @@ fn m1_global_skill_not_per_project() {
     let paths = Paths::new(tmp.path().to_path_buf());
     let project_root = tmp.path().join("proj");
     std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
-    // global canonical
-    let canon = paths.agents_skills_dir().join("gskill");
+    // global canonical（池子）
+    let canon = paths.skillkit_skills_dir().join("gskill");
     std::fs::create_dir_all(&canon).unwrap();
     std::fs::write(canon.join("SKILL.md"), "g").unwrap();
     let mut reg = Registry::load(&paths).unwrap();
@@ -105,7 +105,7 @@ fn m1_global_skill_not_per_project() {
         source: "dc".into(),
         scope: Scope::Global,
         version: None,
-        commit_sha: Some("sha".into()),
+        computed_hash: Some("sha".into()),
         installed_at: "2026-07-29T00:00:00Z".into(),
         canonical_path: canon.to_string_lossy().into_owned(),
     });

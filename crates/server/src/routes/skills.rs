@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
-use skillkit_core::{registry::SkillMeta, Registry, Scope};
+use skillkit_core::{registry::SkillMeta, Registry, Scope, SourcesStore};
 
 use crate::AppState;
 
@@ -61,7 +61,25 @@ pub async fn install(
     } else {
         Scope::Local
     };
-    match skillkit_core::install(&state.paths, source, skill, scope) {
+    // web install 仅支持固定源（有 package）；registry 源（skills.sh）走 CLI find 选候选
+    let store = match SourcesStore::load(&state.paths) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = ?e, "加载 sources 失败");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let src = match store.get(source) {
+        Ok(s) => s.clone(),
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let Some(package) = src.package else {
+        tracing::error!(
+            "registry 源 {source} 的 install 请用 CLI（skillkit install add {source} {skill}）走 find 选候选"
+        );
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match skillkit_core::install(&state.paths, source, skill, &package, scope) {
         Ok(_) => render_skills(state, token),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");

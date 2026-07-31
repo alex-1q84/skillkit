@@ -14,7 +14,7 @@ pub struct LocalTarget {
     pub skill_id: String,
     pub agent: String,
     pub canonical_path: String,
-    pub commit_sha: String,
+    pub computed_hash: String,
 }
 
 /// apply 内部 diff：expected（应落地的 local target）+ conflicts（sha 漂移的 skill）。
@@ -26,7 +26,7 @@ pub struct ApplyDiff {
 }
 
 /// 计算 diff：expected = installed_skills 中 local scope 的 skill × agents；
-/// conflicts = locked_shas 与 registry.commit_sha 不一致（sha 漂移）。
+/// conflicts = locked_shas 与 registry.computed_hash 不一致（sha 漂移）。
 pub fn compute_diff(project: &Project, registry: &Registry) -> Result<ApplyDiff> {
     let mut expected = Vec::new();
     let mut conflicts = Vec::new();
@@ -37,7 +37,7 @@ pub fn compute_diff(project: &Project, registry: &Registry) -> Result<ApplyDiff>
         if meta.scope != Scope::Local {
             continue; // global 不 per-project 落地
         }
-        let sha = meta.commit_sha.clone().unwrap_or_default();
+        let sha = meta.computed_hash.clone().unwrap_or_default();
         if let Some(locked) = project.locked_shas.get(id) {
             if locked != &sha {
                 conflicts.push(id.clone());
@@ -49,7 +49,7 @@ pub fn compute_diff(project: &Project, registry: &Registry) -> Result<ApplyDiff>
                 skill_id: id.clone(),
                 agent: agent.clone(),
                 canonical_path: canonical.clone(),
-                commit_sha: sha.clone(),
+                computed_hash: sha.clone(),
             });
         }
     }
@@ -106,15 +106,15 @@ fn land_one(
         if !supports_symlink {
             let sha_file = dest.join(".skillkit-sha");
             let current = std::fs::read_to_string(&sha_file).unwrap_or_default();
-            if current == target.commit_sha {
+            if current == target.computed_hash {
                 return Ok((false, false)); // 副本未过期，幂等跳过
             }
             std::fs::remove_dir_all(&dest)?;
             copy_dir_all(canonical, &dest)?;
-            std::fs::write(sha_file, &target.commit_sha)?;
+            std::fs::write(sha_file, &target.computed_hash)?;
             return Ok((false, true)); // 过期重 copy
         }
-        return Err(SkillkitError::Git {
+        return Err(SkillkitError::Tool {
             message: format!(
                 "{} 已存在且非 symlink，疑似 shared，跳过 local 落地",
                 dest.display()
@@ -130,13 +130,13 @@ fn land_one(
             std::fs::remove_file(&dest)?; // 指向错误，删旧重建
         }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(canonical, &dest).map_err(|e| SkillkitError::Git {
+        std::os::unix::fs::symlink(canonical, &dest).map_err(|e| SkillkitError::Tool {
             message: format!("symlink 失败：{e}"),
         })?;
         Ok((true, false))
     } else {
         copy_dir_all(canonical, &dest)?;
-        std::fs::write(dest.join(".skillkit-sha"), &target.commit_sha)?;
+        std::fs::write(dest.join(".skillkit-sha"), &target.computed_hash)?;
         Ok((true, false))
     }
 }
@@ -147,11 +147,11 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         .arg(src)
         .arg(dst)
         .status()
-        .map_err(|e| SkillkitError::Git {
+        .map_err(|e| SkillkitError::Tool {
             message: e.to_string(),
         })?;
     if !status.success() {
-        return Err(SkillkitError::Git {
+        return Err(SkillkitError::Tool {
             message: format!("复制失败：{}", src.display()),
         });
     }
@@ -249,7 +249,7 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
         }
     }
     if frozen && !diff.conflicts.is_empty() {
-        return Err(SkillkitError::Git {
+        return Err(SkillkitError::Tool {
             message: format!("--frozen：版本冲突 {}", diff.conflicts.join(", ")),
         });
     }
@@ -319,7 +319,7 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
     for target in &diff.expected {
         project
             .locked_shas
-            .insert(target.skill_id.clone(), target.commit_sha.clone());
+            .insert(target.skill_id.clone(), target.computed_hash.clone());
     }
     Ok(report)
 }
@@ -379,7 +379,7 @@ mod tests {
             source: id.split('/').next().unwrap_or("").into(),
             scope,
             version: None,
-            commit_sha: Some(sha.into()),
+            computed_hash: Some(sha.into()),
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: format!("/canon/{}", id.split('/').next_back().unwrap_or(id)),
         }
@@ -435,14 +435,14 @@ mod tests {
         let home = tmp.path();
         let project_root = home.join("proj");
         std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
-        let canon = home.join(".skillkit/skills/logseq");
+        let canon = home.join(".skillkit/.agents/skills/logseq");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
         let target = LocalTarget {
             skill_id: "dc/logseq".into(),
             agent: "claude-code".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
-            commit_sha: "sha1".into(),
+            computed_hash: "sha1".into(),
         };
         let (created, _) = land_one(&project_root, &target, true).unwrap();
         assert!(created);
@@ -461,14 +461,14 @@ mod tests {
         let home = tmp.path();
         let project_root = home.join("proj");
         std::fs::create_dir_all(&project_root).unwrap();
-        let canon = home.join(".skillkit/skills/foo");
+        let canon = home.join(".skillkit/.agents/skills/foo");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "v1").unwrap();
         let t1 = LocalTarget {
             skill_id: "dc/foo".into(),
             agent: "cursor".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
-            commit_sha: "sha1".into(),
+            computed_hash: "sha1".into(),
         };
         land_one(&project_root, &t1, false).unwrap();
         let dest = project_root.join(".cursor/skills/foo");
@@ -479,7 +479,7 @@ mod tests {
         );
         std::fs::write(canon.join("SKILL.md"), "v2").unwrap();
         let t2 = LocalTarget {
-            commit_sha: "sha2".into(),
+            computed_hash: "sha2".into(),
             ..t1
         };
         let (_, recopied) = land_one(&project_root, &t2, false).unwrap();
@@ -498,7 +498,7 @@ mod tests {
             source: id.split('/').next().unwrap_or("").into(),
             scope: Scope::Local,
             version: None,
-            commit_sha: Some(sha.into()),
+            computed_hash: Some(sha.into()),
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });
@@ -573,6 +573,6 @@ mod tests {
                 .collect(),
         };
         let err = run_apply(&paths, &mut proj, true).unwrap_err();
-        assert!(matches!(err, SkillkitError::Git { .. }));
+        assert!(matches!(err, SkillkitError::Tool { .. }));
     }
 }

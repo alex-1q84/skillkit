@@ -2,9 +2,9 @@
 pub mod apply;
 pub mod config;
 pub mod error;
-pub mod git;
 pub mod install;
 pub mod lock;
+pub mod npx;
 pub mod paths;
 pub mod profile;
 pub mod project;
@@ -19,9 +19,10 @@ pub use apply::{
 pub use error::{Result, SkillkitError};
 pub use install::{install, uninstall};
 pub use lock::FileLock;
+pub use npx::Candidate;
 pub use paths::Paths;
 pub use profile::{list_names as list_profile_names, Profile};
 pub use project::{list_ids as list_project_ids, Project};
 pub use registry::{Registry, Scope, SkillMeta};
-pub use source::SourcesStore;
+pub use source::{Source, SourcesStore};
 pub use symlink::ensure_global_claude;

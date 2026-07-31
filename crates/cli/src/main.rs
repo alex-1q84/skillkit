@@ -32,6 +32,8 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
+    // 启动确保默认源种子（sources.toml 不存在则写入 skills.sh registry 入口）
+    skillkit_core::SourcesStore::ensure_default(&skillkit_core::Paths::production())?;
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Source(cmd) => commands::source::run(cmd)?,

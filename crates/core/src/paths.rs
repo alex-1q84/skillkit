@@ -34,9 +34,9 @@ impl Paths {
         self.home.join(".claude").join("skills")
     }
 
-    /// 项目 local skill 的集中 canonical（M0 装进来，M1 才 per-project 落地）。
+    /// canonical 池子：所有 skill 集中存储（单版本），npx skills project scope 直接写入。
     pub fn skillkit_skills_dir(&self) -> PathBuf {
-        self.skillkit_dir().join("skills")
+        self.skillkit_dir().join(".agents").join("skills")
     }
 
     pub fn sources_path(&self) -> PathBuf {
@@ -80,7 +80,7 @@ mod tests {
         );
         assert_eq!(
             p.skillkit_skills_dir(),
-            PathBuf::from("/tmp/fakehome/.skillkit/skills")
+            PathBuf::from("/tmp/fakehome/.skillkit/.agents/skills")
         );
         assert_eq!(
             p.sources_path(),

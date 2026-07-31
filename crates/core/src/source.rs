@@ -1,36 +1,15 @@
-//! 安装源注册表（sources.toml）。三种源：skills-sh / git / local。
+//! 安装源注册表（sources.toml）。Source 极简成 {name, package}：
+//! package 是 npx skills 的 source format 串（github shorthand / git url / local path）；
+//! None 表示 registry 搜索入口（skills.sh 默认源）。
 use crate::error::{Result, SkillkitError};
 use crate::paths::Paths;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub enum SourceType {
-    SkillsSh,
-    Git,
-    Local,
-}
-
-impl std::fmt::Display for SourceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SkillsSh => write!(f, "skills-sh"),
-            Self::Git => write!(f, "git"),
-            Self::Local => write!(f, "local"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub name: String,
-    pub source_type: SourceType,
-    pub url: Option<String>,
-    pub path: Option<String>,
-    #[serde(rename = "ref")]
-    pub ref_: Option<String>,
-    /// skill 在 git/local 源仓库中的子目录（一仓库多 skill 场景）；None=skill 在仓库根。
-    pub skills_dir: Option<String>,
+    /// npx skills source format（github shorthand / git url / local path）；None=registry 搜索入口。
+    pub package: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,6 +25,11 @@ impl SourcesStore {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&path)?;
+        // 旧 schema（含 source_type 字段）不兼容：备份后视为空（项目未发布，无线上数据）。
+        if content.contains("source_type") {
+            let _ = std::fs::rename(&path, path.with_extension("toml.bak"));
+            return Ok(Self::default());
+        }
         Ok(toml::from_str(&content)?)
     }
 
@@ -92,6 +76,21 @@ impl SourcesStore {
                 name: name.to_string(),
             })
     }
+
+    /// 入口层（CLI main / server 启动）调：sources.toml 不存在时种子写入 skills.sh
+    /// 默认源（registry 搜索入口）。用户可删，删了不加回。
+    pub fn ensure_default(paths: &Paths) -> Result<()> {
+        if paths.sources_path().exists() {
+            return Ok(());
+        }
+        Self {
+            sources: vec![Source {
+                name: "skills.sh".into(),
+                package: None,
+            }],
+        }
+        .save(paths)
+    }
 }
 
 #[cfg(test)]
@@ -113,11 +112,7 @@ mod tests {
         store
             .add(Source {
                 name: "team-private".into(),
-                source_type: SourceType::Git,
-                url: Some("git@github.com:org/team.git".into()),
-                path: None,
-                ref_: Some("main".into()),
-                skills_dir: None,
+                package: Some("git@github.com:org/team.git".into()),
             })
             .unwrap();
         store.save(&p).unwrap();
@@ -135,11 +130,7 @@ mod tests {
         let mut store = SourcesStore::default();
         let s = Source {
             name: "x".into(),
-            source_type: SourceType::Local,
-            url: None,
-            path: Some("~/x".into()),
-            ref_: None,
-            skills_dir: None,
+            package: Some("~/x".into()),
         };
         store.add(s.clone()).unwrap();
         assert!(store.add(s).is_err());
@@ -152,5 +143,33 @@ mod tests {
             store.remove("nope"),
             Err(SkillkitError::SourceNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn ensure_default_seeds_skills_sh_when_absent() {
+        let p = paths();
+        assert!(!p.sources_path().exists());
+        SourcesStore::ensure_default(&p).unwrap();
+        let store = SourcesStore::load(&p).unwrap();
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.list()[0].name, "skills.sh");
+        assert!(store.list()[0].package.is_none());
+        // 已存在不再覆盖
+        SourcesStore::ensure_default(&p).unwrap();
+        assert_eq!(SourcesStore::load(&p).unwrap().list().len(), 1);
+    }
+
+    #[test]
+    fn legacy_schema_backed_up_and_reset() {
+        let p = paths();
+        std::fs::create_dir_all(p.skillkit_dir()).unwrap();
+        std::fs::write(
+            p.sources_path(),
+            "[[sources]]\nname=\"old\"\nsource_type=\"git\"\nurl=\"x\"\n",
+        )
+        .unwrap();
+        let store = SourcesStore::load(&p).unwrap();
+        assert!(store.list().is_empty());
+        assert!(p.sources_path().with_extension("toml.bak").exists());
     }
 }

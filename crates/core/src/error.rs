@@ -14,8 +14,8 @@ pub enum SkillkitError {
     #[error("skill 已存在：{id}")]
     SkillAlreadyInstalled { id: String },
 
-    #[error("git 操作失败：{message}")]
-    Git { message: String },
+    #[error("外部工具调用失败：{message}")]
+    Tool { message: String },
 
     #[error("IO 错误：{0}")]
     Io(#[from] std::io::Error),

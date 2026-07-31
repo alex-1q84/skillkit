@@ -96,13 +96,9 @@ async fn sources_page_lists_sources() {
     };
     let mut store = skillkit_core::SourcesStore::default();
     store
-        .add(skillkit_core::source::Source {
+        .add(skillkit_core::Source {
             name: "demo".into(),
-            source_type: skillkit_core::source::SourceType::Git,
-            url: Some("git@example/x.git".into()),
-            path: None,
-            ref_: None,
-            skills_dir: None,
+            package: Some("git@example/x.git".into()),
         })
         .unwrap();
     store.save(&state.paths).unwrap();
@@ -137,7 +133,7 @@ async fn skills_page_lists_registry() {
             source: "demo".into(),
             scope: skillkit_core::Scope::Local,
             version: None,
-            commit_sha: None,
+            computed_hash: None,
             installed_at: "2026-07-31".into(),
             canonical_path: "/x".into(),
         },
@@ -265,7 +261,7 @@ async fn source_add_persists() {
                     axum::http::header::CONTENT_TYPE,
                     "application/x-www-form-urlencoded",
                 )
-                .body(Body::from("name=git-src&source_type=git&url=git%40x"))
+                .body(Body::from("name=git-src&package=git%40x"))
                 .unwrap(),
         )
         .await
@@ -291,7 +287,7 @@ async fn skill_uninstall_removes_from_registry() {
             source: "demo".into(),
             scope: skillkit_core::Scope::Global,
             version: None,
-            commit_sha: None,
+            computed_hash: None,
             installed_at: "2026-07-31".into(),
             canonical_path: dir
                 .path()
@@ -366,7 +362,7 @@ async fn project_apply_lands_symlink() {
         paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
         token: "test-token".into(),
     };
-    let canon = dir.path().join(".skillkit/skills/logseq");
+    let canon = dir.path().join(".skillkit/.agents/skills/logseq");
     std::fs::create_dir_all(&canon).unwrap();
     std::fs::write(canon.join("SKILL.md"), "x").unwrap();
     let mut reg = skillkit_core::Registry::default();
@@ -378,7 +374,7 @@ async fn project_apply_lands_symlink() {
             source: "dc".into(),
             scope: skillkit_core::Scope::Local,
             version: None,
-            commit_sha: Some("sha1".into()),
+            computed_hash: Some("sha1".into()),
             installed_at: "2026-07-31".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         },

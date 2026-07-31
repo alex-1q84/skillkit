@@ -3,28 +3,16 @@
 <h1>Sources</h1>
 <form class="row" hx-post="/{{ token }}/sources" hx-target="body" hx-swap="outerHTML">
   <input name="name" placeholder="name" required>
-  <select name="source_type">
-    <option value="git">git</option>
-    <option value="local">local</option>
-    <option value="skills-sh">skills-sh</option>
-  </select>
-  <input name="url" placeholder="url (git)">
-  <input name="path" placeholder="path (local)">
-  <input name="ref" placeholder="ref">
-  <input name="skills_dir" placeholder="skills_dir">
+  <input name="package" placeholder="package（git url / local path / owner-repo；省略=skills.sh）">
   <button>add</button>
 </form>
 <table class="data">
-  <thead><tr><th>name</th><th>type</th><th>url</th><th>path</th><th>ref</th><th>skills_dir</th><th>ops</th></tr></thead>
+  <thead><tr><th>name</th><th>package</th><th>ops</th></tr></thead>
   <tbody>
   {% for s in sources %}
   <tr>
     <td>{{ s.name }}</td>
-    <td>{{ s.source_type }}</td>
-    <td>{{ s.url.as_deref().unwrap_or("-") }}</td>
-    <td>{{ s.path.as_deref().unwrap_or("-") }}</td>
-    <td>{{ s.ref_.as_deref().unwrap_or("-") }}</td>
-    <td>{{ s.skills_dir.as_deref().unwrap_or("-") }}</td>
+    <td>{{ s.package.as_deref().unwrap_or("（registry 搜索入口）") }}</td>
     <td><button class="x" hx-delete="/{{ token }}/sources/{{ s.name }}" hx-target="body" hx-swap="outerHTML">×</button></td>
   </tr>
   {% endfor %}

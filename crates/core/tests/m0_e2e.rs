@@ -1,180 +1,111 @@
-//! M0 端到端验收：add source → install git 源 → registry 记录 + canonical 落地 +
-//! Claude symlink → 幂等。含 skills_dir 子目录平铺场景。用本地 bare repo 真跑 git。
+//! M0 端到端：source 注册（含默认源种子）+ install（委托 npx skills，local fixture 真跑）
+//! → registry + canonical 池子 + global 双层 symlink + 幂等。
+//! install 走外部 npx skills（需本地 Node），标 #[ignore]：日常 make check 跳过，
+//! 本地 `cargo test -p skillkit-core m0 -- --ignored` 手动跑。
 use skillkit_core::{
     ensure_global_claude, install,
     paths::Paths,
     registry::Registry,
-    source::{Source, SourceType, SourcesStore},
+    source::{Source, SourcesStore},
     Scope,
 };
-use std::process::Command;
 use tempfile::tempdir;
 
-/// 把 work 目录做成 bare repo（带 -c user，不依赖全局 git 配置）。
-fn git_bare(work: &std::path::Path, bare: &std::path::Path) {
-    Command::new("git")
-        .args([
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "init",
-            "--quiet",
-        ])
-        .current_dir(work)
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."])
-        .current_dir(work)
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args([
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-qm",
-            "init",
-        ])
-        .current_dir(work)
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args(["clone", "--bare", "--quiet"])
-        .arg(work)
-        .arg(bare)
-        .status()
-        .unwrap();
-}
-
-/// skill 直接在仓库根。
-fn bare_repo(dir: &std::path::Path) -> std::path::PathBuf {
-    let work = dir.join("work");
-    let bare = dir.join("src.git");
-    std::fs::create_dir_all(&work).unwrap();
-    std::fs::write(work.join("SKILL.md"), "# e2e\n").unwrap();
-    git_bare(&work, &bare);
-    bare
-}
-
-/// skill 在仓库的 skills/shared-skill/ 子目录下。
-fn bare_repo_with_skills_dir(dir: &std::path::Path) -> std::path::PathBuf {
-    let work = dir.join("work-sd");
-    let bare = dir.join("src-sd.git");
-    std::fs::create_dir_all(work.join("skills").join("shared-skill")).unwrap();
+/// 建本地 skill fixture 目录（含 <skill>/SKILL.md），返回其根。npx skills add <root> -s <skill>。
+fn local_fixture(dir: &std::path::Path, skill: &str) -> std::path::PathBuf {
+    let skill_dir = dir.join(skill);
+    std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(
-        work.join("skills").join("shared-skill").join("SKILL.md"),
-        "# e2e skills-dir\n",
+        skill_dir.join("SKILL.md"),
+        format!("---\nname: {skill}\ndescription: e2e fixture\n---\n# {skill}\n"),
     )
     .unwrap();
-    git_bare(&work, &bare);
-    bare
+    dir.to_path_buf()
 }
 
 #[test]
-fn m0_full_flow_global_install_and_symlink() {
+fn source_default_seed_and_add() {
+    // 纯逻辑（不调 npx）：默认源种子 + 固定 package 源注册
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
-    let bare = bare_repo(tmp.path());
 
-    let mut store = SourcesStore::default();
+    SourcesStore::ensure_default(&paths).unwrap();
+    let store = SourcesStore::load(&paths).unwrap();
+    assert_eq!(store.list()[0].name, "skills.sh");
+    assert!(
+        store.list()[0].package.is_none(),
+        "skills.sh 是 registry 搜索入口"
+    );
+
+    let mut store = SourcesStore::load(&paths).unwrap();
     store
         .add(Source {
             name: "team".into(),
-            source_type: SourceType::Git,
-            url: Some(bare.to_string_lossy().into()),
-            path: None,
-            ref_: None,
-            skills_dir: None,
+            package: Some("git@github.com:org/team.git".into()),
         })
         .unwrap();
     store.save(&paths).unwrap();
-
-    let meta = install(&paths, "team", "shared-skill", Scope::Global).unwrap();
-    assert_eq!(meta.scope, Scope::Global);
-
-    let reg = Registry::load(&paths).unwrap();
-    assert!(reg.get("team/shared-skill").is_ok());
-
-    assert!(paths
-        .agents_skills_dir()
-        .join("shared-skill")
-        .join("SKILL.md")
-        .exists());
-
-    let link = paths.claude_skills_dir().join("shared-skill");
-    assert!(link.is_symlink(), "Claude symlink 应已建立");
-
-    // 幂等：再 ensure 一次不报错
-    ensure_global_claude(&paths, &meta).unwrap();
-    assert!(link.is_symlink());
+    assert_eq!(SourcesStore::load(&paths).unwrap().list().len(), 2);
 }
 
 #[test]
-fn m0_full_flow_with_skills_dir_flattens_and_symlinks() {
+#[ignore = "install 委托 npx skills，需本地 Node；cargo test -- --ignored 手动跑"]
+fn m0_install_local_to_pool_and_global_symlink() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
-    let bare = bare_repo_with_skills_dir(tmp.path());
+    let fixture = local_fixture(tmp.path(), "demo-skill");
+    let pkg = fixture.to_string_lossy().into_owned();
 
     let mut store = SourcesStore::default();
     store
         .add(Source {
-            name: "dc".into(),
-            source_type: SourceType::Git,
-            url: Some(bare.to_string_lossy().into()),
-            path: None,
-            ref_: None,
-            skills_dir: Some("skills".into()),
+            name: "local-src".into(),
+            package: Some(pkg.clone()),
         })
         .unwrap();
     store.save(&paths).unwrap();
 
-    install(&paths, "dc", "shared-skill", Scope::Global).unwrap();
-    // canonical 平铺：SKILL.md 直接在 shared-skill 下，无 skills/ 中间层
+    let meta = install(&paths, "local-src", "demo-skill", &pkg, Scope::Global).unwrap();
+    assert_eq!(meta.scope, Scope::Global);
+
+    // canonical 池子落地（~/.skillkit/.agents/skills/demo-skill）
     assert!(paths
-        .agents_skills_dir()
-        .join("shared-skill")
+        .skillkit_skills_dir()
+        .join("demo-skill")
         .join("SKILL.md")
         .exists());
-    assert!(!paths
-        .agents_skills_dir()
-        .join("shared-skill")
-        .join("skills")
-        .exists());
-    // Claude symlink 桥接
-    assert!(
-        paths.claude_skills_dir().join("shared-skill").is_symlink(),
-        "skills_dir 模式下 global install 也应建 Claude symlink"
-    );
-    // registry 记录
+
+    // registry 登记
     assert!(Registry::load(&paths)
         .unwrap()
-        .get("dc/shared-skill")
+        .get("local-src/demo-skill")
         .is_ok());
+
+    // global 双层 symlink：agents 落地 + Claude 桥接
+    assert!(paths.agents_skills_dir().join("demo-skill").is_symlink());
+    assert!(paths.claude_skills_dir().join("demo-skill").is_symlink());
+
+    // 幂等：再 ensure 不报错
+    ensure_global_claude(&paths, &meta).unwrap();
+    assert!(paths.claude_skills_dir().join("demo-skill").is_symlink());
 }
 
 #[test]
-fn reinstall_same_skill_fails_cleanly() {
+#[ignore = "install 委托 npx skills，需本地 Node"]
+fn reinstall_same_skill_fails() {
     let tmp = tempdir().unwrap();
     let paths = Paths::new(tmp.path().to_path_buf());
-    let bare = bare_repo(tmp.path());
+    let fixture = local_fixture(tmp.path(), "dup");
+    let pkg = fixture.to_string_lossy().into_owned();
     let mut store = SourcesStore::default();
     store
         .add(Source {
             name: "t".into(),
-            source_type: SourceType::Git,
-            url: Some(bare.to_string_lossy().into()),
-            path: None,
-            ref_: None,
-            skills_dir: None,
+            package: Some(pkg.clone()),
         })
         .unwrap();
     store.save(&paths).unwrap();
 
-    install(&paths, "t", "dup", Scope::Global).unwrap();
-    let second = install(&paths, "t", "dup", Scope::Global);
-    assert!(second.is_err(), "重复安装同名 skill 应报错而非覆盖");
+    install(&paths, "t", "dup", &pkg, Scope::Global).unwrap();
+    assert!(install(&paths, "t", "dup", &pkg, Scope::Global).is_err());
 }
