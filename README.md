@@ -108,7 +108,7 @@ unmanaged skill（无源存量）只删登记不删目录。
 ### serve — Web GUI
 
 ```bash
-skillkit serve [--port 7317] [--no-open]          # 四视图 + apply 闭环 + SSE
+skillkit serve [--port 7317] [--no-open]          # 四视图，覆盖 CLI 全部操作（find/装/卸/升级/导入、project 注册/扫描/重绑/apply-profile/apply 闭环）+ SSE
 ```
 
 ## 支持的 Agent
