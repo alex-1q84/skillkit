@@ -14,6 +14,11 @@
     <button>导入存量 skill</button>
     <span id="import-indicator" class="htmx-indicator">导入中…</span>
   </form>
+  <form class="inline" hx-post="/{{ token }}/skills/upgrade-all"
+        hx-target="body" hx-swap="outerHTML" hx-indicator="#upgrade-all-indicator">
+    <button>全部升级</button>
+    <span id="upgrade-all-indicator" class="htmx-indicator">升级中…</span>
+  </form>
   <table class="data">
   <thead><tr><th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th></tr></thead>
   <tbody>

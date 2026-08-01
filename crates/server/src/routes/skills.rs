@@ -249,6 +249,29 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
     }
 }
 
+/// 全部升级：批量升级 registry 全部 managed skill，冲突进 blocked 列出（不升级）。
+pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+    match skillkit_core::upgrade_all(&state.paths, false) {
+        Ok(all) => {
+            use std::fmt::Write as _;
+            let mut summary = format!("已升级 {} 个", all.upgraded.len());
+            for b in &all.blocked {
+                let _ = write!(
+                    summary,
+                    "；跳过 {}（影响项目 {}，需重新 apply）",
+                    b.id,
+                    b.affected.join(", ")
+                );
+            }
+            render_skills(state, token, Some(&summary), false)
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "upgrade-all 失败");
+            Html("<p class=\"err\">批量升级失败</p>").into_response()
+        }
+    }
+}
+
 fn render_str(rendered: askama::Result<String>) -> Response {
     match rendered {
         Ok(html) => Html(html).into_response(),

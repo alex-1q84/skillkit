@@ -742,3 +742,81 @@ async fn skills_import_registers_existing() {
     let m = reg.get("unmanaged/foo").expect("应登记 unmanaged/foo");
     assert!(m.computed_hash.is_none());
 }
+
+#[tokio::test]
+async fn skills_upgrade_all_batch_upgrades() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 两个 managed skill：dc/ok 无人锁 → 正常升级；dc/conflict 被项目 P1 锁 oldhash → 冲突进 blocked
+    let mut reg = skillkit_core::Registry::default();
+    for (id, name) in [("dc/ok", "ok"), ("dc/conflict", "conflict")] {
+        let canon = state.paths.skillkit_skills_dir().join(name);
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        reg.skills.insert(
+            id.into(),
+            skillkit_core::registry::SkillMeta {
+                id: id.into(),
+                name: name.into(),
+                source: "dc".into(),
+                scope: skillkit_core::Scope::Local,
+                version: None,
+                computed_hash: Some("oldhash".into()),
+                installed_at: "2026-07-31".into(),
+                canonical_path: canon.to_string_lossy().into_owned(),
+            },
+        );
+    }
+    reg.save(&state.paths).unwrap();
+
+    // P1 锁 dc/conflict=oldhash：upgrade_all(false) 必须把它列进 blocked，而非静默升级
+    skillkit_core::Project {
+        id: "P1".into(),
+        name: "P1".into(),
+        path: dir.path().join("p1").to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: [("dc/conflict".to_string(), "oldhash".to_string())]
+            .into_iter()
+            .collect(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let _g = common::fake_npx(&state.paths);
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/upgrade-all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    let after = skillkit_core::Registry::load(&state.paths).unwrap();
+    // dc/ok 无冲突 → 正常升到 hashnew
+    assert_eq!(
+        after.get("dc/ok").unwrap().computed_hash.as_deref(),
+        Some("hashnew"),
+        "无冲突的 dc/ok 应升级到 hashnew",
+    );
+    // dc/conflict 被锁 → 进 blocked 不升级，hash 保持 oldhash（不静默漂移）
+    assert_eq!(
+        after.get("dc/conflict").unwrap().computed_hash.as_deref(),
+        Some("oldhash"),
+        "被项目锁定的 dc/conflict 应进 blocked 不升级，hash 不变",
+    );
+    // summary 反馈冲突 skill + 受影响项目（列出不静默）
+    assert!(
+        body.contains("dc/conflict") && body.contains("P1"),
+        "summary 应列出冲突 skill 与受影响项目：{body}"
+    );
+}
