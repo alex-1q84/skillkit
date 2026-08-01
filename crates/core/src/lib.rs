@@ -25,7 +25,7 @@ pub use lock::FileLock;
 pub use npx::Candidate;
 pub use paths::Paths;
 pub use profile::{list_names as list_profile_names, Profile};
-pub use project::{list_ids as list_project_ids, Project};
+pub use project::{list_ids as list_project_ids, scan_projects, Project};
 pub use registry::{Registry, Scope, SkillMeta};
 pub use source::{derive_source_name, Source, SourcesStore};
 pub use symlink::ensure_global_claude;

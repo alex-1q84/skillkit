@@ -69,7 +69,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             println!("✓ 已重绑定 {id} → {}", proj.path);
         }
         ProjectSub::Scan { dir, depth } => {
-            let found = scan_projects(&dir, depth)?;
+            let found = skillkit_core::scan_projects(&dir, depth)?;
             if found.is_empty() {
                 println!("（未发现项目，project scan 只识别含 .git 的目录）");
             }
@@ -149,23 +149,4 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-/// 扫描：找含 .git 的目录（depth 限制）。
-fn scan_projects(dir: &std::path::Path, depth: u32) -> anyhow::Result<Vec<PathBuf>> {
-    let mut found = Vec::new();
-    if dir.join(".git").exists() {
-        found.push(dir.to_path_buf());
-    }
-    if depth > 0 {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_dir() && !p.starts_with(dir.join(".git")) {
-                    found.extend(scan_projects(&p, depth - 1)?);
-                }
-            }
-        }
-    }
-    Ok(found)
 }

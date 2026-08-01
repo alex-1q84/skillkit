@@ -125,6 +125,25 @@ pub fn list_ids(paths: &Paths) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+/// 扫描目录树，返回含 .git 的项目目录（depth 限制递归深度，跳过 .git 自身子目录）。
+pub fn scan_projects(dir: &Path, depth: u32) -> Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    if dir.join(".git").exists() {
+        found.push(dir.to_path_buf());
+    }
+    if depth > 0 {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() && !p.starts_with(dir.join(".git")) {
+                    found.extend(scan_projects(&p, depth - 1)?);
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +200,29 @@ mod tests {
             Project::load(&paths, "nope"),
             Err(SkillkitError::ProjectNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn scan_projects_finds_git_dirs_with_depth_limit() {
+        let tmp = tempdir().unwrap();
+        // tmp/a/.git  → depth 0 也应发现根级 .git
+        std::fs::create_dir_all(tmp.path().join("a/.git")).unwrap();
+        // tmp/a/b/.git → depth 1 才发现
+        std::fs::create_dir_all(tmp.path().join("a/b/.git")).unwrap();
+        // tmp/a/b/c/.git → depth 2 才发现
+        std::fs::create_dir_all(tmp.path().join("a/b/c/.git")).unwrap();
+        // tmp/a/.git/info → 跳过 .git 自身子目录树（不误入）
+        std::fs::create_dir_all(tmp.path().join("a/.git/info")).unwrap();
+
+        let d0 = super::scan_projects(&tmp.path().join("a"), 0).unwrap();
+        assert_eq!(d0, vec![tmp.path().join("a")], "depth 0 只发现根");
+
+        let d1 = super::scan_projects(&tmp.path().join("a"), 1).unwrap();
+        assert!(d1.contains(&tmp.path().join("a")));
+        assert!(d1.contains(&tmp.path().join("a/b")));
+        assert!(!d1.iter().any(|p| p.ends_with("a/b/c")));
+
+        let d2 = super::scan_projects(&tmp.path().join("a"), 2).unwrap();
+        assert!(d2.iter().any(|p| p.ends_with("a/b/c")));
     }
 }
