@@ -14,6 +14,7 @@ rust-embed = "8"
 uuid = { version = "1", features = ["v4"] }
 askama = "0.13"
 form_urlencoded = "1"
+dirs = "5"
 notify = "8"
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"

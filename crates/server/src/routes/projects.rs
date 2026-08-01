@@ -70,6 +70,25 @@ pub struct ApplyResultTpl<'a> {
     pub report: ApplyReport,
 }
 
+#[derive(Template)]
+#[template(path = "fragments/browse.html")]
+pub struct BrowseTpl<'a> {
+    pub token: &'a str,
+    pub current: &'a str,
+    pub parent: &'a str,
+    pub into: &'a str,
+    pub panel: &'a str,
+    pub dirs: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/browse_select.html")]
+pub struct BrowseSelectTpl<'a> {
+    pub into: &'a str,
+    pub panel: &'a str,
+    pub value: &'a str,
+}
+
 #[derive(Deserialize)]
 pub struct ProjectAddForm {
     pub path: String,
@@ -360,6 +379,89 @@ fn render_list(token: String, projects: Vec<Project>, fragment: bool) -> Respons
         .render()
     };
     render_str(rendered)
+}
+
+#[derive(Deserialize)]
+pub struct BrowseQuery {
+    /// 要列的目录（空/无效 → home）。
+    pub path: Option<String>,
+    /// 选定时回填的输入框 id（= name，如 path / dir）。
+    pub into: String,
+    /// 浏览面板 div id（如 browse-panel-add）。
+    pub panel: String,
+    /// 存在时表示「选定 path 下此子目录名」，触发 oob 回填。
+    pub select: Option<String>,
+}
+
+/// 目录浏览：列 path 下子目录（跳过隐藏/文件），或带 select 时返回 hx-swap-oob 回填输入框。
+pub async fn browse(Path(token): Path<String>, Query(q): Query<BrowseQuery>) -> Response {
+    let base = resolve_dir(q.path.as_deref());
+    // 选定动作：oob 回填 input + 清空面板
+    if let Some(name) = &q.select {
+        let full = base.join(name);
+        let rendered = BrowseSelectTpl {
+            into: &q.into,
+            panel: &q.panel,
+            value: &full.to_string_lossy(),
+        }
+        .render();
+        return render_str(rendered);
+    }
+    // 浏览动作：列子目录
+    match list_subdirs(&base) {
+        Ok(dirs) => {
+            let parent = parent_of(&base).to_string_lossy().into_owned();
+            let rendered = BrowseTpl {
+                token: &token,
+                current: &base.to_string_lossy(),
+                parent: &parent,
+                into: &q.into,
+                panel: &q.panel,
+                dirs,
+            }
+            .render();
+            render_str(rendered)
+        }
+        Err(e) => {
+            tracing::warn!(error = ?e, "browse 不可读：{}", base.display());
+            Html("<p class=\"err\">目录不可读，检查路径或权限</p>").into_response()
+        }
+    }
+}
+
+/// 解析路径：空 → home；`~` 开头 → home + rest；否则 canonicalize（失败用原值，不 panic）。
+fn resolve_dir(raw: Option<&str>) -> PathBuf {
+    let raw = raw.map(str::trim).unwrap_or_default();
+    if raw.is_empty() {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    }
+    if let Some(rest) = raw.strip_prefix('~') {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        return home.join(rest.trim_start_matches('/'));
+    }
+    PathBuf::from(raw)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(raw))
+}
+
+/// 列子目录（跳过隐藏 `.` 开头 + 跳过文件），按名字排序。
+fn list_subdirs(dir: &StdPath) -> std::io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.path().is_dir() && !name.starts_with('.') {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// 父目录；根的父是自身（模板里 parent==current 时不渲染上级按钮）。
+fn parent_of(dir: &StdPath) -> PathBuf {
+    dir.parent()
+        .map_or_else(|| dir.to_path_buf(), PathBuf::from)
 }
 
 fn render_str(rendered: askama::Result<String>) -> Response {

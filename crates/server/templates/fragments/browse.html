@@ -1,0 +1,26 @@
+<div id="{{ panel }}" class="browse-panel">
+  <div class="browse-cwd">📁 {{ current }}
+    {% if parent != current %}
+    <button type="button"
+            hx-get="/{{ token }}/projects/browse?path={{ parent }}&into={{ into }}&panel={{ panel }}"
+            hx-target="#{{ panel }}">↑ 上级</button>
+    {% endif %}
+  </div>
+  {% if dirs.is_empty() %}
+  <p class="muted">（无子目录）</p>
+  {% else %}
+  <ul class="browse-list">
+    {% for d in dirs %}
+    <li>
+      <span>{{ d }}/</span>
+      <button type="button"
+              hx-get="/{{ token }}/projects/browse?path={{ current }}/{{ d }}&into={{ into }}&panel={{ panel }}"
+              hx-target="#{{ panel }}">进入</button>
+      <button type="button"
+              hx-get="/{{ token }}/projects/browse?path={{ current }}&select={{ d }}&into={{ into }}&panel={{ panel }}"
+              hx-swap="none">✓ 选定</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

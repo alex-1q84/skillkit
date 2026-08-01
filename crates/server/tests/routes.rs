@@ -1005,3 +1005,103 @@ async fn projects_apply_profile_merges_skills() {
     );
     assert!(after.applied_profiles.contains(&"fe".to_string()));
 }
+
+#[tokio::test]
+async fn projects_browse_lists_subdirs_skips_hidden_and_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("b")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".hidden")).unwrap();
+    std::fs::write(dir.path().join("file.txt"), "x").unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/browse?path={}&into=path&panel=browse-panel-add",
+                    dir.path().display()
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("a/"), "应含子目录 a");
+    assert!(body.contains("b/"), "应含子目录 b");
+    assert!(!body.contains(".hidden"), "跳过隐藏目录");
+    assert!(!body.contains("file.txt"), "跳过文件");
+    assert!(body.contains("进入"), "每条有进入按钮");
+    assert!(body.contains("选定"), "每条有选定按钮");
+    assert!(body.contains("上级"), "有上级按钮");
+}
+
+#[tokio::test]
+async fn projects_browse_select_returns_oob_to_fill_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("a")).unwrap();
+    let base = dir.path().display().to_string();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/browse?path={base}&select=a&into=path&panel=browse-panel-add"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    // oob 回填：input 带 id=name=path + value=选定路径 + hx-swap-oob
+    assert!(body.contains(r#"id="path""#), "oob input id=path");
+    assert!(
+        body.contains(r#"name="path""#),
+        "oob input name=path 保留（提交用）"
+    );
+    assert!(
+        body.contains(&format!("{base}/a")),
+        "input value 是选定绝对路径"
+    );
+    assert!(body.contains(r#"hx-swap-oob="true""#), "oob 标记");
+    // oob 清空面板
+    assert!(
+        body.contains(r#"id="browse-panel-add""#),
+        "含 panel oob（清空关闭）"
+    );
+}
+
+#[tokio::test]
+async fn projects_browse_unreadable_path_returns_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/projects/browse?path=/nonexistent-skillkit-xyz-123&into=path&panel=browse-panel-add")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("不可读"), "不可读路径给可读提示，不 panic");
+}
