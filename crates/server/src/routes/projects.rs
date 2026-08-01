@@ -149,6 +149,27 @@ pub async fn scan(
     }
 }
 
+#[derive(Deserialize)]
+pub struct RebindForm {
+    pub path: String,
+}
+
+/// 重绑定：项目移动/改名后更新 path/name，id 不变。
+pub async fn rebind(
+    State(state): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+    Form(f): Form<RebindForm>,
+) -> Response {
+    let Ok(mut proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    proj.rebind(StdPath::new(&f.path));
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    render_workspace(state, token, proj, false)
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Path(token): Path<String>,

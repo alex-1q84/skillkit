@@ -21,4 +21,13 @@
   </section>
 
   {% include "fragments/status.html" %}
+
+  <details>
+    <summary>重绑定（项目移动/改名后修正路径）</summary>
+    <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/rebind"
+          hx-target="body" hx-swap="outerHTML">
+      <input type="text" name="path" placeholder="新路径" required>
+      <button>重绑定</button>
+    </form>
+  </details>
 </div>

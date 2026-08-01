@@ -894,3 +894,51 @@ async fn projects_scan_finds_git_dirs() {
     assert!(body.contains("proj1"), "scan 结果含 proj1");
     assert!(body.contains("proj2"), "scan 结果含 proj2");
 }
+
+#[tokio::test]
+async fn projects_rebind_updates_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let old = dir.path().join("old-name");
+    std::fs::create_dir_all(&old).unwrap();
+    let new = dir.path().join("new-name");
+    std::fs::create_dir_all(&new).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "old-name".into(),
+        path: old.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/rebind")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(format!(
+                    "path={}",
+                    urlencode(&new.to_string_lossy())
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert_eq!(after.id, "ABCDEF12", "rebind 不变 id");
+    assert_eq!(after.name, "new-name");
+    assert!(after.path.contains("new-name"));
+}
