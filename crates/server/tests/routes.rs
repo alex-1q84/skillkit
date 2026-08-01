@@ -4,6 +4,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
+fn urlencode(s: &str) -> String {
+    s.replace('/', "%2F")
+}
+
 #[tokio::test]
 async fn ping_returns_pong() {
     let app = skillkit_server::app(common::test_state());
@@ -819,4 +823,39 @@ async fn skills_upgrade_all_batch_upgrades() {
         body.contains("dc/conflict") && body.contains("P1"),
         "summary 应列出冲突 skill 与受影响项目：{body}"
     );
+}
+
+#[tokio::test]
+async fn projects_add_registers_and_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_root = dir.path().join("myapp");
+    std::fs::create_dir_all(&proj_root).unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(format!(
+                    "path={}",
+                    urlencode(&proj_root.to_string_lossy())
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ids = skillkit_core::list_project_ids(&state.paths).unwrap();
+    assert_eq!(ids.len(), 1, "应注册 1 个项目");
+    let proj = skillkit_core::Project::load(&state.paths, &ids[0]).unwrap();
+    assert!(proj.path.contains("myapp"));
 }

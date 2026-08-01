@@ -1,5 +1,11 @@
 <h1>Projects</h1>
-<ul>
+  <form class="inline" hx-post="/{{ token }}/projects"
+        hx-target="body" hx-swap="outerHTML">
+    <input type="text" name="path" placeholder="项目绝对路径（如 /Users/me/app）" required>
+    <input type="text" name="agents" placeholder="agents（可选，逗号分隔，留空用全部）">
+    <button>注册项目</button>
+  </form>
+  <ul>
   {% for p in projects %}
   <li><a href="/{{ token }}/projects/{{ p.id }}">{{ p.name }}</a> — {{ p.path }} ({{ p.installed_skills.len() }} skills)</li>
   {% endfor %}

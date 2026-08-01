@@ -4,12 +4,14 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
+use axum::Form;
 use form_urlencoded::parse;
+use serde::Deserialize;
 use skillkit_core::{
     build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, Project, Registry,
     SkillMeta, StatusView,
 };
-use std::path::Path as StdPath;
+use std::path::{Path as StdPath, PathBuf};
 
 use crate::routes::FragmentQuery;
 use crate::AppState;
@@ -64,6 +66,47 @@ pub struct ApplyResultTpl<'a> {
     pub token: &'a str,
     pub project_id: &'a str,
     pub report: ApplyReport,
+}
+
+#[derive(Deserialize)]
+pub struct ProjectAddForm {
+    pub path: String,
+    /// 可选，逗号分隔；留空用 config 全 agent。
+    pub agents: Option<String>,
+}
+
+/// 注册新项目：canonicalize path → Project::register → save → 刷新列表。
+pub async fn add(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Form(f): Form<ProjectAddForm>,
+) -> Response {
+    let abs = PathBuf::from(&f.path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&f.path));
+    let agents = match f.agents.as_deref() {
+        Some(a) if !a.trim().is_empty() => a
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>(),
+        _ => skillkit_core::config::Config::load(&state.paths)
+            .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
+            .unwrap_or_default(),
+    };
+    let proj = Project::register(abs, agents);
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    let mut projects = Vec::new();
+    if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
+        for id in ids {
+            if let Ok(p) = Project::load(&state.paths, &id) {
+                projects.push(p);
+            }
+        }
+    }
+    render_list(token, projects, false)
 }
 
 pub async fn list(
