@@ -51,7 +51,7 @@
 //! skill 实体的查询与移除：find（搜 skills.sh）/ list（列已装）/ remove（卸载，替换 uninstall）。
 //! 复用 core 的 npx::find / Registry / uninstall，cli 只做薄壳与展示。
 use clap::Args;
-use skillkit_core::{paths::Paths, Candidate};
+use skillkit_core::paths::Paths;
 
 /// find：skillkit find <query> [--json]，搜 skills.sh registry，纯展示候选不安装。
 #[derive(Args)]
@@ -76,6 +76,7 @@ pub fn run_find(_cmd: FindCmd) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use clap::{Parser, Subcommand};
+    use skillkit_core::Candidate;
 
     /// 测试入口：自建同形 Parser 解析顶层命令（main.rs 的 Cli 私有，这里复刻命令变体）。
     /// 后续 task 给 TestCmd 累积追加 List/Remove 变体。
@@ -93,7 +94,9 @@ mod tests {
     #[test]
     fn find_parses_query_and_json() {
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "find", "pdf", "--json"]);
-        let TestCmd::Find(FindCmd { query, json }) = cmd;
+        let TestCmd::Find(FindCmd { query, json }) = cmd else {
+            panic!("expected Find")
+        };
         assert_eq!(query, "pdf");
         assert!(json);
     }
@@ -101,7 +104,9 @@ mod tests {
     #[test]
     fn find_defaults_json_false() {
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "find", "pdf"]);
-        let TestCmd::Find(FindCmd { json, .. }) = cmd;
+        let TestCmd::Find(FindCmd { json, .. }) = cmd else {
+            panic!("expected Find")
+        };
         assert!(!json);
     }
 
@@ -145,7 +150,7 @@ use commands::skill::FindCmd;
         Cmd::Find(cmd) => commands::skill::run_find(cmd)?,
 ```
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1`
 预期：`find_parses_query_and_json` / `find_defaults_json_false` / `find_json_schema_locks_candidate_fields` 三个 PASS（前两个纯解析，第三个纯序列化，均不触达 `unimplemented!`）。
 
 - [ ] **Step 3: 实现 print_candidates 与 run_find**
@@ -181,12 +186,12 @@ pub fn run_find(cmd: FindCmd) -> anyhow::Result<()> {
 
 ```rust
 use clap::Args;
-use skillkit_core::{npx, paths::Paths, Candidate};
+use skillkit_core::{npx, paths::Paths};
 ```
 
 - [ ] **Step 4: 跑测试 + 编译**
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
 预期：三测全 PASS；编译通过。
 
 - [ ] **Step 5: 加 find 真跑 npx 的 e2e（#[ignore]）**
@@ -213,7 +218,7 @@ fn find_json_returns_candidate_array() {
 }
 ```
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1`
 预期：常规三测仍 PASS（新 e2e 默认跳过）。
 
 - [ ] **Step 6: format + lint**
@@ -238,7 +243,7 @@ git commit -m "feat(cli): 新增 skill find 命令——搜 skills.sh 候选 + -
 
 **Interfaces:**
 - Consumes: `skillkit_core::Registry::load(&Paths) -> Result<Registry>`（`Registry.skills: BTreeMap<String, SkillMeta>`）、`skillkit_core::SkillMeta`（9 字段：id/name/source/scope/version/computed_hash/installed_at/canonical_path）、`skillkit_core::Scope`（`Global`/`Local`）。
-- Produces: `pub struct ListCmd { pub json: bool }`、`pub fn run_list(ListCmd) -> anyhow::Result<()>`、私有 `fn render_list_table(&[SkillMeta]) -> String` / `fn render_list_json(&[SkillMeta]) -> anyhow::Result<String>` / `fn scope_str(&Scope) -> &'static str`。
+- Produces: `pub struct ListCmd { pub json: bool }`、`pub fn run_list(ListCmd) -> anyhow::Result<()>`、私有 `fn render_list_table(&[SkillMeta]) -> String` / `fn render_list_json(&[SkillMeta]) -> anyhow::Result<String>` / `fn scope_str(Scope) -> &'static str`（Scope 是 Copy，传值，避免 clippy `trivially_copy_pass_by_ref`）。
 
 - [ ] **Step 1: 写失败测试（clap 解析 + 渲染纯函数 + schema）**
 
@@ -264,7 +269,9 @@ git commit -m "feat(cli): 新增 skill find 命令——搜 skills.sh 候选 + -
     fn list_parses_json_flag() {
         // 先给 Task 1 的 TestCmd 枚举追加 List 变体：`List(ListCmd)`
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "list", "--json"]);
-        let TestCmd::List(ListCmd { json }) = cmd;
+        let TestCmd::List(ListCmd { json }) = cmd else {
+            panic!("expected List")
+        };
         assert!(json);
     }
 
@@ -299,7 +306,7 @@ git commit -m "feat(cli): 新增 skill find 命令——搜 skills.sh 候选 + -
 
 - [ ] **Step 2: 跑测试看失败**
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1`
 预期：编译失败——`ListCmd` / `render_list_table` / `render_list_json` 未定义。
 
 - [ ] **Step 3: 实现 ListCmd + 渲染 + run_list**
@@ -308,7 +315,7 @@ git commit -m "feat(cli): 新增 skill find 命令——搜 skills.sh 候选 + -
 
 ```rust
 use clap::Args;
-use skillkit_core::{npx, paths::Paths, Candidate, Registry, Scope, SkillMeta};
+use skillkit_core::{npx, paths::Paths, Registry, Scope, SkillMeta};
 ```
 
 在 `run_find` 之后追加：
@@ -322,7 +329,7 @@ pub struct ListCmd {
     pub json: bool,
 }
 
-fn scope_str(s: &Scope) -> &'static str {
+fn scope_str(s: Scope) -> &'static str {
     match s {
         Scope::Global => "global",
         Scope::Local => "local",
@@ -331,19 +338,22 @@ fn scope_str(s: &Scope) -> &'static str {
 
 /// 渲染 list 表格（人看）。unmanaged（computed_hash=None）行尾标 unmanaged。
 fn render_list_table(skills: &[SkillMeta]) -> String {
+    use std::fmt::Write;
     let mut out = String::new();
     for s in skills {
         let hash = s.computed_hash.as_deref().unwrap_or("-");
         let unm = if s.computed_hash.is_none() { "  (unmanaged)" } else { "" };
-        out.push_str(&format!(
-            "{id}  [{scope}]  {source}  {ver}  {hash}{unm}\n",
+        writeln!(
+            out,
+            "{id}  [{scope}]  {source}  {ver}  {hash}{unm}",
             id = s.id,
-            scope = scope_str(&s.scope),
+            scope = scope_str(s.scope),
             source = s.source,
             ver = s.version.as_deref().unwrap_or("-"),
             hash = hash,
             unm = unm,
-        ));
+        )
+        .unwrap();
     }
     out
 }
@@ -391,7 +401,7 @@ use commands::skill::{FindCmd, ListCmd};
 
 - [ ] **Step 5: 跑测试 + 编译**
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
 预期：全部 PASS；编译通过。
 
 - [ ] **Step 6: 加 list e2e（非 ignore，用 import-existing 造数据，不需 npx）**
@@ -458,7 +468,9 @@ git commit -m "feat(cli): 新增 skill list 命令——列已装 skill + unmana
     fn remove_parses_id_yes_json() {
         // 先给 TestCmd 枚举追加 Remove 变体：`Remove(RemoveCmd)`
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "remove", "skills.sh/pdf", "--yes", "--json"]);
-        let TestCmd::Remove(RemoveCmd { id, yes, json }) = cmd;
+        let TestCmd::Remove(RemoveCmd { id, yes, json }) = cmd else {
+            panic!("expected Remove")
+        };
         assert_eq!(id, "skills.sh/pdf");
         assert!(yes);
         assert!(json);
@@ -467,7 +479,7 @@ git commit -m "feat(cli): 新增 skill list 命令——列已装 skill + unmana
 
 - [ ] **Step 2: 跑测试看失败**
 
-运行：`cargo test -p skillkit-cli --lib skill::tests::remove_parses_id_yes_json 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests::remove_parses_id_yes_json 2>&1`
 预期：编译失败——`RemoveCmd` 未定义。
 
 - [ ] **Step 3: 实现 RemoveCmd + run_remove（含交互确认）**
@@ -475,7 +487,7 @@ git commit -m "feat(cli): 新增 skill list 命令——列已装 skill + unmana
 `skill.rs` 顶部 `use` 加 `uninstall`：
 
 ```rust
-use skillkit_core::{npx, paths::Paths, uninstall, Candidate, Registry, Scope, SkillMeta};
+use skillkit_core::{npx, paths::Paths, uninstall, Registry, Scope, SkillMeta};
 ```
 
 文件末尾（`run_list` 之后、`mod tests` 之前）追加：
@@ -505,7 +517,7 @@ pub fn run_remove(cmd: RemoveCmd) -> anyhow::Result<()> {
 
     let skip_confirm = cmd.yes || cmd.json;
     if !skip_confirm {
-        let note = if managed { String::new() } else { "（unmanaged：仅删登记，保留目录）".into() };
+        let note = if managed { "" } else { "（unmanaged：仅删登记，保留目录）" };
         println!("将删除 {id}{note}，确认？(y/n)", id = cmd.id, note = note);
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)?;
@@ -550,7 +562,7 @@ use commands::skill::{FindCmd, ListCmd, RemoveCmd};
 
 - [ ] **Step 5: 跑测试 + 编译**
 
-运行：`cargo test -p skillkit-cli --lib skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
+运行：`cargo test -p skillkit-cli --bin skillkit skill::tests 2>&1 && cargo build -p skillkit-cli 2>&1`
 预期：全 PASS；编译通过（`Uninstall` 仍在，两命令共存）。
 
 - [ ] **Step 6: 加 remove 确认交互 e2e（unmanaged，非 ignore，不依赖 npx）**
