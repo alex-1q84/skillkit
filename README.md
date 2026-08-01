@@ -48,6 +48,20 @@ skillkit install add <source> <skill> [--scope global|local] [--json]
 - 固定源直接安装；skills.sh（registry）源走 `npx skills find` 交互选候选
 - `--json` 时只输出候选数组，不交互不安装（适合 AI agent 调用）
 
+### find — 搜索 skills.sh 候选
+
+```bash
+skillkit find <query>                            # 搜 skills.sh registry，纯展示不安装
+skillkit find <query> --json                     # 候选数组 [{spec,url}]，供 agent 决策
+```
+
+### list — 列出已装 skill
+
+```bash
+skillkit list                                    # 列 registry 全部已装 skill（unmanaged 标记）
+skillkit list --json                             # SkillMeta[]
+```
+
 ### project — 项目管理
 
 ```bash
@@ -81,11 +95,15 @@ skillkit import-existing --dry-run               # 只输出不写
 skillkit import-existing --json                  # JSON 输出
 ```
 
-### uninstall — 卸载
+### remove — 卸载 skill
 
 ```bash
-skillkit uninstall <id>                          # 从 canonical 池移除
+skillkit remove <id>                             # 从 canonical 池移除（默认交互确认）
+skillkit remove <id> --yes                       # 跳过确认
+skillkit remove <id> --json                      # 输出 {id,removed_canonical}（隐含 --yes）
 ```
+
+unmanaged skill（无源存量）只删登记不删目录。
 
 ### serve — Web GUI
 

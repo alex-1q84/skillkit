@@ -12,7 +12,9 @@
 skillkit source add <package> [--name <别名>]        # 名称默认从 package 推导（repo 名/目录名），--name 覆盖
 skillkit source list / remove <name>
 skillkit install add <source> <skill> [--scope global|local] [--json]   # 固定源直接装；skills.sh 源走 npx skills find 交互选候选（--json 输出候选数组不安装）
-skillkit uninstall <id>
+skillkit find <query> [--json]                              # 搜 skills.sh 候选，纯展示不安装（--json 输出 [{spec,url}]）
+skillkit list [--json]                                      # 列已装 skill（--json 输出 SkillMeta[]）
+skillkit remove <id> [--yes] [--json]                       # 完全替换 uninstall；默认确认，--yes/--json 跳过（--json 输出 {id,removed_canonical}）
 skillkit upgrade <id> | --all [--yes] [--json]                          # npx skills update + 重读 computed_hash；冲突列受影响项目，--yes 跳过
 skillkit import-existing [--json] [--dry-run]                           # 扫描存量 skill 目录，可溯重装入池 + 无源 unmanaged 登记
 skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + apply 闭环 + SSE + 默认自动打开浏览器；--token 仅 e2e/localhost 用（默认随机）
@@ -27,7 +29,7 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 - **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）；`--json` 时直接输出候选数组。
 - `SkillkitError::Git` → `Tool`。
 - 测试：**make check 全绿**（core 45 + cli 8 + server 21 + m0_e2e 1 + m1_e2e 3 + m3_e2e 1）+ **CLI e2e 10 用例**（5 常规 + 5 `#[ignore]` 真跑 npx）+ **GUI e2e 6 用例**。clippy `-D warnings` 零 warning。计数会漂，用 `make check` / `make e2e-cli` / `make e2e` 复跑。
-- **unmanaged skill**（M3）：存量目录无法溯源时以虚拟源 `unmanaged` 登记（`computed_hash=None`、scope=global），不可升级、uninstall 不删目录、GUI 角标标记。`import-existing` 扫描 `~/.agents/skills/` + `~/.claude/skills/`（跳 symlink）+ `~/.codex/skills/` + `~/.cursor/skills/`，可溯源（`.git`+remote）重装入池。
+- **unmanaged skill**（M3）：存量目录无法溯源时以虚拟源 `unmanaged` 登记（`computed_hash=None`、scope=global），不可升级、remove 不删目录、GUI 角标标记。`import-existing` 扫描 `~/.agents/skills/` + `~/.claude/skills/`（跳 symlink）+ `~/.codex/skills/` + `~/.cursor/skills/`，可溯源（`.git`+remote）重装入池。
 - **e2e 设施三层**（`make check` / `make e2e-cli` / `make e2e`）：core `#[ignore]` 端到端真跑 npx；CLI assert_cmd 驱动真实二进制 + 临时 HOME（`crates/cli/tests/e2e_cli.rs`，BDD 风格 Given/When/Then）；GUI playwright 真实 chromium。
 
 ### 1.3 验证 flow
@@ -41,7 +43,9 @@ cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills�
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
-## 2. 最近完成（M3 全量 + e2e 固化 + README）
+## 2. 最近完成（skill find/list/remove + M3 全量 + e2e 固化 + README）
+
+19. **skill find/list/remove**（本会话，分支 skill-find-list-remove）：顶层新增 find（搜 skills.sh，复用 npx::find）/ list（列 registry）/ remove（完全替换 uninstall + 补交互确认，修旧 uninstall 无确认的 gap）。新建 cli/commands/skill.rs，install.rs 删 Uninstall 回归单一职责、registry 源 --json 分支复用 skill::print_candidates（DRY）。--json schema 锁定测试三件（Candidate[]/SkillMeta[]/{id,removed_canonical}）。GUI 原型 Skills 视图同步见 Task 6。
 
 18. **README 落地**（本会话，未提交）：新建 `README.md`——从交接 §1.1 命令表面 + CLI `--help` 真实输出提炼（不编造命令），覆盖安装（`cargo install --path crates/cli`）、快速开始、全部命令参考（source/install/project/profile/upgrade/import-existing/uninstall/serve）、支持的 agent 表格（Claude/Cursor/OpenCode/Codex，新增 agent 只改配置）、开发命令（make check/e2e/e2e-cli）、三层架构。README 顶部声明 MIT（license 字段待 Cargo.toml 补齐对齐）。基建债 README 项完成，剩 Cargo.toml 元数据 + CI。
 
@@ -78,7 +82,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 - [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 45 + cli 8 + server 21 + e2e + clippy `-D warnings` 零 warning）。
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）+ m3 一个（install → upgrade 更新 hash）。
-- [ ] `make e2e-cli`：CLI 全链路 e2e 过（import-existing / uninstall 保护 + upgrade 冲突交互 5 用例真跑 npx）。
+- [ ] `make e2e-cli`：CLI 全链路 e2e 过（import-existing / remove 确认交互 + upgrade 冲突交互 + managed remove 真跑 npx）。
 - [ ] `make e2e`：GUI e2e 6 用例过（导航不重复回归 / 实时预览 / 默认源 / 增删闭环 / unmanaged 角标 / upgrade 按钮仅 managed）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
