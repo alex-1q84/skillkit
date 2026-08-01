@@ -859,3 +859,38 @@ async fn projects_add_registers_and_persists() {
     let proj = skillkit_core::Project::load(&state.paths, &ids[0]).unwrap();
     assert!(proj.path.contains("myapp"));
 }
+
+#[tokio::test]
+async fn projects_scan_finds_git_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let root = dir.path().join("scanroot");
+    std::fs::create_dir_all(root.join("proj1/.git")).unwrap();
+    std::fs::create_dir_all(root.join("proj2/.git")).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/scan")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(format!(
+                    "dir={}&depth=2",
+                    urlencode(&root.to_string_lossy())
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("proj1"), "scan 结果含 proj1");
+    assert!(body.contains("proj2"), "scan 结果含 proj2");
+}

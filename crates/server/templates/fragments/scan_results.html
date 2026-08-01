@@ -1,0 +1,23 @@
+<div id="scan-results">
+  {% if dirs.is_empty() %}
+  <p class="err">未发现含 .git 的项目目录</p>
+  {% else %}
+  <table class="data">
+    <thead><tr><th>发现的项目目录</th><th>ops</th></tr></thead>
+    <tbody>
+    {% for d in dirs %}
+    <tr>
+      <td>{{ d }}</td>
+      <td>
+        <form class="inline" hx-post="/{{ token }}/projects"
+              hx-target="body" hx-swap="outerHTML">
+          <input type="hidden" name="path" value="{{ d }}">
+          <button>注册</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

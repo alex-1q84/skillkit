@@ -109,6 +109,46 @@ pub async fn add(
     render_list(token, projects, false)
 }
 
+#[derive(Deserialize)]
+pub struct ScanForm {
+    pub dir: String,
+    pub depth: Option<u32>,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/scan_results.html")]
+pub struct ScanResultsTpl<'a> {
+    pub token: &'a str,
+    pub dirs: Vec<String>,
+}
+
+/// 扫描目录发现项目，渲染候选（每条带注册按钮，复用 POST /projects）。
+pub async fn scan(
+    State(_state): State<AppState>,
+    Path(token): Path<String>,
+    Form(f): Form<ScanForm>,
+) -> Response {
+    let depth = f.depth.unwrap_or(3);
+    match skillkit_core::scan_projects(StdPath::new(&f.dir), depth) {
+        Ok(dirs) => {
+            let dirs: Vec<String> = dirs
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            let rendered = ScanResultsTpl {
+                token: &token,
+                dirs,
+            }
+            .render();
+            render_str(rendered)
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "scan 失败：{}", f.dir);
+            Html("<p class=\"err\">扫描失败，检查目录路径</p>").into_response()
+        }
+    }
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Path(token): Path<String>,
