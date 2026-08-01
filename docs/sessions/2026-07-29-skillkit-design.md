@@ -1,8 +1,8 @@
-# skillkit 交接（2026-07-29 → 2026-08-01，M0-M3 + skill find/list/remove + GUI parity 设计完成）
+# skillkit 交接（2026-07-29 → 2026-08-01，M0-M3 + skill find/list/remove + GUI parity 实现）
 
 > 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：GUI parity 设计完成（spec `b3a5eeb` + plan `0e0c066`，已提交 main），**代码尚未动**。目标：把 CLI 已有、GUI 缺失的 8 条操作补到 web GUI（Skills 视图 find/install-candidate/import/upgrade-all + Projects 视图 add/scan/rebind/apply-profile），core 仅需下沉 `scan_projects`。plan 拆 10 个 TDD task，每 task 自带测试循环 + commit。下次接续 **直接执行 plan**（§7）。基建债（CI / Cargo.toml 元数据）退居次优。
+> **当前阶段**：GUI parity **实现完成**（10 task 全落地 main，commit `395d97c`..`b68c1d9` + review 修正 `564a171`，测试 + e2e 双绿）。CLI 18 条原子操作 GUI 全覆盖——Skills 视图 find/install-candidate/import/upgrade-all + Projects 视图 add/scan/rebind/apply-profile 全补齐，`scan_projects` 已从 cli 下沉 core。执行前据 spec review 预修了 P0（apply-profile 整页替换 bug）/ P1（upgrade_all 静默升级）/ P2（find/scan 嵌套 id）三处。下次接续转**基建债**（CI / Cargo.toml 元数据）（§7）。
 
 ## 1. 当前状态
 
@@ -17,7 +17,7 @@ skillkit list [--json]                                      # 列已装 skill（
 skillkit remove <id> [--yes] [--json]                       # 完全替换 uninstall；默认确认，--yes/--json 跳过（--json 输出 {id,removed_canonical}）
 skillkit upgrade <id> | --all [--yes] [--json]                          # npx skills update + 重读 computed_hash；冲突列受影响项目，--yes 跳过
 skillkit import-existing [--json] [--dry-run]                           # 扫描存量 skill 目录，可溯重装入池 + 无源 unmanaged 登记
-skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + apply 闭环 + SSE + 默认自动打开浏览器；--token 仅 e2e/localhost 用（默认随机）
+skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图，覆盖 CLI 全部操作（find/装/卸/升级/导入、project 注册/扫描/重绑/apply-profile/apply 闭环）+ SSE；--token 仅 e2e/localhost 用（默认随机）
 ```
 
 ### 1.2 结构性事实
@@ -28,10 +28,10 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 - **版本 `computed_hash`**：源自 `~/.skillkit/skills-lock.json` 的 `computedHash`（内容 SHA-256）。registry 字段名 computed_hash，`locked_shas` 值同步。
 - **skills.sh 默认源** = registry 搜索入口：CLI main / server serve 启动调 `SourcesStore::ensure_default`，缺失即自动补回（用户删了也会在下一次启动补回）。`install skills.sh/<skill>` 走 `npx skills find` 交互选候选（多同名候选不自动装）；`--json` 时直接输出候选数组。
 - `SkillkitError::Git` → `Tool`。
-- 测试：**make check 全绿**（core 45 + cli 8 + server 21 + m0_e2e 1 + m1_e2e 3 + m3_e2e 1）+ **CLI e2e 10 用例**（5 常规 + 5 `#[ignore]` 真跑 npx）+ **GUI e2e 6 用例**。clippy `-D warnings` 零 warning。计数会漂，用 `make check` / `make e2e-cli` / `make e2e` 复跑。
+- 测试：**make check 全绿**（core 单测含 `scan_projects` + cli + server 集成测试含 8 个新 GUI 端点 + m0/m1/m3 e2e）+ **CLI e2e 10 用例**（5 常规 + 5 `#[ignore]` 真跑 npx）+ **GUI e2e 6 用例**。clippy `-D warnings` 零 warning。计数会漂，用 `make check` / `make e2e-cli` / `make e2e` 复跑。
 - **unmanaged skill**（M3）：存量目录无法溯源时以虚拟源 `unmanaged` 登记（`computed_hash=None`、scope=global），不可升级、remove 不删目录、GUI 角标标记。`import-existing` 扫描 `~/.agents/skills/` + `~/.claude/skills/`（跳 symlink）+ `~/.codex/skills/` + `~/.cursor/skills/`，可溯源（`.git`+remote）重装入池。
 - **e2e 设施三层**（`make check` / `make e2e-cli` / `make e2e`）：core `#[ignore]` 端到端真跑 npx；CLI assert_cmd 驱动真实二进制 + 临时 HOME（`crates/cli/tests/e2e_cli.rs`，BDD 风格 Given/When/Then）；GUI playwright 真实 chromium。
-- **GUI 现状（2026-08-01 盘点）**：CLI 18 条原子操作中 GUI 已覆盖 10 条，缺 8 条（find/install-candidate/import/upgrade-all/project add/scan/rebind/apply-profile）。8 条里 7 条 core 已具备能力（GUI 待接端点），仅 `scan_projects` 当前在 `cli/commands/project.rs` 待下沉 core。spec/plan 已就绪（§2-20），**代码未动**。
+- **GUI 现状（2026-08-01 实现）**：CLI 18 条原子操作 GUI **全覆盖**。原缺的 8 条（find/install-candidate/import/upgrade-all/project add/scan/rebind/apply-profile）全部补齐；`scan_projects` 已从 cli 下沉 core（`skillkit_core::scan_projects`，cli `project scan` 改调它）。新端点都是 server 薄壳调 core，零业务逻辑泄漏。
 
 ### 1.3 验证 flow
 
@@ -44,7 +44,9 @@ cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills�
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
-## 2. 最近完成（GUI parity 设计 + skill find/list/remove + M3 全量 + e2e 固化 + README）
+## 2. 最近完成（GUI parity 实现 + 设计 + skill find/list/remove + M3 全量 + e2e 固化 + README）
+
+21. **GUI parity 实现**（本会话，10 commit `395d97c`..`b68c1d9` + review 修正 `564a171`，已提交 main）：executing-plans 全流程。先独立验证前会话的 spec review（`docs/review/2026-08-01-gui-parity-design-spec-review.md`）——4 条主张（P0/P1/P2×2）逐条对照源码**全成立**，落 plan/spec 修正后再执行。10 task TDD：Task1 `scan_projects` 下沉 core（cli 改调 `skillkit_core::scan_projects` + 删私有副本）；Task2 Skills find 端点 + `fake_npx` 测试基建（PATH 前置 RAII guard，范式源自 core `upgrade.rs::install_fake_npx`）；Task3-5 install-candidate/import/upgrade-all（`SkillsMainTpl`+`SkillsTpl` 加 `summary: Option<&str>` 承载计数反馈，`render_skills` 签名加 summary 参数）；Task6-9 Projects add/scan/rebind/apply-profile（`WorkspaceTpl`+`WorkspaceMainTpl` 加 `profiles` 字段）；Task10 README serve 段同步。**review 修正（执行前落 plan）**：① P0 apply-profile 表单 `hx-target` body→`#status-panel`（原写法点击会把整页替换成一行 status 面板），测试加 `body.contains("status-panel") && !body.contains("installed_skills")` 防回归；② P1 `upgrade_all(.., true)→false`（`yes=true` 时 `blocked` 恒空、冲突 skill 被静默升级致项目基线漂移而零反馈），测试种锁 oldhash 的 project 断言冲突列出且 hash 不变；③ P2 find/scan 片段 `innerHTML`→`outerHTML`（避免嵌套重复 id）；④ find handler 用 `tokio::task::spawn_blocking` 包同步 `npx::find`。**执行适配**（plan 代码 vs 现状）：`common/mod.rs` 已 use `Paths` 故 fake_npx 去重 use；`Config` 未在 lib.rs re-export 故用全路径 `skillkit_core::config::Config`；clippy 拦 `format_push_string`（summary 改 `write!`）+ `manual_let_else`（apply_profile match 改 let-else）。验证：`make check` 全绿（server 集成测试 +8）+ `make e2e` 6 用例过（模板加搜索框/按钮未破坏现有 UI）。
 
 20. **GUI parity 设计**（本会话，spec `b3a5eeb` + plan `0e0c066`，已提交 main，**代码未动**）：brainstorming→writing-plans 全流程。对照 CLI 18 条原子操作盘点 GUI 缺口——已覆盖 10 条，缺 8 条（find/install-candidate/import/upgrade-all + project add/scan/rebind/apply-profile）。core 仅 `scan_projects` 需从 `cli/commands/project.rs` 下沉（其余 7 条 core 已具备）。决策：find 同步 + `hx-indicator` loading（不搞 async+SSE，YAGNI）；GUI 端点不加 `--json`（职责分离，`--json` 是 CLI 给 agent 的契约）；8 条全补齐含 scan（主人定）。plan 拆 10 TDD task（Task1 scan 下沉 / Task2-5 Skills 四端点 + fake_npx 测试基建 / Task6-9 Projects 四端点 / Task10 收尾），每 task 完整 handler+模板+测试代码。spec/plan 落 `docs/superpowers/{specs,plans}/2026-08-01-gui-parity*.md`。下次直接执行 plan（§7）。
 
@@ -89,15 +91,15 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ## 4. 验证清单（重载 / 切换后立即跑）
 
-- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 45 + cli bin 15 + e2e 8 非 ignore + server 21 + clippy `-D warnings` 零 warning）。
+- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 单测含 scan_projects + cli + server 集成测试含 8 个新 GUI 端点 + m0/m1/m3 e2e + clippy `-D warnings` 零 warning）。
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）+ m3 一个（install → upgrade 更新 hash）。
 - [ ] `make e2e-cli`：CLI 全链路 e2e 过（import-existing / remove 确认交互 + upgrade 冲突交互 + managed remove 真跑 npx）。
 - [ ] `make e2e`：GUI e2e 6 用例过（导航不重复回归 / 实时预览 / 默认源 / 增删闭环 / unmanaged 角标 / upgrade 按钮仅 managed）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
-- [ ] `git status` 干净度：工作树应干净（GUI parity spec+plan + skill find/list/remove + README + plan 修正均已提交 main）。
-- [ ] **GUI parity 就绪信号**：`ls docs/superpowers/{specs,plans}/2026-08-01-gui-parity*.md` 两文件都在；`git log --oneline -3` 见 `0e0c066`(plan) + `b3a5eeb`(spec)。代码尚未动——`make check` 仍为旧基线全绿（core 45 + cli + server 21）。
-- [ ] **回归信号**：若 `git log` 不见 `0e0c066`/`b3a5eeb`，spec/plan 丢了——从 `docs/superpowers/{specs,plans}/` 重查；若 `make check` 已有 server 新端点测试（find/scan/install-candidate 等）说明 GUI parity 已开始执行，改读 plan 对应 task 续上。
+- [ ] `git status` 干净度：工作树应干净（GUI parity 实现 + review 修正 + README 均已提交 main）。
+- [ ] **GUI parity 完成信号**：`git log --oneline | grep "feat(gui)"` 见 8 个端点 commit（find/install/import/upgrade-all + add/scan/rebind/apply-profile）+ `refactor(core): scan_projects`；`make check` 含 server 新端点集成测试；`make e2e` 6 用例过。
+- [ ] **回归信号**：apply-profile 点击后整页消失 → P0 回归（模板 `hx-target` 应是 `#status-panel` 非 `body`）；upgrade-all 冲突 skill 的 hash 变了 → P1 回归（`upgrade_all` 应传 `false`）；server 测试缺 `skills_find_renders_candidates` / `projects_apply_profile_merges_skills` 等 → 端点丢失，查 `crates/server/src/routes/{skills,projects}.rs`。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。GUI Skills 页若 unmanaged 行没有「install 表单」= M3 计划误删 install 的回归（Task 7 fix 曾修复）。
 
 ## 5. 已知遗留 / 待办
@@ -112,7 +114,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 5. **`button.u` 无 CSS 规则**（server）：server `skills_main.html` 的 `class="u"` 升级按钮无 CSS（demo 原型已加 `.pill-btn.u`，server 未对齐，Minor）。
 6. **GUI Skills 页 install 表单无回归测试**：e2e 已断言 install 表单存在（`test_skills_upgrade_button_only_managed`），后续若改模板需留意（Minor）。
 7. **e2e 三层不统一入口**：`make check`（无 e2e）、`make e2e-cli`、`make e2e` 分开跑；未来可加 `make e2e-all` 聚合（Minor）。
-8. **GUI parity 执行**（下次焦点，plan 已就绪 `0e0c066`）：跑 `docs/superpowers/plans/2026-08-01-gui-parity.md` 10 task。core 下沉 `scan_projects` + Skills/Projects 视图各 4 端点 + 模板 + fake_npx 测试基建。推荐 subagent-driven 逐 task 执行；实现时按 §8.2 的 13 条 htmx/askama 坑。
+8. ~~**GUI parity 执行**~~ ✅ 完成（commit `395d97c`..`b68c1d9`，10 task 全落地 main）。core 下沉 `scan_projects` + Skills/Projects 视图各 4 端点 + 模板 + fake_npx 测试基建。据 spec review 预修 P0/P1/P2 三处。详见 §2-21。
 
 ## 6. 关键文件路径速查
 
@@ -151,7 +153,32 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 - `~/.agents/skills/<skill>/`：global apply 落地点（agent 直读；symlink 自池子）。
 - `~/.claude/skills/<skill>/`：Claude 桥接（symlink → ~/.agents/skills/）。
 
-## 7. 下次接续工作的最短路径（GUI parity 执行）
+## 7. 下次接续工作的最短路径（基建债）
+
+### 7.1 冷启动（新会话第一件事）
+
+```bash
+cd /Users/mywo/lab/skillkit
+git status                                # 工作树应干净（GUI parity 实现已提交 main）
+make check                                # 全绿（含 8 个新 GUI 端点集成测试）
+make e2e                                  # GUI e2e 6 用例过
+git log --oneline | grep "feat(gui)"      # 确认 8 个 GUI 端点 commit 在
+```
+
+**必读**：§1（GUI 已对齐 CLI 全操作）+ §3.1（npx skills 行为）+ §8.2（htmx/askama 坑，改 GUI 时遵守）。
+
+### 7.2 焦点：基建债
+
+1. **Cargo.toml `[package]` 元数据**：core/cli/server 三 crate 补 description/license/repository（README 已声明 MIT，对齐）。
+2. **CI**（GitHub Actions）：跑 `make check`。e2e 三层不进 check；是否额外跑 `make e2e-cli`（需 npx）由主人定。
+
+### 7.3 优先级
+
+1. 基建债（Cargo.toml 元数据 + CI）→ 2. 可选 GUI 打磨（§5 minor 项：uninstall→remove 命名清理 / `button.u` CSS / `make e2e-all` 聚合）。
+
+## 7.3 (archive) GUI parity 执行（已完成，commit `395d97c`..`b68c1d9`）
+
+原焦点，10 task 全落地 main。保留下方执行路径作溯源。
 
 ### 7.1 冷启动（新会话第一件事）
 
