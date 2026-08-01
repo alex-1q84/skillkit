@@ -208,6 +208,35 @@ fn find_json_returns_candidate_array() {
 }
 
 // ===========================================================================
+// list（不依赖 npx）
+// ===========================================================================
+
+#[test]
+fn list_marks_unmanaged_skill() {
+    // Given：import-existing 登记一个 unmanaged skill
+    let env = Env::new();
+    env.make_skill(".agents/skills", "legacy-b");
+    env.skillkit().args(["import-existing"]).assert().success();
+
+    // When：list（人看输出）
+    let out = env.skillkit().args(["list"]).assert().success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout);
+
+    // Then：输出含该 skill 且标 unmanaged
+    assert!(
+        stdout.contains("unmanaged/legacy-b"),
+        "list 应列出 unmanaged skill"
+    );
+    assert!(stdout.contains("unmanaged"), "unmanaged 行应有标识");
+
+    // And：--json 输出含 id 与 computed_hash=null
+    let outj = env.skillkit().args(["list", "--json"]).assert().success();
+    let v: serde_json::Value = serde_json::from_slice(&outj.get_output().stdout).unwrap();
+    assert_eq!(v[0]["id"], "unmanaged/legacy-b");
+    assert!(v[0]["computed_hash"].is_null());
+}
+
+// ===========================================================================
 // uninstall 保护 unmanaged
 // ===========================================================================
 

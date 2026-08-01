@@ -1,7 +1,7 @@
 //! skill 实体的查询与移除：find（搜 skills.sh）/ list（列已装）/ remove（卸载，替换 uninstall）。
 //! 复用 core 的 npx::find / Registry / uninstall，cli 只做薄壳与展示。
 use clap::Args;
-use skillkit_core::{npx, paths::Paths};
+use skillkit_core::{npx, paths::Paths, Registry, Scope, SkillMeta};
 
 /// find：skillkit find <query> [--json]，搜 skills.sh registry，纯展示候选不安装。
 #[derive(Args)]
@@ -34,11 +34,71 @@ pub fn run_find(cmd: FindCmd) -> anyhow::Result<()> {
     print_candidates(&Paths::production(), &cmd.query, cmd.json)
 }
 
+/// list：skillkit list [--json]，列 registry 全部已装 skill。
+#[derive(Args)]
+pub struct ListCmd {
+    /// JSON 输出：SkillMeta[]
+    #[arg(long)]
+    pub json: bool,
+}
+
+fn scope_str(s: Scope) -> &'static str {
+    match s {
+        Scope::Global => "global",
+        Scope::Local => "local",
+    }
+}
+
+/// 渲染 list 表格（人看）。unmanaged（computed_hash=None）行尾标 unmanaged。
+fn render_list_table(skills: &[SkillMeta]) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for s in skills {
+        let hash = s.computed_hash.as_deref().unwrap_or("-");
+        let unm = if s.computed_hash.is_none() {
+            "  (unmanaged)"
+        } else {
+            ""
+        };
+        writeln!(
+            out,
+            "{id}  [{scope}]  {source}  {ver}  {hash}{unm}",
+            id = s.id,
+            scope = scope_str(s.scope),
+            source = s.source,
+            ver = s.version.as_deref().unwrap_or("-"),
+            hash = hash,
+            unm = unm,
+        )
+        .unwrap();
+    }
+    out
+}
+
+fn render_list_json(skills: &[SkillMeta]) -> anyhow::Result<String> {
+    Ok(serde_json::to_string_pretty(skills)?)
+}
+
+pub fn run_list(cmd: ListCmd) -> anyhow::Result<()> {
+    let paths = Paths::production();
+    let reg = Registry::load(&paths)?;
+    let mut skills: Vec<SkillMeta> = reg.skills.values().cloned().collect();
+    skills.sort_by(|a, b| a.id.cmp(&b.id));
+    if cmd.json {
+        println!("{}", render_list_json(&skills)?);
+    } else if skills.is_empty() {
+        println!("（registry 为空，尚无已装 skill）");
+    } else {
+        print!("{}", render_list_table(&skills));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::{Parser, Subcommand};
-    use skillkit_core::Candidate;
+    use skillkit_core::{Candidate, Scope, SkillMeta};
 
     /// 测试入口：自建同形 Parser 解析顶层命令（main.rs 的 Cli 私有，这里复刻命令变体）。
     /// 后续 task 给 TestCmd 累积追加 List/Remove 变体。
@@ -51,12 +111,31 @@ mod tests {
     #[derive(Subcommand)]
     enum TestCmd {
         Find(FindCmd),
+        List(ListCmd),
+    }
+
+    fn meta(id: &str, scope: Scope, hash: Option<&str>) -> SkillMeta {
+        SkillMeta {
+            id: id.into(),
+            name: id.rsplit('/').next().unwrap().into(),
+            source: id.split('/').next().unwrap().into(),
+            scope,
+            version: Some("1.0.0".into()),
+            computed_hash: hash.map(str::to_string),
+            installed_at: "2026-08-01T00:00:00Z".into(),
+            canonical_path: format!(
+                "~/.skillkit/.agents/skills/{}",
+                id.rsplit('/').next().unwrap()
+            ),
+        }
     }
 
     #[test]
     fn find_parses_query_and_json() {
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "find", "pdf", "--json"]);
-        let TestCmd::Find(FindCmd { query, json }) = cmd;
+        let TestCmd::Find(FindCmd { query, json }) = cmd else {
+            panic!("expected Find")
+        };
         assert_eq!(query, "pdf");
         assert!(json);
     }
@@ -64,7 +143,9 @@ mod tests {
     #[test]
     fn find_defaults_json_false() {
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "find", "pdf"]);
-        let TestCmd::Find(FindCmd { json, .. }) = cmd;
+        let TestCmd::Find(FindCmd { json, .. }) = cmd else {
+            panic!("expected Find")
+        };
         assert!(!json);
     }
 
@@ -86,5 +167,42 @@ mod tests {
             json,
             r#"[{"spec":"anthropics/skills@pdf","url":"https://skills.sh/a"},{"spec":"openai/skills@pdf","url":null}]"#
         );
+    }
+
+    #[test]
+    fn list_parses_json_flag() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "list", "--json"]);
+        let TestCmd::List(ListCmd { json }) = cmd else {
+            panic!("expected List")
+        };
+        assert!(json);
+    }
+
+    #[test]
+    fn list_table_marks_unmanaged() {
+        let skills = vec![
+            meta("skills.sh/pdf", Scope::Global, Some("abc123")),
+            meta("unmanaged/legacy", Scope::Global, None),
+        ];
+        let table = render_list_table(&skills);
+        assert!(table.contains("skills.sh/pdf"));
+        assert!(table.contains("[global]"));
+        assert!(table.contains("unmanaged/legacy"));
+        assert!(table.contains("unmanaged"));
+    }
+
+    /// --json schema 锁定：SkillMeta[] 字段名稳定。
+    #[test]
+    fn list_json_schema_locks_skillmeta_fields() {
+        let skills = vec![meta("skills.sh/pdf", Scope::Local, Some("abc123"))];
+        let json = render_list_json(&skills).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = &v[0];
+        assert_eq!(obj["id"], "skills.sh/pdf");
+        assert_eq!(obj["scope"], "local");
+        assert_eq!(obj["computed_hash"], "abc123");
+        assert_eq!(obj["source"], "skills.sh");
+        assert!(obj["installed_at"].is_string());
+        assert!(obj["canonical_path"].is_string());
     }
 }
