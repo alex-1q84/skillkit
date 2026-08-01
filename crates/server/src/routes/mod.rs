@@ -58,14 +58,15 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/projects", get(projects::list).post(projects::add))
         .route("/{token}/projects/scan", post(projects::scan))
         .route("/{token}/projects/browse", get(projects::browse))
-        .route("/{token}/projects/{id}", get(projects::workspace))
+        .route(
+            "/{token}/projects/{id}",
+            get(projects::workspace).delete(projects::remove),
+        )
         .route("/{token}/projects/{id}/rebind", post(projects::rebind))
         .route(
-            "/{token}/projects/{id}/apply-profile",
-            post(projects::apply_profile),
+            "/{token}/projects/{id}/profiles",
+            post(projects::set_profiles),
         )
-        .route("/{token}/projects/{id}/skills", post(projects::set_skills))
         .route("/{token}/projects/{id}/status", get(projects::status))
-        .route("/{token}/projects/{id}/apply", post(projects::apply))
         .route("/{token}/events", get(sse::events))
 }

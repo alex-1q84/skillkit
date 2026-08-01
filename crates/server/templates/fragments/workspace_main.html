@@ -1,41 +1,62 @@
-<h1>{{ project.name }}</h1>
-<p>{{ project.path }} · agents: {{ project.agents.join(", ") }}</p>
+<h1>{{ project.name }}
+  <button class="x"
+          hx-delete="/{{ token }}/projects/{{ project.id }}"
+          hx-target="body" hx-swap="outerHTML"
+          hx-confirm="注销后该项目不再被 skillkit 管理，已落地文件保留。确定？">删除</button>
+</h1>
+<p>{{ project.path }} · agents: {{ project.agents.join(", ") }}{% if !project.applied_profiles.is_empty() %} · 绑定: {{ project.applied_profiles.join(", ") }}{% endif %}</p>
 
-<div class="workspace">
-  <section class="col">
-    <h2>installed_skills ({{ project.installed_skills.len() }})</h2>
-    <ul>{% for id in project.installed_skills %}<li>{{ id }}</li>{% endfor %}</ul>
-    <form hx-post="/{{ token }}/projects/{{ project.id }}/skills" hx-target="#status-panel" hx-swap="outerHTML">
-      {% for (meta, checked) in all_skills %}
-      <label><input type="checkbox" name="skills" value="{{ meta.id }}"{% if checked %} checked{% endif %}>
-        {{ meta.id }} [{{ meta.scope }}]</label><br>
+{% include "fragments/status.html" %}
+
+<section class="card">
+  <h2>重绑定路径</h2>
+  <p class="hint">项目移动/改名后，用浏览向导修正路径。</p>
+  <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/rebind"
+        hx-target="body" hx-swap="outerHTML">
+    <input id="path" name="path" type="text" placeholder="新路径" required value="{{ project.path }}">
+    <button type="button"
+            hx-get="/{{ token }}/projects/browse?into=path&panel=browse-panel-rebind"
+            hx-target="#browse-panel-rebind"
+            hx-include="#path">浏览...</button>
+    <button>重绑定</button>
+  </form>
+  <div id="browse-panel-rebind"></div>
+</section>
+
+<section class="card">
+  <h2>绑定 Profile</h2>
+  {% if profiles.is_empty() %}
+  <p class="hint">还没有 profile，去 <a href="/{{ token }}/profiles">Profiles 视图</a>创建。</p>
+  {% else %}
+  <form hx-post="/{{ token }}/projects/{{ project.id }}/profiles"
+        hx-target="body" hx-swap="outerHTML">
+    <div class="profile-grid">
+      {% for p in &profiles %}
+      <label class="profile-card{% if p.bound %} bound{% endif %}">
+        <input type="checkbox" name="profiles" value="{{ p.name }}"{% if p.bound %} checked{% endif %}>
+        <span class="pc-name">{{ p.name }}</span>
+        <span class="pc-count">{{ p.skill_count }} skills</span>
+      </label>
       {% endfor %}
-      <button>update</button>
-      <button class="apply" hx-post="/{{ token }}/projects/{{ project.id }}/apply" hx-target="#status-panel" hx-swap="outerHTML">▶ APPLY</button>
-    </form>
-  </section>
+    </div>
+    <button class="apply">▶ 应用</button>
+  </form>
+  {% endif %}
+  {% if let Some(r) = report.as_ref() %}
+  <div class="apply-result">
+    <p class="hint">上次应用：created {{ r.created.len() }} · removed {{ r.removed.len() }} · recopied {{ r.recopied.len() }}{% if !r.warnings.is_empty() %} · ⚠ {{ r.warnings.len() }} warnings{% endif %}</p>
+    {% for w in &r.warnings %}<p class="warn">{{ w }}</p>{% endfor %}
+  </div>
+  {% endif %}
+</section>
 
+<div class="workspace-bottom">
+  <section class="col">
+    <h2>local installed skills ({{ local_skills.len() }})</h2>
+    <ul>{% for id in &local_skills %}<li>{{ id }}</li>{% else %}<li>—</li>{% endfor %}</ul>
+  </section>
   <section class="col">
     <h2>shared（只读 · git 管）</h2>
-    <ul>{% for s in shared %}<li>{{ s }}</li>{% else %}<li>—</li>{% endfor %}</ul>
+    <ul>{% for s in &shared %}<li>{{ s }}</li>{% else %}<li>—</li>{% endfor %}</ul>
   </section>
-
-  {% include "fragments/status.html" %}
-
-  <details>
-    <summary>重绑定（项目移动/改名后修正路径）</summary>
-    <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/rebind"
-          hx-target="body" hx-swap="outerHTML">
-      <input type="text" name="path" placeholder="新路径" required>
-      <button>重绑定</button>
-    </form>
-  </details>
-  <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/apply-profile"
-        hx-target="#status-panel" hx-swap="outerHTML">
-    <select name="profile">
-      <option value="">（选择 profile）</option>
-      {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-    </select>
-    <button>应用 profile</button>
-  </form>
 </div>

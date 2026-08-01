@@ -1,4 +1,8 @@
 <h1>Projects</h1>
+
+<section class="card">
+  <h2>注册项目</h2>
+  <p class="hint">已知项目路径？直接填路径注册。</p>
   <form class="inline" hx-post="/{{ token }}/projects"
         hx-target="body" hx-swap="outerHTML">
     <input id="path" name="path" type="text" placeholder="项目绝对路径（如 /Users/me/app）" required>
@@ -6,10 +10,15 @@
             hx-get="/{{ token }}/projects/browse?into=path&panel=browse-panel-add"
             hx-target="#browse-panel-add"
             hx-include="#path">浏览...</button>
-    <input name="agents" placeholder="agents（可选，逗号分隔，留空用全部）">
-    <button>注册项目</button>
+    <input name="agents" placeholder="agents（可选，逗号分隔）">
+    <button>注册</button>
   </form>
   <div id="browse-panel-add"></div>
+</section>
+
+<section class="card">
+  <h2>扫描发现</h2>
+  <p class="hint">不确定有哪些项目？扫目录树自动发现候选。</p>
   <form class="inline" hx-post="/{{ token }}/projects/scan"
         hx-target="#scan-results" hx-swap="outerHTML"
         hx-indicator="#scan-indicator">
@@ -19,13 +28,26 @@
             hx-target="#browse-panel-scan"
             hx-include="#dir">浏览...</button>
     <input type="number" name="depth" value="3" min="0" max="5">
-    <button>扫描发现</button>
+    <button>扫描</button>
     <span id="scan-indicator" class="htmx-indicator">扫描中…</span>
   </form>
   <div id="browse-panel-scan"></div>
   <div id="scan-results"></div>
-  <ul>
-  {% for p in projects %}
-  <li><a href="/{{ token }}/projects/{{ p.id }}">{{ p.name }}</a> — {{ p.path }} ({{ p.installed_skills.len() }} skills)</li>
+</section>
+
+<h2>已注册项目</h2>
+<ul class="project-list">
+  {% for row in &rows %}
+  <li>
+    <a href="/{{ token }}/projects/{{ row.id }}">{{ row.name }}</a>
+    <span class="muted">{{ row.path }}</span>
+    <span class="badge">{{ row.local_count }} local skills</span>
+    <button class="x"
+            hx-delete="/{{ token }}/projects/{{ row.id }}"
+            hx-target="body" hx-swap="outerHTML"
+            hx-confirm="注销后该项目不再被 skillkit 管理，已落地文件保留。确定？">删除</button>
+  </li>
+  {% else %}
+  <li class="muted">— 还没有注册的项目</li>
   {% endfor %}
 </ul>

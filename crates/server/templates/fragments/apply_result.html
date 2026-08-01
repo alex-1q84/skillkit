@@ -1,6 +1,0 @@
-<div id="status-panel" class="apply-result">
-  <h2>apply 结果</h2>
-  <p>✓ {{ report.created.len() }} created · {{ report.removed.len() }} removed · {{ report.recopied.len() }} recopied</p>
-  {% for w in report.warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
-  <a href="/{{ token }}/projects/{{ project_id }}">↻ 回到工作台（查看最新 status）</a>
-</div>

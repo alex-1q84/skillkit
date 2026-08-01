@@ -263,6 +263,23 @@ async fn project_workspace_renders_status() {
     };
     let proj_root = dir.path().join("myproj");
     std::fs::create_dir_all(&proj_root).unwrap();
+    let canon = dir.path().join("canon/logseq");
+    std::fs::create_dir_all(&canon).unwrap();
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "demo/logseq".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "demo/logseq".into(),
+            name: "logseq".into(),
+            source: "demo".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            computed_hash: Some("s".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
     let proj = skillkit_core::Project {
         id: "ABCDEF12".into(),
         name: "myproj".into(),
@@ -452,104 +469,6 @@ async fn skill_uninstall_removes_from_registry() {
     assert_eq!(resp.status(), StatusCode::OK);
     let after = skillkit_core::Registry::load(&state.paths).unwrap();
     assert!(after.skills.is_empty());
-}
-
-#[tokio::test]
-async fn project_set_skills_replaces_installed() {
-    let dir = tempfile::tempdir().unwrap();
-    let state = skillkit_server::AppState {
-        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
-        token: "test-token".into(),
-    };
-    let proj = skillkit_core::Project {
-        id: "ABCDEF12".into(),
-        name: "p".into(),
-        path: dir.path().join("p").to_string_lossy().into_owned(),
-        agents: vec!["claude-code".into()],
-        applied_profiles: vec![],
-        installed_skills: vec!["old/x".into()],
-        locked_shas: std::collections::BTreeMap::new(),
-    };
-    proj.save(&state.paths).unwrap();
-
-    let app = skillkit_server::app(state.clone());
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/test-token/projects/ABCDEF12/skills")
-                .header(
-                    axum::http::header::CONTENT_TYPE,
-                    "application/x-www-form-urlencoded",
-                )
-                .body(Body::from("skills=new%2Fa&skills=new%2Fb"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
-    assert_eq!(
-        after.installed_skills,
-        vec!["new/a".to_string(), "new/b".to_string()]
-    );
-}
-
-#[tokio::test]
-async fn project_apply_lands_symlink() {
-    let dir = tempfile::tempdir().unwrap();
-    let state = skillkit_server::AppState {
-        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
-        token: "test-token".into(),
-    };
-    let canon = dir.path().join(".skillkit/.agents/skills/logseq");
-    std::fs::create_dir_all(&canon).unwrap();
-    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
-    let mut reg = skillkit_core::Registry::default();
-    reg.skills.insert(
-        "dc/logseq".into(),
-        skillkit_core::registry::SkillMeta {
-            id: "dc/logseq".into(),
-            name: "logseq".into(),
-            source: "dc".into(),
-            scope: skillkit_core::Scope::Local,
-            version: None,
-            computed_hash: Some("sha1".into()),
-            installed_at: "2026-07-31".into(),
-            canonical_path: canon.to_string_lossy().into_owned(),
-        },
-    );
-    reg.save(&state.paths).unwrap();
-    let proj_root = dir.path().join("proj");
-    std::fs::create_dir_all(proj_root.join(".git/info")).unwrap();
-    skillkit_core::Project {
-        id: "ABCDEF12".into(),
-        name: "proj".into(),
-        path: proj_root.to_string_lossy().into_owned(),
-        agents: vec!["claude-code".into()],
-        applied_profiles: vec![],
-        installed_skills: vec!["dc/logseq".into()],
-        locked_shas: std::collections::BTreeMap::new(),
-    }
-    .save(&state.paths)
-    .unwrap();
-
-    let app = skillkit_server::app(state);
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/test-token/projects/ABCDEF12/apply")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert!(
-        proj_root.join(".claude/skills/logseq").is_symlink(),
-        "apply 应建 symlink"
-    );
 }
 
 #[tokio::test]
@@ -944,69 +863,6 @@ async fn projects_rebind_updates_path() {
 }
 
 #[tokio::test]
-async fn projects_apply_profile_merges_skills() {
-    let dir = tempfile::tempdir().unwrap();
-    let state = skillkit_server::AppState {
-        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
-        token: "test-token".into(),
-    };
-    let proj_root = dir.path().join("p");
-    std::fs::create_dir_all(&proj_root).unwrap();
-    skillkit_core::Project {
-        id: "ABCDEF12".into(),
-        name: "p".into(),
-        path: proj_root.to_string_lossy().into_owned(),
-        agents: vec!["claude-code".into()],
-        applied_profiles: vec![],
-        installed_skills: vec![],
-        locked_shas: std::collections::BTreeMap::new(),
-    }
-    .save(&state.paths)
-    .unwrap();
-    skillkit_core::Profile {
-        name: "fe".into(),
-        description: String::new(),
-        skills: vec!["dc/logseq".into(), "dc/dataviz".into()],
-    }
-    .save(&state.paths)
-    .unwrap();
-
-    let app = skillkit_server::app(state.clone());
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/test-token/projects/ABCDEF12/apply-profile")
-                .header(
-                    axum::http::header::CONTENT_TYPE,
-                    "application/x-www-form-urlencoded",
-                )
-                .body(Body::from("profile=fe"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    // 防 P0 回归：handler 必须只返回 status 片段（含 #status-panel），不能返回整页 workspace。
-    // 整页才含 installed_skills 标题；配合模板 hx-target="#status-panel" 才不会整页替换。
-    let body = common::body_string(resp).await;
-    assert!(
-        body.contains("status-panel"),
-        "apply-profile 响应应含 status 片段"
-    );
-    assert!(
-        !body.contains("installed_skills"),
-        "apply-profile 不应返回整页 workspace"
-    );
-    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
-    assert_eq!(
-        after.installed_skills,
-        vec!["dc/logseq".to_string(), "dc/dataviz".to_string()]
-    );
-    assert!(after.applied_profiles.contains(&"fe".to_string()));
-}
-
-#[tokio::test]
 async fn projects_browse_lists_subdirs_skips_hidden_and_files() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {
@@ -1137,4 +993,330 @@ async fn projects_main_renders_browse_buttons_and_panels() {
         "扫描浏览按钮调 browse"
     );
     assert!(body.contains(r#"id="browse-panel-scan""#), "扫描面板 div");
+}
+
+#[tokio::test]
+async fn workspace_renders_status_badge_profile_cards_and_local_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // registry：1 local + 1 global
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "dc/local".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/local".into(),
+            name: "local".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            computed_hash: Some("s1".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: dir
+                .path()
+                .join("canon/local")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    );
+    reg.skills.insert(
+        "dc/glob".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/glob".into(),
+            name: "glob".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Global,
+            version: None,
+            computed_hash: Some("s2".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: dir.path().join("canon/glob").to_string_lossy().into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+    // profile fe
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["dc/local".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    // project：绑了 fe，installed 含 local + global
+    let proj_root = dir.path().join("p");
+    std::fs::create_dir_all(&proj_root).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "p".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec!["fe".into()],
+        installed_skills: vec!["dc/local".into(), "dc/glob".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/projects/ABCDEF12")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("status-panel"), "含 status badge 条");
+    assert!(body.contains("missing"), "未落地显 missing badge");
+    assert!(
+        body.contains("绑定: fe") || body.contains("绑定：fe"),
+        "展示绑定 profiles"
+    );
+    assert!(
+        body.contains(r#"name="profiles""#),
+        "profile 卡片是 checkbox"
+    );
+    assert!(body.contains("fe"), "列出 profile fe");
+    assert!(body.contains("dc/local"), "local 区块含 local skill");
+    assert!(body.contains("local installed skills"), "local 区块标题");
+    assert!(
+        !body.contains(r#"name="skills""#),
+        "不再有手动勾选 skill 的 checkbox"
+    );
+}
+
+#[tokio::test]
+async fn project_set_profiles_binds_lands_and_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // registry：1 local skill（带 canonical 目录，供落地）
+    let canon = dir.path().join(".skillkit/.agents/skills/logseq");
+    std::fs::create_dir_all(&canon).unwrap();
+    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "dc/logseq".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/logseq".into(),
+            name: "logseq".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            computed_hash: Some("sha1".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+    // profile fe 含 dc/logseq
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["dc/logseq".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    // project（需 .git/info 供落地写 exclude）
+    let proj_root = dir.path().join("proj");
+    std::fs::create_dir_all(proj_root.join(".git/info")).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "proj".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/profiles")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("profiles=fe"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert_eq!(after.applied_profiles, vec!["fe".to_string()]);
+    assert_eq!(
+        after.installed_skills,
+        vec!["dc/logseq".to_string()],
+        "绑定 fe 后重算 installed_skills"
+    );
+    assert!(
+        proj_root.join(".claude/skills/logseq").is_symlink(),
+        "set_profiles 应一步落地建 symlink"
+    );
+    let body = common::body_string(resp).await;
+    assert!(body.contains("上次应用"), "响应含落地结果区");
+    assert!(body.contains("status-panel"), "响应含 status");
+}
+
+#[tokio::test]
+async fn project_set_profiles_unknown_profile_returns_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_root = dir.path().join("p");
+    std::fs::create_dir_all(&proj_root).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "p".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/profiles")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("profiles=nope"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("不存在"), "未知 profile 给可读提示，不 500");
+}
+
+#[tokio::test]
+async fn project_remove_deletes_and_returns_list_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_root = dir.path().join("p");
+    std::fs::create_dir_all(&proj_root).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "p".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+    assert!(state.paths.projects_dir().join("ABCDEF12.toml").exists());
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/test-token/projects/ABCDEF12")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        !state.paths.projects_dir().join("ABCDEF12.toml").exists(),
+        "toml 已删"
+    );
+    let body = common::body_string(resp).await;
+    assert!(body.contains("Projects"), "返回列表页");
+}
+
+#[tokio::test]
+async fn projects_list_renders_section_cards_delete_and_local_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut reg = skillkit_core::Registry::default();
+    reg.skills.insert(
+        "dc/local".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/local".into(),
+            name: "local".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Local,
+            version: None,
+            computed_hash: Some("s".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: "/canon/local".into(),
+        },
+    );
+    reg.skills.insert(
+        "dc/glob".into(),
+        skillkit_core::registry::SkillMeta {
+            id: "dc/glob".into(),
+            name: "glob".into(),
+            source: "dc".into(),
+            scope: skillkit_core::Scope::Global,
+            version: None,
+            computed_hash: Some("s".into()),
+            installed_at: "2026-08-01".into(),
+            canonical_path: "/canon/glob".into(),
+        },
+    );
+    reg.save(&state.paths).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "myapp".into(),
+        path: "/tmp/myapp".into(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec!["dc/local".into(), "dc/glob".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("注册项目"), "注册卡片");
+    assert!(body.contains("扫描发现"), "扫描卡片");
+    assert!(
+        body.contains("hx-delete=\"/test-token/projects/ABCDEF12\""),
+        "列表项含删除按钮"
+    );
+    assert!(body.contains("1 local skills"), "local skill 数过滤");
 }

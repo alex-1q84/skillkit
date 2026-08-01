@@ -9,7 +9,7 @@ use form_urlencoded::parse;
 use serde::Deserialize;
 use skillkit_core::{
     build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, Project, Registry,
-    SkillMeta, StatusView,
+    Scope, StatusView,
 };
 use std::path::{Path as StdPath, PathBuf};
 
@@ -20,7 +20,7 @@ use crate::AppState;
 #[template(path = "projects.html")]
 pub struct ProjectsTpl<'a> {
     pub token: &'a str,
-    pub projects: Vec<Project>,
+    pub rows: Vec<ProjectRow>,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -28,7 +28,15 @@ pub struct ProjectsTpl<'a> {
 #[template(path = "fragments/projects_main.html")]
 pub struct ProjectsMainTpl<'a> {
     pub token: &'a str,
-    pub projects: Vec<Project>,
+    pub rows: Vec<ProjectRow>,
+}
+
+/// 列表项展示数据（handler 预计算 local_count，避免模板调 registry）。
+pub struct ProjectRow {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub local_count: usize,
 }
 
 #[derive(Template)]
@@ -38,12 +46,12 @@ pub struct WorkspaceTpl<'a> {
     pub project: &'a Project,
     pub status: StatusView,
     pub shared: Vec<String>,
-    /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
-    pub all_skills: Vec<(SkillMeta, bool)>,
-    pub profiles: Vec<String>,
+    pub local_skills: Vec<String>,
+    pub profiles: Vec<ProfileCard>,
+    pub report: Option<ApplyReport>,
 }
 
-/// 纯 main 内容片段（工作台 SSE 刷新用），不含 nav。
+/// 纯 main 内容片段（工作台 SSE 刷新用），不含 nav。字段与 WorkspaceTpl 一致。
 #[derive(Template)]
 #[template(path = "fragments/workspace_main.html")]
 pub struct WorkspaceMainTpl<'a> {
@@ -51,23 +59,22 @@ pub struct WorkspaceMainTpl<'a> {
     pub project: &'a Project,
     pub status: StatusView,
     pub shared: Vec<String>,
-    /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
-    pub all_skills: Vec<(SkillMeta, bool)>,
-    pub profiles: Vec<String>,
+    pub local_skills: Vec<String>,
+    pub profiles: Vec<ProfileCard>,
+    pub report: Option<ApplyReport>,
+}
+
+/// profile 卡片展示数据（handler 预计算，避免模板调方法）。
+pub struct ProfileCard {
+    pub name: String,
+    pub skill_count: usize,
+    pub bound: bool,
 }
 
 #[derive(Template)]
 #[template(path = "fragments/status.html")]
 pub struct StatusTpl {
     pub status: StatusView,
-}
-
-#[derive(Template)]
-#[template(path = "fragments/apply_result.html")]
-pub struct ApplyResultTpl<'a> {
-    pub token: &'a str,
-    pub project_id: &'a str,
-    pub report: ApplyReport,
 }
 
 #[derive(Template)]
@@ -127,7 +134,7 @@ pub async fn add(
             }
         }
     }
-    render_list(token, projects, false)
+    render_list(&state, token, projects, false)
 }
 
 #[derive(Deserialize)]
@@ -188,31 +195,71 @@ pub async fn rebind(
     if proj.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    render_workspace(state, token, proj, false)
+    render_workspace(state, token, proj, false, None)
 }
 
-#[derive(Deserialize)]
-pub struct ApplyProfileForm {
-    pub profile: String,
-}
-
-/// 应用 profile：把 profile 的 skills 灌入 installed_skills，刷新 status 片段。
-pub async fn apply_profile(
+/// 设定 profile 绑定（替换语义）+ 重算 installed_skills + 落地，一步到位。
+/// 返回完整工作台页（含落地报告）。未知 profile 给可读 err 片段，不 500。
+pub async fn set_profiles(
     State(state): State<AppState>,
-    Path((_token, id)): Path<(String, String)>,
-    Form(f): Form<ApplyProfileForm>,
+    Path((token, id)): Path<(String, String)>,
+    body: Bytes,
 ) -> Response {
+    let names: Vec<String> = parse(&body)
+        .filter(|(k, _)| k.as_ref() == "profiles")
+        .map(|(_, v)| v.into_owned())
+        .collect();
     let Ok(mut proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let Ok(profile) = skillkit_core::Profile::load(&state.paths, &f.profile) else {
-        return Html("<p class=\"err\">profile 不存在</p>").into_response();
-    };
-    proj.apply_profile(&f.profile, &profile.skills);
+    // load 所选 profiles；任一不存在给可读 err
+    let mut profiles = Vec::new();
+    for name in &names {
+        match skillkit_core::Profile::load(&state.paths, name) {
+            Ok(p) => profiles.push(p),
+            Err(_) => {
+                return Html(format!(
+                    r#"<p class="err">profile 不存在，先去 <a href="/{token}/profiles">Profiles 视图</a>创建。</p>"#
+                ))
+                .into_response();
+            }
+        }
+    }
+    proj.set_profiles(&names, &profiles);
     if proj.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    status_fragment(state, proj)
+    let report = match run_apply(&state.paths, &mut proj, false) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            tracing::error!(error = ?e, "set_profiles 落地失败");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    // 落地可能更新 locked_shas，再存一次
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    render_workspace(state, token, proj, false, report)
+}
+
+/// 注销项目：删 toml（不碰项目目录），返回完整 Projects 列表页（写操作返回完整页）。
+pub async fn remove(
+    State(state): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+) -> Response {
+    if skillkit_core::Project::remove(&state.paths, &id).is_err() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let mut projects = Vec::new();
+    if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
+        for pid in ids {
+            if let Ok(p) = Project::load(&state.paths, &pid) {
+                projects.push(p);
+            }
+        }
+    }
+    render_list(&state, token, projects, false)
 }
 
 pub async fn list(
@@ -228,7 +275,7 @@ pub async fn list(
             }
         }
     }
-    render_list(token, projects, q.is_fragment())
+    render_list(&state, token, projects, q.is_fragment())
 }
 
 pub async fn workspace(
@@ -239,28 +286,7 @@ pub async fn workspace(
     let Ok(proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    render_workspace(state, token, proj, q.is_fragment())
-}
-
-/// 全量替换 installed_skills（工作台勾选提交），返回刷新后的 status 片段。
-/// 重复 key（skills=a&skills=b）serde_urlencoded 不支持，用 form_urlencoded 手动收集。
-pub async fn set_skills(
-    State(state): State<AppState>,
-    Path((_token, id)): Path<(String, String)>,
-    body: Bytes,
-) -> Response {
-    let skills: Vec<String> = parse(&body)
-        .filter(|(k, _)| k.as_ref() == "skills")
-        .map(|(_, v)| v.into_owned())
-        .collect();
-    let Ok(mut proj) = Project::load(&state.paths, &id) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    proj.installed_skills = skills;
-    if proj.save(&state.paths).is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
-    status_fragment(state, proj)
+    render_workspace(state, token, proj, q.is_fragment(), None)
 }
 
 /// status 片段端点（SSE 触发 hx-get 刷新用，Task 14 接入）。
@@ -274,34 +300,13 @@ pub async fn status(
     status_fragment(state, proj)
 }
 
-/// apply：调 core run_apply 落地，保存 locked_shas，返回 apply 结果片段。
-pub async fn apply(
-    State(state): State<AppState>,
-    Path((token, id)): Path<(String, String)>,
+fn render_workspace(
+    state: AppState,
+    token: String,
+    proj: Project,
+    fragment: bool,
+    report: Option<ApplyReport>,
 ) -> Response {
-    let Ok(mut proj) = Project::load(&state.paths, &id) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let report = match run_apply(&state.paths, &mut proj, false) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(error = ?e, "apply 失败");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    if proj.save(&state.paths).is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
-    let rendered = ApplyResultTpl {
-        token: &token,
-        project_id: &id,
-        report,
-    }
-    .render();
-    render_str(rendered)
-}
-
-fn render_workspace(state: AppState, token: String, proj: Project, fragment: bool) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
     let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
         expected: vec![],
@@ -314,13 +319,25 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
         conflicts: vec![],
     });
     let shared = scan_shared(StdPath::new(&proj.path), &proj.agents);
-    let profiles = skillkit_core::list_profile_names(&state.paths).unwrap_or_default();
-    let all_skills: Vec<(SkillMeta, bool)> = reg
-        .skills
-        .values()
-        .map(|m| {
-            let installed = proj.installed_skills.iter().any(|s| s == &m.id);
-            (m.clone(), installed)
+    let local_skills: Vec<String> = proj
+        .installed_skills
+        .iter()
+        .filter(|id| reg.get(id).is_ok_and(|m| m.scope == Scope::Local))
+        .cloned()
+        .collect();
+    let profiles: Vec<ProfileCard> = skillkit_core::list_profile_names(&state.paths)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| {
+            let skill_count = skillkit_core::Profile::load(&state.paths, &name)
+                .map(|p| p.skills.len())
+                .unwrap_or(0);
+            let bound = proj.applied_profiles.iter().any(|n| n == &name);
+            ProfileCard {
+                name,
+                skill_count,
+                bound,
+            }
         })
         .collect();
     let rendered = if fragment {
@@ -329,8 +346,9 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
             project: &proj,
             status,
             shared,
-            all_skills,
+            local_skills,
             profiles,
+            report,
         }
         .render()
     } else {
@@ -339,8 +357,9 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
             project: &proj,
             status,
             shared,
-            all_skills,
+            local_skills,
             profiles,
+            report,
         }
         .render()
     };
@@ -364,17 +383,39 @@ fn status_fragment(state: AppState, proj: Project) -> Response {
     render_str(rendered)
 }
 
-fn render_list(token: String, projects: Vec<Project>, fragment: bool) -> Response {
+fn render_list(
+    state: &AppState,
+    token: String,
+    projects: Vec<Project>,
+    fragment: bool,
+) -> Response {
+    let reg = Registry::load(&state.paths).unwrap_or_default();
+    let rows: Vec<ProjectRow> = projects
+        .iter()
+        .map(|p| {
+            let local_count = p
+                .installed_skills
+                .iter()
+                .filter(|id| reg.get(id).is_ok_and(|m| m.scope == Scope::Local))
+                .count();
+            ProjectRow {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                path: p.path.clone(),
+                local_count,
+            }
+        })
+        .collect();
     let rendered = if fragment {
         ProjectsMainTpl {
             token: &token,
-            projects,
+            rows,
         }
         .render()
     } else {
         ProjectsTpl {
             token: &token,
-            projects,
+            rows,
         }
         .render()
     };

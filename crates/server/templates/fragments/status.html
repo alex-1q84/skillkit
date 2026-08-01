@@ -1,7 +1,22 @@
-<div id="status-panel" class="col">
-  <h2>status</h2>
-  <pre class="status">expected:  {{ status.expected.join(", ") }}
-missing:   {{ status.missing.join(", ") }}
-extra:     {{ status.extra.join(", ") }}
-conflicts: {{ status.conflicts.join(", ") }}</pre>
+<div id="status-panel" class="status-bar">
+  {% if status.missing.is_empty() && status.extra.is_empty() && status.conflicts.is_empty() %}
+  <span class="badge ok">✓ 已同步 · {{ status.expected.len() }} expected</span>
+  {% else %}
+  <span class="badge">expected {{ status.expected.len() }}</span>
+  {% if !status.missing.is_empty() %}
+  <details class="badge warn"><summary>missing {{ status.missing.len() }}</summary>
+    <ul>{% for m in &status.missing %}<li>{{ m }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if !status.extra.is_empty() %}
+  <details class="badge warn"><summary>extra {{ status.extra.len() }}</summary>
+    <ul>{% for m in &status.extra %}<li>{{ m }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if !status.conflicts.is_empty() %}
+  <details class="badge danger"><summary>conflicts {{ status.conflicts.len() }}</summary>
+    <ul>{% for m in &status.conflicts %}<li>{{ m }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% endif %}
 </div>
