@@ -942,3 +942,66 @@ async fn projects_rebind_updates_path() {
     assert_eq!(after.name, "new-name");
     assert!(after.path.contains("new-name"));
 }
+
+#[tokio::test]
+async fn projects_apply_profile_merges_skills() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_root = dir.path().join("p");
+    std::fs::create_dir_all(&proj_root).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "p".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["dc/logseq".into(), "dc/dataviz".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/apply-profile")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("profile=fe"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    // 防 P0 回归：handler 必须只返回 status 片段（含 #status-panel），不能返回整页 workspace。
+    // 整页才含 installed_skills 标题；配合模板 hx-target="#status-panel" 才不会整页替换。
+    let body = common::body_string(resp).await;
+    assert!(
+        body.contains("status-panel"),
+        "apply-profile 响应应含 status 片段"
+    );
+    assert!(
+        !body.contains("installed_skills"),
+        "apply-profile 不应返回整页 workspace"
+    );
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert_eq!(
+        after.installed_skills,
+        vec!["dc/logseq".to_string(), "dc/dataviz".to_string()]
+    );
+    assert!(after.applied_profiles.contains(&"fe".to_string()));
+}

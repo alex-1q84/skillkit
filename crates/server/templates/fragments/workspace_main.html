@@ -30,4 +30,12 @@
       <button>重绑定</button>
     </form>
   </details>
+  <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/apply-profile"
+        hx-target="#status-panel" hx-swap="outerHTML">
+    <select name="profile">
+      <option value="">（选择 profile）</option>
+      {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    </select>
+    <button>应用 profile</button>
+  </form>
 </div>

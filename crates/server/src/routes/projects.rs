@@ -40,6 +40,7 @@ pub struct WorkspaceTpl<'a> {
     pub shared: Vec<String>,
     /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
     pub all_skills: Vec<(SkillMeta, bool)>,
+    pub profiles: Vec<String>,
 }
 
 /// 纯 main 内容片段（工作台 SSE 刷新用），不含 nav。
@@ -52,6 +53,7 @@ pub struct WorkspaceMainTpl<'a> {
     pub shared: Vec<String>,
     /// (meta, 是否已在 installed_skills)——工作台勾选预置 checked。
     pub all_skills: Vec<(SkillMeta, bool)>,
+    pub profiles: Vec<String>,
 }
 
 #[derive(Template)]
@@ -170,6 +172,30 @@ pub async fn rebind(
     render_workspace(state, token, proj, false)
 }
 
+#[derive(Deserialize)]
+pub struct ApplyProfileForm {
+    pub profile: String,
+}
+
+/// 应用 profile：把 profile 的 skills 灌入 installed_skills，刷新 status 片段。
+pub async fn apply_profile(
+    State(state): State<AppState>,
+    Path((_token, id)): Path<(String, String)>,
+    Form(f): Form<ApplyProfileForm>,
+) -> Response {
+    let Ok(mut proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(profile) = skillkit_core::Profile::load(&state.paths, &f.profile) else {
+        return Html("<p class=\"err\">profile 不存在</p>").into_response();
+    };
+    proj.apply_profile(&f.profile, &profile.skills);
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    status_fragment(state, proj)
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Path(token): Path<String>,
@@ -269,6 +295,7 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
         conflicts: vec![],
     });
     let shared = scan_shared(StdPath::new(&proj.path), &proj.agents);
+    let profiles = skillkit_core::list_profile_names(&state.paths).unwrap_or_default();
     let all_skills: Vec<(SkillMeta, bool)> = reg
         .skills
         .values()
@@ -284,6 +311,7 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
             status,
             shared,
             all_skills,
+            profiles,
         }
         .render()
     } else {
@@ -293,6 +321,7 @@ fn render_workspace(state: AppState, token: String, proj: Project, fragment: boo
             status,
             shared,
             all_skills,
+            profiles,
         }
         .render()
     };
