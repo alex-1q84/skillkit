@@ -104,6 +104,34 @@ impl Project {
             }
         }
     }
+
+    /// 设定绑定 profile 集合（替换语义）+ 重算 installed_skills 为所选 profiles 的 skills 并集（去重保序）。
+    /// names 中找不到对应 profile 的条目静默跳过（handler 应先校验存在性并给可读 err）。
+    pub fn set_profiles(&mut self, names: &[String], profiles: &[crate::profile::Profile]) {
+        self.applied_profiles = names.to_vec();
+        let mut skills: Vec<String> = Vec::new();
+        for name in names {
+            if let Some(p) = profiles.iter().find(|p| &p.name == name) {
+                for id in &p.skills {
+                    if !skills.contains(id) {
+                        skills.push(id.clone());
+                    }
+                }
+            }
+        }
+        self.installed_skills = skills;
+    }
+
+    /// 注销项目：删 ~/.skillkit/projects/<id>.toml。不存在返回 ProjectNotFound。
+    /// 只删元数据，不碰项目目录任何文件（已落地 symlink 保留，shared/git 资产绝不动）。
+    pub fn remove(paths: &Paths, id: &str) -> Result<()> {
+        let path = paths.projects_dir().join(format!("{id}.toml"));
+        if !path.exists() {
+            return Err(SkillkitError::ProjectNotFound { id: id.to_string() });
+        }
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
 }
 
 pub fn list_ids(paths: &Paths) -> Result<Vec<String>> {
@@ -224,5 +252,89 @@ mod tests {
 
         let d2 = super::scan_projects(&tmp.path().join("a"), 2).unwrap();
         assert!(d2.iter().any(|p| p.ends_with("a/b/c")));
+    }
+
+    #[test]
+    fn set_profiles_recomputes_union_and_replaces() {
+        let mut proj = Project {
+            id: "X1".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec!["old".into()],
+            installed_skills: vec!["old/x".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        let fe = crate::profile::Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["dc/a".into(), "dc/b".into()],
+        };
+        let base = crate::profile::Profile {
+            name: "base".into(),
+            description: String::new(),
+            skills: vec!["dc/b".into(), "dc/c".into()], // b 与 fe 重叠
+        };
+        proj.set_profiles(&["fe".into(), "base".into()], &[fe, base]);
+        assert_eq!(
+            proj.applied_profiles,
+            vec!["fe".to_string(), "base".to_string()],
+            "applied_profiles 替换为所选"
+        );
+        assert_eq!(
+            proj.installed_skills,
+            vec!["dc/a".to_string(), "dc/b".to_string(), "dc/c".to_string()],
+            "installed_skills = 并集去重保序，旧值被替换"
+        );
+    }
+
+    #[test]
+    fn set_profiles_replace_unbinds_previous() {
+        let mut proj = Project {
+            id: "X2".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec!["fe".into()],
+            installed_skills: vec!["dc/a".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        let base = crate::profile::Profile {
+            name: "base".into(),
+            description: String::new(),
+            skills: vec!["dc/z".into()],
+        };
+        // 改绑只剩 base：fe 的 skill 应被清除（替换语义，可取消绑定）
+        proj.set_profiles(&["base".into()], &[base]);
+        assert_eq!(proj.applied_profiles, vec!["base".to_string()]);
+        assert_eq!(
+            proj.installed_skills,
+            vec!["dc/z".to_string()],
+            "取消 fe 绑定后其 skill 不再保留"
+        );
+    }
+
+    #[test]
+    fn remove_deletes_toml_and_errors_when_missing() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        Project {
+            id: "RM1".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec![],
+            installed_skills: vec![],
+            locked_shas: BTreeMap::new(),
+        }
+        .save(&paths)
+        .unwrap();
+        assert!(paths.projects_dir().join("RM1.toml").exists());
+        Project::remove(&paths, "RM1").unwrap();
+        assert!(!paths.projects_dir().join("RM1.toml").exists());
+        assert!(matches!(
+            Project::remove(&paths, "RM1"),
+            Err(SkillkitError::ProjectNotFound { .. })
+        ));
     }
 }
