@@ -1,8 +1,8 @@
-# skillkit 交接（2026-07-29 → 08-01，M0-M3 全部完成 + 手动验证固化 e2e）
+# skillkit 交接（2026-07-29 → 08-01，M0-M3 + skill find/list/remove 全部完成）
 
 > 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：M0-M3 全部完成（import-existing / upgrade / unmanaged / justfile 打包），手动验证已固化为自动化 e2e（`04626fc`，CLI assert_cmd 10 用例 + GUI playwright 6 用例），README 已落地（本会话，未提交）。下次接续 **基建债**（CI / Cargo.toml 元数据）。
+> **当前阶段**：M0-M3 + skill find/list/remove 全部完成。新增 find（搜 skills.sh）/ list（列已装）/ remove（完全替换 uninstall + 补交互确认）三顶层命令，新建 `cli/commands/skill.rs`，install.rs 删 Uninstall 回归单一职责；GUI 原型 Skills 视图同步。spec/plan 落 `docs/superpowers/{specs,plans}/`，已 merge 回 main（`5885ee9`）+ plan 回填执行修正（`b73260d`）。下次接续 **基建债**（CI / Cargo.toml 元数据）+ server GUI 对齐 remove（§5-3）。
 
 ## 1. 当前状态
 
@@ -36,7 +36,7 @@ skillkit serve [--port 7317] [--no-open] [--token <固定值>]   # 四视图 + a
 
 ```bash
 cd /Users/mywo/lab/skillkit
-make check                                    # 全绿（cli 8+5 + core 45 + server 21，clippy 零 warning）
+make check                                    # 全绿（cli bin 15 + e2e 8 非 ignore + core 45 + server 21，clippy 零 warning）
 make e2e                                      # GUI 端到端（真实 chromium，6 用例；需空闲端口 7417）
 make e2e-cli                                  # CLI 全链路端到端（assert_cmd + 真跑 npx，5 用例；不进 check）
 cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills（m0 2 + m3 1）
@@ -45,7 +45,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ## 2. 最近完成（skill find/list/remove + M3 全量 + e2e 固化 + README）
 
-19. **skill find/list/remove**（本会话，分支 skill-find-list-remove）：顶层新增 find（搜 skills.sh，复用 npx::find）/ list（列 registry）/ remove（完全替换 uninstall + 补交互确认，修旧 uninstall 无确认的 gap）。新建 cli/commands/skill.rs，install.rs 删 Uninstall 回归单一职责、registry 源 --json 分支复用 skill::print_candidates（DRY）。--json schema 锁定测试三件（Candidate[]/SkillMeta[]/{id,removed_canonical}）。GUI 原型 Skills 视图同步见 Task 6。
+19. **skill find/list/remove**（本会话，已 merge main `5885ee9`，plan 回填 `b73260d`）：brainstorming→writing-plans→executing-plans→finishing 全流程。顶层新增 find（搜 skills.sh，复用 `npx::find`）/ list（列 registry）/ remove（完全替换 uninstall + 补交互确认，修旧 uninstall 无确认的 gap）。新建 `cli/commands/skill.rs`，install.rs 删 `UninstallCmd`/`run_uninstall`/`print_registry_candidates` 回归单一职责、registry 源 --json 分支复用 `skill::print_candidates`（DRY）。--json schema 锁定测试三件（Candidate[]/SkillMeta[]/{id,removed_canonical}）。GUI 原型 `demo/index.html` Skills 视图同步（find 搜索框/remove ×/unmanaged badge/列对齐 server）。spec/plan 落 `docs/superpowers/{specs,plans}/`。**执行修正回填 plan 6 类**：Candidate 移 tests use、refutable pattern 改 let-else、scope_str 传值、render_list_table 用 writeln!、note 用 &str、验证命令 --lib→--bin skillkit。
 
 18. **README 落地**（本会话，未提交）：新建 `README.md`——从交接 §1.1 命令表面 + CLI `--help` 真实输出提炼（不编造命令），覆盖安装（`cargo install --path crates/cli`）、快速开始、全部命令参考（source/install/project/profile/upgrade/import-existing/uninstall/serve）、支持的 agent 表格（Claude/Cursor/OpenCode/Codex，新增 agent 只改配置）、开发命令（make check/e2e/e2e-cli）、三层架构。README 顶部声明 MIT（license 字段待 Cargo.toml 补齐对齐）。基建债 README 项完成，剩 Cargo.toml 元数据 + CI。
 
@@ -80,13 +80,13 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ## 4. 验证清单（重载 / 切换后立即跑）
 
-- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 45 + cli 8 + server 21 + e2e + clippy `-D warnings` 零 warning）。
+- [ ] `cd /Users/mywo/lab/skillkit && make check` 全绿（core 45 + cli bin 15 + e2e 8 非 ignore + server 21 + clippy `-D warnings` 零 warning）。
 - [ ] `cargo test -p skillkit-core -- --ignored`：m0 两个端到端过（真跑 npx skills local fixture → 池子落地 + registry + 双层 symlink；重复 install 报错）+ m3 一个（install → upgrade 更新 hash）。
 - [ ] `make e2e-cli`：CLI 全链路 e2e 过（import-existing / remove 确认交互 + upgrade 冲突交互 + managed remove 真跑 npx）。
 - [ ] `make e2e`：GUI e2e 6 用例过（导航不重复回归 / 实时预览 / 默认源 / 增删闭环 / unmanaged 角标 / upgrade 按钮仅 managed）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
-- [ ] `git status` 干净度：本会话后 `README.md` 未跟踪未提交（待主人提交）；其余应干净。
+- [ ] `git status` 干净度：工作树应干净（skill find/list/remove + README + plan 修正均已提交 main）。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。GUI Skills 页若 unmanaged 行没有「install 表单」= M3 计划误删 install 的回归（Task 7 fix 曾修复）。
 
 ## 5. 已知遗留 / 待办
@@ -95,10 +95,12 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
    - ~~`skillkit import-existing`~~ ✅ 完成——扫描存量 skill 目录 → 可溯重装入池 + 无源登记 unmanaged；`--dry-run` 只输出不写，`--json` 输出 ImportReport。
    - ~~`skillkit upgrade <id>`~~ ✅ 完成——`npx skills update` + 重读 computed_hash 更新 registry；`--all` 批量（冲突列出不拦截，blocked 列受影响项目）；单 skill 冲突需 `--yes` 或交互确认。
    - ~~打包进 mac-config Brewfile~~ ✅ 完成（`just install_skillkit` 构建 + 装进 PATH；未发布前不进 Brewfile）。
-2. **基建债**（下次焦点）：CI（GitHub Actions `make check`）、Cargo.toml `[package]` 元数据（description/license/repository）。~~README~~ ✅ 完成（本会话，未提交）。
-3. **`button.u` 无 CSS 规则**：升级按钮渲染默认样式，可加一条 `button.u { color: var(--ok) }` 风格化（Minor）。
-4. **GUI Skills 页 install 表单无回归测试**：e2e 已断言 install 表单存在（`test_skills_upgrade_button_only_managed`），后续若改模板需留意（Minor）。
-5. **e2e 三层不统一入口**：`make check`（无 e2e）、`make e2e-cli`、`make e2e` 分开跑；未来可加 `make e2e-all` 聚合（Minor）。
+2. **基建债**（下次焦点）：CI（GitHub Actions `make check`）、Cargo.toml `[package]` 元数据（description/license/repository）。~~README~~ ✅ 完成（`b7a5a40`）。
+3. **server GUI 对齐 remove**（本次遗留）：本次只动 cli（uninstall→remove）+ 原型 demo；server Skills 视图的 uninstall 端点 + × 按钮仍旧名（spec §7 有意不动 server）。要 server GUI 也叫 remove + 加 find/list 端点，单开。
+4. **demo 走查 + ignored e2e 真跑**（本次遗留）：`demo/index.html` Skills 视图 Task 6 Step 6 浏览器手查未自动验；`find_json_returns_candidate_array` + `remove_managed_deletes_canonical_directory` 两个 `#[ignore]` 真跑 npx 用例需 `make e2e-cli` 跑过验证。
+5. **`button.u` 无 CSS 规则**（server）：server `skills_main.html` 的 `class="u"` 升级按钮无 CSS（demo 原型已加 `.pill-btn.u`，server 未对齐，Minor）。
+6. **GUI Skills 页 install 表单无回归测试**：e2e 已断言 install 表单存在（`test_skills_upgrade_button_only_managed`），后续若改模板需留意（Minor）。
+7. **e2e 三层不统一入口**：`make check`（无 e2e）、`make e2e-cli`、`make e2e` 分开跑；未来可加 `make e2e-all` 聚合（Minor）。
 
 ## 6. 关键文件路径速查
 
@@ -110,21 +112,22 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 │   │   ├── src/{lib,paths,error,config,source,registry,npx,install,import,upgrade,symlink,profile,project,apply,lock}.rs
 │   │   └── tests/{m0_e2e,m1_e2e,m3_e2e}.rs       # 端到端 #[ignore] 真跑 npx skills（m0 2 + m3 1）
 │   ├── cli/                   # skillkit-cli（bin）
-│   │   ├── src/{main, commands/{source,install,import,upgrade,profile,project,serve}}.rs
+│   │   ├── src/{main, commands/{source,install,skill,import,upgrade,profile,project,serve}}.rs
 │   │   └── tests/e2e_cli.rs                # CLI 全链路 e2e（assert_cmd + 临时 HOME，BDD 风格）
 │   └── server/                # skillkit-server（lib）—— Axum + Askama + rust-embed
 │       ├── src/{lib.rs, routes/{mod,sources,skills,profiles,projects,sse}.rs}
 │       ├── templates/{layout,home,sources,skills,profiles,projects,project_workspace}.html + fragments/
 │       ├── static/{htmx.min.js, sortable.min.js, app.css}
 │       └── tests/{common/mod.rs, routes.rs}
-├── demo/index.html            # GUI 设计原型（SOURCES mock 用 package 语义、SKILLS mock 用 computed_hash/canonical_path）
+├── demo/index.html            # GUI 设计原型（Skills 视图已对齐 server：find 搜索框/remove ×/unmanaged badge/列序）
 ├── e2e/                       # GUI 端到端（python playwright + 真实 chromium）
 │   ├── test_ui.py             # 6 用例（导航回归/预览/默认源/增删/unmanaged 角标/upgrade 按钮）
 │   └── fixtures.py            # wait_for_serve / assert_nav_single / open_page / seed_registry
 └── docs/
     ├── 2026-07-29-skillkit-design.md          # spec（source 模型收敛后的权威）
     ├── design-decisions-2026-07-29.md         # 决策 13/14/15（source 收敛/默认源/名称推导）
-    ├── superpowers/...                        # M2/M3 spec + plan
+    ├── frontend-rules.md                      # 前端 AI 约束（htmx/askama 坑）
+    ├── superpowers/{specs,plans}/             # M2/M3 + skill find/list/remove 的 spec+plan
     └── sessions/2026-07-29-skillkit-design.md # 本交接
 ```
 
