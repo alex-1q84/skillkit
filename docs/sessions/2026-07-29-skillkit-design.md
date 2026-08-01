@@ -1,8 +1,8 @@
-# skillkit 交接（2026-07-29 → 2026-08-01，M0-M3 + skill find/list/remove + GUI parity 实现）
+# skillkit 交接（2026-07-29 → 2026-08-01，M0-M3 + skill find/list/remove + GUI parity 实现 + Projects 路径向导）
 
 > 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：GUI parity **实现完成**（10 task 全落地 main，commit `395d97c`..`b68c1d9` + review 修正 `564a171`，测试 + e2e 双绿）。CLI 18 条原子操作 GUI 全覆盖——Skills 视图 find/install-candidate/import/upgrade-all + Projects 视图 add/scan/rebind/apply-profile 全补齐，`scan_projects` 已从 cli 下沉 core。执行前据 spec review 预修了 P0（apply-profile 整页替换 bug）/ P1（upgrade_all 静默升级）/ P2（find/scan 嵌套 id）三处。下次接续转**基建债**（CI / Cargo.toml 元数据）（§7）。
+> **当前阶段**：GUI parity **实现完成** + Projects 路径向导已加，测试 + e2e 双绿。GUI parity（10 task，commit `395d97c`..`b68c1d9` + review 修正 `564a171`）让 CLI 18 条原子操作 GUI 全覆盖（Skills find/install/import/upgrade-all + Projects add/scan/rebind/apply-profile + `scan_projects` 下沉 core；执行前据 spec review 预修 P0 apply-profile 整页替换 / P1 upgrade_all 静默升级 / P2 find-scan 嵌套 id 三处）。Projects 路径向导（commit `9199feb`..`c211635`，2 task + spec `aacc1b3` + plan `3981d02`）给注册/扫描表单加「浏览...」逐级目录向导——混合（输入框 + 浏览按钮）、`hx-swap-oob` 选定回填零裸 JS、各表单就近面板、跳过隐藏目录。下次接续转**基建债**（CI / Cargo.toml 元数据）（§7）。
 
 ## 1. 当前状态
 
@@ -44,7 +44,9 @@ cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills�
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
-## 2. 最近完成（GUI parity 实现 + 设计 + skill find/list/remove + M3 全量 + e2e 固化 + README）
+## 2. 最近完成（Projects 路径向导 + GUI parity 实现 + 设计 + skill find/list/remove + M3 全量 + e2e 固化 + README）
+
+22. **Projects 路径向导**（本会话，commit `9199feb`..`c211635` 2 task + spec `aacc1b3` + plan `3981d02`，已提交 main）：brainstorming→writing-plans→executing-plans 全流程。需求：注册/扫描表单手输绝对路径反 UX（要切终端 `pwd` 复制、易错）。**技术约束**：浏览器原生 `<input type=file webkitdirectory>` 出于安全沙箱拿不到完整本地路径，故走 server 端目录浏览（本地 127.0.0.1 无风险）。**交互形态**（主人定）：混合——输入框（仍可手输）+ 旁「浏览...」按钮点开逐级目录面板；选定回填纯 htmx（`hx-swap-oob`，非 onclick JS，主人「htmx 兼容」）；面板各表单就近展开（方案 B 非共用固定）；跳过隐藏目录/文件。**实现**：1 端点 `GET /{token}/projects/browse`（`path`/`into`/`panel`/`select` query；`select` 时返回 oob input+空 panel，否则列子目录）+ 2 片段（`browse.html` 面板 / `browse_select.html` oob）+ `projects_main.html` 两表单各加浏览按钮 + 面板 div（**input id=name=path/dir 约定**，让 oob 重建 input 无属性映射）。路径处理：`~` 展开、canonicalize、home 兜底（`dirs::home_dir`，server 新加 `dirs = "5"` 依赖）、不可读提示。**执行修正**（clippy 拦）：`map_unwrap_or`（`parent_of` 改 `map_or_else`）+ `needless_borrow`（测试 `.uri(&format!)`→`.uri(format!)`）。**已知限制**：browse query 路径暂不 percent-encode（含空格/中文会断，YAGNI；详见 §5-9）。验证：`make check` 全绿（+4 测试：browse 列子目录跳隐藏/选定 oob/不可读 + projects_main 渲染断言）+ `make e2e` 6 用例过。
 
 21. **GUI parity 实现**（本会话，10 commit `395d97c`..`b68c1d9` + review 修正 `564a171`，已提交 main）：executing-plans 全流程。先独立验证前会话的 spec review（`docs/review/2026-08-01-gui-parity-design-spec-review.md`）——4 条主张（P0/P1/P2×2）逐条对照源码**全成立**，落 plan/spec 修正后再执行。10 task TDD：Task1 `scan_projects` 下沉 core（cli 改调 `skillkit_core::scan_projects` + 删私有副本）；Task2 Skills find 端点 + `fake_npx` 测试基建（PATH 前置 RAII guard，范式源自 core `upgrade.rs::install_fake_npx`）；Task3-5 install-candidate/import/upgrade-all（`SkillsMainTpl`+`SkillsTpl` 加 `summary: Option<&str>` 承载计数反馈，`render_skills` 签名加 summary 参数）；Task6-9 Projects add/scan/rebind/apply-profile（`WorkspaceTpl`+`WorkspaceMainTpl` 加 `profiles` 字段）；Task10 README serve 段同步。**review 修正（执行前落 plan）**：① P0 apply-profile 表单 `hx-target` body→`#status-panel`（原写法点击会把整页替换成一行 status 面板），测试加 `body.contains("status-panel") && !body.contains("installed_skills")` 防回归；② P1 `upgrade_all(.., true)→false`（`yes=true` 时 `blocked` 恒空、冲突 skill 被静默升级致项目基线漂移而零反馈），测试种锁 oldhash 的 project 断言冲突列出且 hash 不变；③ P2 find/scan 片段 `innerHTML`→`outerHTML`（避免嵌套重复 id）；④ find handler 用 `tokio::task::spawn_blocking` 包同步 `npx::find`。**执行适配**（plan 代码 vs 现状）：`common/mod.rs` 已 use `Paths` 故 fake_npx 去重 use；`Config` 未在 lib.rs re-export 故用全路径 `skillkit_core::config::Config`；clippy 拦 `format_push_string`（summary 改 `write!`）+ `manual_let_else`（apply_profile match 改 let-else）。验证：`make check` 全绿（server 集成测试 +8）+ `make e2e` 6 用例过（模板加搜索框/按钮未破坏现有 UI）。
 
@@ -99,6 +101,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
 - [ ] `git status` 干净度：工作树应干净（GUI parity 实现 + review 修正 + README 均已提交 main）。
 - [ ] **GUI parity 完成信号**：`git log --oneline | grep "feat(gui)"` 见 8 个端点 commit（find/install/import/upgrade-all + add/scan/rebind/apply-profile）+ `refactor(core): scan_projects`；`make check` 含 server 新端点集成测试；`make e2e` 6 用例过。
+- [ ] **路径向导完成信号**：`git log --oneline | grep browse` 见 `9199feb`（browse 端点）+ `c211635`（前端接入）；`projects_main.html` 注册/扫描表单含「浏览...」按钮 + `#browse-panel-add`/`#browse-panel-scan` div；`make check` 含 `projects_browse_*` 三个测试。
 - [ ] **回归信号**：apply-profile 点击后整页消失 → P0 回归（模板 `hx-target` 应是 `#status-panel` 非 `body`）；upgrade-all 冲突 skill 的 hash 变了 → P1 回归（`upgrade_all` 应传 `false`）；server 测试缺 `skills_find_renders_candidates` / `projects_apply_profile_merges_skills` 等 → 端点丢失，查 `crates/server/src/routes/{skills,projects}.rs`。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。GUI Skills 页若 unmanaged 行没有「install 表单」= M3 计划误删 install 的回归（Task 7 fix 曾修复）。
 
@@ -115,6 +118,8 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 6. **GUI Skills 页 install 表单无回归测试**：e2e 已断言 install 表单存在（`test_skills_upgrade_button_only_managed`），后续若改模板需留意（Minor）。
 7. **e2e 三层不统一入口**：`make check`（无 e2e）、`make e2e-cli`、`make e2e` 分开跑；未来可加 `make e2e-all` 聚合（Minor）。
 8. ~~**GUI parity 执行**~~ ✅ 完成（commit `395d97c`..`b68c1d9`，10 task 全落地 main）。core 下沉 `scan_projects` + Skills/Projects 视图各 4 端点 + 模板 + fake_npx 测试基建。据 spec review 预修 P0/P1/P2 三处。详见 §2-21。
+9. **browse 路径未 percent-encode**（Minor）：Projects 路径向导的 browse query 路径暂不 encode，含空格/中文/`&` 等特殊字符的目录路径会断 query。项目目录通常无空格，YAGNI；实测遇问题再加 `percent-encoding`。
+10. **demo/index.html 未同步路径向导**（Minor）：路径向导只改了 server `projects_main.html`，GUI 设计原型 `demo/index.html` 的 Projects 视图未加浏览按钮（demo 是设计参考，server 是实现，不强求同步）。
 
 ## 6. 关键文件路径速查
 
