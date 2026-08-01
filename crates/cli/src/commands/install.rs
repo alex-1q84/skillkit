@@ -2,7 +2,7 @@
 //! registry 源（package=None，即 skills.sh）install 时走 npx skills find 交互选候选；
 //! `--json` 时直接输出候选数组（不安装），供 agent 决策后自行 install。
 use clap::{Args, Subcommand};
-use skillkit_core::{install, npx, paths::Paths, registry::Scope, source::SourcesStore, uninstall};
+use skillkit_core::{install, npx, paths::Paths, registry::Scope, source::SourcesStore};
 use std::io::{self, Write};
 
 #[derive(Args)]
@@ -24,12 +24,6 @@ enum InstallSub {
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Args)]
-pub struct UninstallCmd {
-    /// skill id，格式 <source>/<skill>
-    pub id: String,
 }
 
 fn parse_scope(s: &str) -> Result<Scope, String> {
@@ -61,16 +55,6 @@ fn resolve_registry_package(paths: &Paths, skill: &str) -> anyhow::Result<String
         .ok_or_else(|| anyhow::anyhow!("无效序号：{idx}"))
 }
 
-/// registry 源 find 候选输出（--json）：解析 find → 序列化数组，不安装。
-fn print_registry_candidates(paths: &Paths, skill: &str) -> anyhow::Result<()> {
-    let candidates = npx::find(paths, skill)?;
-    if candidates.is_empty() {
-        anyhow::bail!("在 skills.sh 未找到 skill：{skill}");
-    }
-    println!("{}", serde_json::to_string_pretty(&candidates)?);
-    Ok(())
-}
-
 pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
     let paths = Paths::production();
     match cmd.cmd {
@@ -97,7 +81,7 @@ pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
                 }
                 None => {
                     if json {
-                        print_registry_candidates(&paths, &skill)?;
+                        crate::commands::skill::print_candidates(&paths, &skill, true)?;
                     } else {
                         let package = resolve_registry_package(&paths, &skill)?;
                         let meta = install(&paths, &source, &skill, &package, scope)?;
@@ -111,13 +95,6 @@ pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
             }
         }
     }
-    Ok(())
-}
-
-pub fn run_uninstall(cmd: UninstallCmd) -> anyhow::Result<()> {
-    let paths = Paths::production();
-    uninstall(&paths, &cmd.id)?;
-    println!("✓ 已卸载 {}", cmd.id);
     Ok(())
 }
 

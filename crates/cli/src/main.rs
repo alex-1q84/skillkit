@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 
 use commands::import::{run as run_import, ImportExistingCmd};
-use commands::install::{InstallCmd, UninstallCmd};
+use commands::install::InstallCmd;
 use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
 use commands::serve::ServeCmd;
@@ -30,8 +30,6 @@ enum Cmd {
     List(ListCmd),
     /// 卸载 skill（替换 uninstall）
     Remove(RemoveCmd),
-    /// 卸载 skill
-    Uninstall(UninstallCmd),
     /// 扫描导入现有 skill（存量目录登记进 registry）
     ImportExisting(ImportExistingCmd),
     /// profile 候选集管理
@@ -54,7 +52,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::Find(cmd) => commands::skill::run_find(cmd)?,
         Cmd::List(cmd) => commands::skill::run_list(cmd)?,
         Cmd::Remove(cmd) => commands::skill::run_remove(cmd)?,
-        Cmd::Uninstall(cmd) => commands::install::run_uninstall(cmd)?,
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
         Cmd::Project(cmd) => commands::project::run(cmd)?,

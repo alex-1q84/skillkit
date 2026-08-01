@@ -1,5 +1,5 @@
 //! CLI 全链路 e2e（assert_cmd 驱动真实 skillkit 二进制 + 临时 HOME 隔离）。
-//! 覆盖 M3 手动验证的 CLI 场景：import-existing / upgrade 冲突交互 / uninstall 保护。
+//! 覆盖 M3+ 手动验证的 CLI 场景：import-existing / upgrade 冲突交互 / remove 保护 / find / list。
 //!
 //! BDD 风格：每个测试按 Given（前置）/ When（动作）/ Then（断言）组织。
 //! 依赖编译出的 skillkit 二进制（assert_cmd cargo_bin）与系统 npx skills。
@@ -299,26 +299,29 @@ fn remove_yes_skips_confirm_and_json_implies_yes() {
 }
 
 // ===========================================================================
-// uninstall 保护 unmanaged
+// remove managed（真跑 npx install，验证删目录）
 // ===========================================================================
 
 #[test]
-fn uninstall_unmanaged_keeps_directory() {
-    // Given：agents 目录有存量 skill 且已 import 登记为 unmanaged
+#[ignore = "需真跑 npx skills 装 local source；cargo test -- --ignored 手动跑"]
+fn remove_managed_deletes_canonical_directory() {
+    // Given：装一个 local source managed skill
     let env = Env::new();
-    env.make_skill(".agents/skills", "legacy-a");
-    env.skillkit().args(["import-existing"]).assert().success();
-
-    // When：uninstall unmanaged/legacy-a
-    env.skillkit()
-        .args(["uninstall", "unmanaged/legacy-a"])
+    install_local_skill(&env, "dc", "pdf");
+    // When：--yes remove（跳过确认）
+    let out = env
+        .skillkit()
+        .args(["remove", "dc/pdf", "--yes", "--json"])
         .assert()
         .success();
-
-    // Then：真实目录保留（unmanaged 保护），registry 记录移除
+    // Then：--json removed_canonical=true；canonical 目录已删；registry 移除
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["removed_canonical"], true);
     assert!(
-        env.home_path().join(".agents/skills/legacy-a").exists(),
-        "unmanaged 的目录不能被删"
+        !env.home_path()
+            .join(".skillkit/.agents/skills/pdf")
+            .exists(),
+        "managed canonical 目录应被删"
     );
     assert!(registry_ids(&env).is_empty(), "registry 记录应移除");
 }
