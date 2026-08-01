@@ -1105,3 +1105,36 @@ async fn projects_browse_unreadable_path_returns_hint() {
     let body = common::body_string(resp).await;
     assert!(body.contains("不可读"), "不可读路径给可读提示，不 panic");
 }
+
+#[tokio::test]
+async fn projects_main_renders_browse_buttons_and_panels() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains(r#"id="path""#), "注册 input id=path");
+    assert!(
+        body.contains("/projects/browse?into=path&panel=browse-panel-add"),
+        "注册浏览按钮调 browse"
+    );
+    assert!(body.contains(r#"id="browse-panel-add""#), "注册面板 div");
+    assert!(body.contains(r#"id="dir""#), "扫描 input id=dir");
+    assert!(
+        body.contains("/projects/browse?into=dir&panel=browse-panel-scan"),
+        "扫描浏览按钮调 browse"
+    );
+    assert!(body.contains(r#"id="browse-panel-scan""#), "扫描面板 div");
+}

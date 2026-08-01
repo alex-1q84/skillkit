@@ -1,18 +1,28 @@
 <h1>Projects</h1>
   <form class="inline" hx-post="/{{ token }}/projects"
         hx-target="body" hx-swap="outerHTML">
-    <input type="text" name="path" placeholder="项目绝对路径（如 /Users/me/app）" required>
-    <input type="text" name="agents" placeholder="agents（可选，逗号分隔，留空用全部）">
+    <input id="path" name="path" type="text" placeholder="项目绝对路径（如 /Users/me/app）" required>
+    <button type="button"
+            hx-get="/{{ token }}/projects/browse?into=path&panel=browse-panel-add"
+            hx-target="#browse-panel-add"
+            hx-include="#path">浏览...</button>
+    <input name="agents" placeholder="agents（可选，逗号分隔，留空用全部）">
     <button>注册项目</button>
   </form>
+  <div id="browse-panel-add"></div>
   <form class="inline" hx-post="/{{ token }}/projects/scan"
         hx-target="#scan-results" hx-swap="outerHTML"
         hx-indicator="#scan-indicator">
-    <input type="text" name="dir" placeholder="扫描根目录（如 ~/code）" required>
+    <input id="dir" name="dir" type="text" placeholder="扫描根目录（如 ~/code）" required>
+    <button type="button"
+            hx-get="/{{ token }}/projects/browse?into=dir&panel=browse-panel-scan"
+            hx-target="#browse-panel-scan"
+            hx-include="#dir">浏览...</button>
     <input type="number" name="depth" value="3" min="0" max="5">
     <button>扫描发现</button>
     <span id="scan-indicator" class="htmx-indicator">扫描中…</span>
   </form>
+  <div id="browse-panel-scan"></div>
   <div id="scan-results"></div>
   <ul>
   {% for p in projects %}
