@@ -1107,6 +1107,7 @@ dependencies = [
  "anyhow",
  "askama",
  "axum",
+ "dirs",
  "form_urlencoded",
  "futures-util",
  "http-body-util",
