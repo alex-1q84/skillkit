@@ -186,6 +186,28 @@ fn import_existing_json_emits_import_report() {
 }
 
 // ===========================================================================
+// find（真跑 npx skills find）
+// ===========================================================================
+
+#[test]
+#[ignore = "需真跑 npx skills find（联网）；cargo test -- --ignored 手动跑"]
+fn find_json_returns_candidate_array() {
+    // Given/When：find pdf --json（query 选 skills.sh 上确实存在的 skill 名）
+    let env = Env::new();
+    let out = env
+        .skillkit()
+        .args(["find", "pdf", "--json"])
+        .assert()
+        .success();
+    // Then：stdout 是 JSON 数组，元素含 spec 字段（不断言具体值，skills.sh 内容会变）
+    let body: serde_json::Value =
+        serde_json::from_slice(&out.get_output().stdout).expect("find --json 应输出合法 JSON 数组");
+    let arr = body.as_array().expect("应为数组");
+    assert!(!arr.is_empty(), "pdf 应至少有一个候选");
+    assert!(arr[0].get("spec").is_some(), "候选元素含 spec 字段");
+}
+
+// ===========================================================================
 // uninstall 保护 unmanaged
 // ===========================================================================
 

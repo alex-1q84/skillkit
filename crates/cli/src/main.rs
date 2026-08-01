@@ -7,6 +7,7 @@ use commands::install::{InstallCmd, UninstallCmd};
 use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
 use commands::serve::ServeCmd;
+use commands::skill::FindCmd;
 use commands::source::SourceCmd;
 use commands::upgrade::{run as run_upgrade, UpgradeCmd};
 
@@ -23,6 +24,8 @@ enum Cmd {
     Source(SourceCmd),
     /// skill 安装到 canonical 存储
     Install(InstallCmd),
+    /// 搜 skills.sh registry 中的 skill 候选
+    Find(FindCmd),
     /// 卸载 skill
     Uninstall(UninstallCmd),
     /// 扫描导入现有 skill（存量目录登记进 registry）
@@ -44,6 +47,7 @@ fn main() -> anyhow::Result<()> {
     match cli.cmd {
         Cmd::Source(cmd) => commands::source::run(cmd)?,
         Cmd::Install(cmd) => commands::install::run_install(cmd)?,
+        Cmd::Find(cmd) => commands::skill::run_find(cmd)?,
         Cmd::Uninstall(cmd) => commands::install::run_uninstall(cmd)?,
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
