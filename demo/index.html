@@ -149,6 +149,8 @@
     background: var(--surface); color: var(--ink-2); transition: all .15s;
   }
   .pill-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+  .pill-btn.u { color: var(--ok); border-color: var(--ok); }
+  .pill-btn.x { color: var(--danger); border-color: var(--danger); }
 
   /* ---------- filters ---------- */
   .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
@@ -302,10 +304,15 @@
       <h1>Skills</h1>
       <span class="desc">registry 总览 · 全部已安装 skill 元数据</span>
     </div>
+    <form class="toolbar" onsubmit="event.preventDefault(); doFind();">
+      <input class="filter" id="find-query" placeholder="find <query>：搜 skills.sh 候选" style="min-width:260px">
+      <button type="submit" class="filter" style="background:var(--ink);color:var(--bg)">find</button>
+      <span id="find-result" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-2)"></span>
+    </form>
     <div class="toolbar" id="skills-filter"></div>
     <table>
       <thead><tr>
-        <th>id</th><th>scope</th><th>version</th><th>computed_hash</th><th>source</th><th>canonical_path</th><th></th>
+        <th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th>
       </tr></thead>
       <tbody id="skills-body"></tbody>
     </table>
@@ -337,6 +344,7 @@ const SKILLS = {
   'team-private/tdd':          { name:'tdd',             source:'team-private', scope:'local',  version:'0.3.1', computed_hash:'def5678', canonical_path:'~/.skillkit/.agents/skills/tdd' },
   'team-private/api-spec':     { name:'api-spec',        source:'team-private', scope:'local',  version:'1.1.0', computed_hash:'c4f8a12', canonical_path:'~/.skillkit/.agents/skills/api-spec' },
   'team-private/code-review':  { name:'code-review',     source:'team-private', scope:'local',  version:'2.2.0', computed_hash:'8e5d3b1', canonical_path:'~/.skillkit/.agents/skills/code-review' },
+  'unmanaged/legacy-thing':    { name:'legacy-thing',    source:'unmanaged',   scope:'global', version:null,    computed_hash:null,      canonical_path:'~/.agents/skills/legacy-thing' },
 };
 
 const SOURCES = [
@@ -430,16 +438,42 @@ function renderSkills(){
     if (skillFilter==='global'||skillFilter==='local') return s.scope===skillFilter;
     return s.source===skillFilter;
   });
-  $('#skills-body').innerHTML = rows.map(([id,s]) => `
+  $('#skills-body').innerHTML = rows.map(([id,s]) => {
+    const managed = s.computed_hash !== null && s.computed_hash !== undefined;
+    const badge = managed ? '' : ' <span class="tag" style="background:#fee2e2;color:#b91c1c">unmanaged</span>';
+    const upgrade = managed
+      ? `<button class="pill-btn u">upgrade</button>`
+      : `<span style="color:var(--ink-3);font-size:11px">不可升级</span>`;
+    const removeTitle = managed ? 'remove（删目录）' : 'remove（仅删登记）';
+    return `
     <tr>
-      <td>${idCell(id)}</td>
+      <td>${idCell(id)}${badge}</td>
       <td>${sc(s)}</td>
-      <td class="mono">${s.version}</td>
-      <td class="mono" style="color:var(--ink-2)">${s.computed_hash}</td>
       <td>${tag('src', s.source)}</td>
-      <td class="mono" style="color:var(--ink-3);font-size:12px">${s.canonical_path}</td>
-      <td><button class="pill-btn">upgrade</button></td>
-    </tr>`).join('');
+      <td class="mono">${s.version || '-'}</td>
+      <td class="mono" style="color:var(--ink-2)">${s.computed_hash || '-'}</td>
+      <td>
+        <select class="select-mini" style="padding:3px 6px"><option>local</option><option>global</option></select>
+        <button class="pill-btn">install</button>
+        ${upgrade}
+        <button class="pill-btn x" title="${removeTitle}">×</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// mock find（模拟 npx::find 返回候选，不联网）
+const FIND_INDEX = ['pdf','frontend-design','dataviz','canvas-design','logseq-usage','tdd','code-review'];
+function doFind(){
+  const q = $('#find-query').value.trim();
+  if (!q) { $('#find-result').textContent = ''; return; }
+  const hits = FIND_INDEX.filter(n => n.includes(q)).map(n => ({
+    spec: `anthropics/skills@${n}`,
+    url: `https://skills.sh/anthropics/skills/${n}`,
+  }));
+  $('#find-result').innerHTML = hits.length
+    ? hits.map(h => `<div>[+] <b>${h.spec}</b> → ${h.url}</div>`).join('')
+    : `<span style="color:var(--danger)">在 skills.sh 未找到 skill：${q}</span>`;
 }
 
 // ============ PROFILES view ============
