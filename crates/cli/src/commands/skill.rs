@@ -1,7 +1,7 @@
 //! skill 实体的查询与移除：find（搜 skills.sh）/ list（列已装）/ remove（卸载，替换 uninstall）。
 //! 复用 core 的 npx::find / Registry / uninstall，cli 只做薄壳与展示。
 use clap::Args;
-use skillkit_core::{npx, paths::Paths, Registry, Scope, SkillMeta};
+use skillkit_core::{npx, paths::Paths, uninstall, Registry, Scope, SkillMeta};
 
 /// find：skillkit find <query> [--json]，搜 skills.sh registry，纯展示候选不安装。
 #[derive(Args)]
@@ -94,6 +94,58 @@ pub fn run_list(cmd: ListCmd) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// remove：skillkit remove <id> [--yes] [--json]，卸载 skill（完全替换 uninstall）。
+/// 默认交互确认；--yes 跳过；--json 隐含跳过并输出 {id, removed_canonical}。
+#[derive(Args)]
+pub struct RemoveCmd {
+    /// skill id，格式 <source>/<skill>
+    pub id: String,
+    /// 跳过交互确认
+    #[arg(long)]
+    pub yes: bool,
+    /// JSON 输出（隐含 --yes）：{id, removed_canonical}
+    #[arg(long)]
+    pub json: bool,
+}
+
+pub fn run_remove(cmd: RemoveCmd) -> anyhow::Result<()> {
+    let paths = Paths::production();
+    // 先读 registry 判断 managed（决定 removed_canonical + 提示文案），与 uninstall 内部行为一致
+    let managed = {
+        let reg = Registry::load(&paths)?;
+        reg.get(&cmd.id)?.computed_hash.is_some()
+    };
+
+    let skip_confirm = cmd.yes || cmd.json;
+    if !skip_confirm {
+        let note = if managed {
+            ""
+        } else {
+            "（unmanaged：仅删登记，保留目录）"
+        };
+        println!("将删除 {id}{note}，确认？(y/n)", id = cmd.id, note = note);
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        if line.trim() != "y" {
+            println!("已取消");
+            return Ok(());
+        }
+    }
+
+    uninstall(&paths, &cmd.id)?;
+
+    if cmd.json {
+        println!(
+            "{}",
+            serde_json::json!({ "id": cmd.id, "removed_canonical": managed })
+        );
+    } else {
+        let note = if managed { "" } else { "（仅删登记）" };
+        println!("✓ 已卸载 {id}{note}", id = cmd.id, note = note);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +164,7 @@ mod tests {
     enum TestCmd {
         Find(FindCmd),
         List(ListCmd),
+        Remove(RemoveCmd),
     }
 
     fn meta(id: &str, scope: Scope, hash: Option<&str>) -> SkillMeta {
@@ -204,5 +257,17 @@ mod tests {
         assert_eq!(obj["source"], "skills.sh");
         assert!(obj["installed_at"].is_string());
         assert!(obj["canonical_path"].is_string());
+    }
+
+    #[test]
+    fn remove_parses_id_yes_json() {
+        let TestCli { cmd } =
+            TestCli::parse_from(["skillkit", "remove", "skills.sh/pdf", "--yes", "--json"]);
+        let TestCmd::Remove(RemoveCmd { id, yes, json }) = cmd else {
+            panic!("expected Remove")
+        };
+        assert_eq!(id, "skills.sh/pdf");
+        assert!(yes);
+        assert!(json);
     }
 }

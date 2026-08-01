@@ -7,7 +7,7 @@ use commands::install::{InstallCmd, UninstallCmd};
 use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
 use commands::serve::ServeCmd;
-use commands::skill::{FindCmd, ListCmd};
+use commands::skill::{FindCmd, ListCmd, RemoveCmd};
 use commands::source::SourceCmd;
 use commands::upgrade::{run as run_upgrade, UpgradeCmd};
 
@@ -28,6 +28,8 @@ enum Cmd {
     Find(FindCmd),
     /// 列出全部已装 skill
     List(ListCmd),
+    /// 卸载 skill（替换 uninstall）
+    Remove(RemoveCmd),
     /// 卸载 skill
     Uninstall(UninstallCmd),
     /// 扫描导入现有 skill（存量目录登记进 registry）
@@ -51,6 +53,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Install(cmd) => commands::install::run_install(cmd)?,
         Cmd::Find(cmd) => commands::skill::run_find(cmd)?,
         Cmd::List(cmd) => commands::skill::run_list(cmd)?,
+        Cmd::Remove(cmd) => commands::skill::run_remove(cmd)?,
         Cmd::Uninstall(cmd) => commands::install::run_uninstall(cmd)?,
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,

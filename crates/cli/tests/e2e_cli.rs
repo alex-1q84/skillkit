@@ -237,6 +237,68 @@ fn list_marks_unmanaged_skill() {
 }
 
 // ===========================================================================
+// remove 确认交互（unmanaged，不依赖 npx）
+// ===========================================================================
+
+#[test]
+fn remove_unmanaged_default_confirm_with_stdin_y() {
+    // Given：import 登记 unmanaged
+    let env = Env::new();
+    env.make_skill(".agents/skills", "legacy-c");
+    env.skillkit().args(["import-existing"]).assert().success();
+
+    // When：默认确认，stdin 给 y
+    env.skillkit()
+        .args(["remove", "unmanaged/legacy-c"])
+        .write_stdin("y\n")
+        .assert()
+        .success();
+
+    // Then：目录保留（unmanaged 保护），registry 移除
+    assert!(
+        env.home_path().join(".agents/skills/legacy-c").exists(),
+        "unmanaged 目录不能被删"
+    );
+    assert!(registry_ids(&env).is_empty(), "registry 记录应移除");
+}
+
+#[test]
+fn remove_cancel_with_stdin_n_keeps_registry() {
+    let env = Env::new();
+    env.make_skill(".agents/skills", "legacy-d");
+    env.skillkit().args(["import-existing"]).assert().success();
+
+    // stdin 给 n → 取消，registry 记录保留
+    env.skillkit()
+        .args(["remove", "unmanaged/legacy-d"])
+        .write_stdin("n\n")
+        .assert()
+        .success();
+    assert!(
+        registry_ids(&env).contains(&"unmanaged/legacy-d".to_string()),
+        "取消则 registry 记录保留"
+    );
+}
+
+#[test]
+fn remove_yes_skips_confirm_and_json_implies_yes() {
+    let env = Env::new();
+    env.make_skill(".agents/skills", "legacy-e");
+    env.skillkit().args(["import-existing"]).assert().success();
+
+    // --json 隐含跳过确认，输出 {id, removed_canonical:false}
+    let out = env
+        .skillkit()
+        .args(["remove", "unmanaged/legacy-e", "--json"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["id"], "unmanaged/legacy-e");
+    assert_eq!(v["removed_canonical"], false);
+    assert!(registry_ids(&env).is_empty());
+}
+
+// ===========================================================================
 // uninstall 保护 unmanaged
 // ===========================================================================
 
