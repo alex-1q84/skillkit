@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
-use skillkit_core::{registry::SkillMeta, Registry, Scope, SourcesStore};
+use skillkit_core::{registry::SkillMeta, Candidate, Registry, Scope, SourcesStore};
 
 use crate::routes::FragmentQuery;
 use crate::AppState;
@@ -60,6 +60,52 @@ fn render_skills(state: AppState, token: String, fragment: bool) -> Response {
         Err(e) => {
             tracing::error!(error = ?e, "加载 registry 失败");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct FindQuery {
+    pub q: String,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/find_results.html")]
+pub struct FindResultsTpl<'a> {
+    pub token: &'a str,
+    pub query: &'a str,
+    /// 候选列表，每条带 install 表单。
+    pub candidates: Vec<Candidate>,
+}
+
+/// find：搜 skills.sh registry，渲染候选片段（每条带 install 按钮）。
+pub async fn find(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<FindQuery>,
+) -> Response {
+    // npx::find 同步阻塞（Command::output），用 spawn_blocking 卸到 blocking 线程池，
+    // 避免占用 tokio 工作线程（默认 = CPU 核数）；闭包 move state、clone query。
+    let qstr = q.q.clone();
+    let result =
+        tokio::task::spawn_blocking(move || skillkit_core::npx::find(&state.paths, &qstr)).await;
+    match result {
+        Ok(Ok(cs)) => {
+            let rendered = FindResultsTpl {
+                token: &token,
+                query: &q.q,
+                candidates: cs,
+            }
+            .render();
+            render_str(rendered)
+        }
+        Ok(Err(e)) => {
+            tracing::error!(error = ?e, "find 失败：{}", q.q);
+            Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "find join 失败：{}", q.q);
+            Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
         }
     }
 }

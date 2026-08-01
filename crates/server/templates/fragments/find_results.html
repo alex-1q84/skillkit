@@ -1,0 +1,26 @@
+<div id="find-results">
+  {% if candidates.is_empty() %}
+  <p class="err">在 skills.sh 未找到「{{ query }}」，换个关键词或检查网络</p>
+  {% else %}
+  <table class="data">
+    <thead><tr><th>候选 (skills.sh)</th><th>ops</th></tr></thead>
+    <tbody>
+    {% for c in candidates %}
+    <tr>
+      <td>{{ c.spec }}{% if let Some(u) = c.url %} <a href="{{ u }}" target="_blank">↗</a>{% endif %}</td>
+      <td>
+        <form class="inline"
+              hx-post="/{{ token }}/skills/install-candidate"
+              hx-target="body" hx-swap="outerHTML">
+          <input type="hidden" name="spec" value="{{ c.spec }}">
+          <input type="hidden" name="skill" value="{{ query }}">
+          <select name="scope"><option value="local">local</option><option value="global">global</option></select>
+          <button>install</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

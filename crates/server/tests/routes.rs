@@ -655,3 +655,30 @@ async fn skill_upgrade_endpoint_returns_500_on_unknown() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
+
+#[tokio::test]
+async fn skills_find_renders_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let _g = common::fake_npx(&state.paths);
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills/find?q=pdf")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("owner/repo@pdf"), "应渲染候选 spec");
+    assert!(
+        body.contains("https://skills.sh/owner/repo/pdf"),
+        "应渲染 url"
+    );
+}

@@ -1,5 +1,14 @@
 <h1>Skills</h1>
-<table class="data">
+  <div class="find-bar">
+    <input type="text" name="q" placeholder="搜 skills.sh 候选（如 pdf）"
+           hx-get="/{{ token }}/skills/find"
+           hx-trigger="keyup changed delay:400ms"
+           hx-target="#find-results" hx-swap="outerHTML"
+           hx-indicator="#find-indicator">
+    <span id="find-indicator" class="htmx-indicator">搜索中…</span>
+    <div id="find-results"></div>
+  </div>
+  <table class="data">
   <thead><tr><th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th></tr></thead>
   <tbody>
   {% for (s, enc) in skills %}
