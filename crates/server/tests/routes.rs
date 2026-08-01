@@ -682,3 +682,34 @@ async fn skills_find_renders_candidates() {
         "应渲染 url"
     );
 }
+
+#[tokio::test]
+async fn skills_install_candidate_registers_skill() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 种 skills.sh 源（package=None），install 需要 source 存在
+    skillkit_core::SourcesStore::ensure_default(&state.paths).unwrap();
+    let _g = common::fake_npx(&state.paths);
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-candidate")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from("spec=owner%2Frepo%40pdf&skill=pdf&scope=local"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    let m = reg.get("skills.sh/pdf").expect("应登记 skills.sh/pdf");
+    assert_eq!(m.computed_hash.as_deref(), Some("hashnew"));
+}

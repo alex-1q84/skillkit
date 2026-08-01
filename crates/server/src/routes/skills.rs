@@ -16,6 +16,7 @@ pub struct SkillsTpl<'a> {
     pub token: &'a str,
     /// (meta, id 的 path 编码)——id 形如 source/skill，/ 须编码为 %2F 才能放进单段路径参数。
     pub skills: Vec<(SkillMeta, String)>,
+    pub summary: Option<&'a str>,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -24,6 +25,7 @@ pub struct SkillsTpl<'a> {
 pub struct SkillsMainTpl<'a> {
     pub token: &'a str,
     pub skills: Vec<(SkillMeta, String)>,
+    pub summary: Option<&'a str>,
 }
 
 pub async fn page(
@@ -31,10 +33,15 @@ pub async fn page(
     Path(token): Path<String>,
     Query(q): Query<FragmentQuery>,
 ) -> Response {
-    render_skills(state, token, q.is_fragment())
+    render_skills(state, token, None, q.is_fragment())
 }
 
-fn render_skills(state: AppState, token: String, fragment: bool) -> Response {
+fn render_skills(
+    state: AppState,
+    token: String,
+    summary: Option<&str>,
+    fragment: bool,
+) -> Response {
     match Registry::load(&state.paths) {
         Ok(reg) => {
             let skills: Vec<(SkillMeta, String)> = reg
@@ -46,12 +53,14 @@ fn render_skills(state: AppState, token: String, fragment: bool) -> Response {
                 SkillsMainTpl {
                     token: &token,
                     skills,
+                    summary,
                 }
                 .render()
             } else {
                 SkillsTpl {
                     token: &token,
                     skills,
+                    summary,
                 }
                 .render()
             };
@@ -147,10 +156,48 @@ pub async fn install(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match skillkit_core::install(&state.paths, source, skill, &package, scope) {
-        Ok(_) => render_skills(state, token, false),
+        Ok(_) => render_skills(state, token, None, false),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct InstallCandidateForm {
+    /// owner/repo@skill，npx skills add 的 package 参数。
+    pub spec: String,
+    /// skill 名（=find 时的 query），作 canonical 目录名 + registry id 后缀。
+    pub skill: String,
+    pub scope: Option<String>,
+}
+
+/// registry 源（skills.sh）install：find 候选选中后装。source 固定 skills.sh，package 用 spec。
+pub async fn install_candidate(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Form(f): Form<InstallCandidateForm>,
+) -> Response {
+    let scope = if matches!(f.scope.as_deref(), Some("global")) {
+        Scope::Global
+    } else {
+        Scope::Local
+    };
+    match skillkit_core::install(&state.paths, "skills.sh", &f.skill, &f.spec, scope) {
+        Ok(_) => render_skills(
+            state,
+            token,
+            Some(&format!("✓ 已安装 skills.sh/{}", f.skill)),
+            false,
+        ),
+        Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
+            Html("<p class=\"err\">该 skill 已安装，可在列表中 upgrade 或 remove</p>")
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "install-candidate 失败：{}", f.spec);
+            Html("<p class=\"err\">安装失败，检查网络/Node 后重试</p>").into_response()
         }
     }
 }
@@ -160,7 +207,7 @@ pub async fn uninstall(
     Path((token, id)): Path<(String, String)>,
 ) -> Response {
     match skillkit_core::uninstall(&state.paths, &id) {
-        Ok(()) => render_skills(state, token, false),
+        Ok(()) => render_skills(state, token, None, false),
         Err(e) => {
             tracing::error!(error = ?e, "uninstall 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -174,7 +221,7 @@ pub async fn upgrade(
 ) -> Response {
     // GUI 场景已显式点击升级，yes=true 不二次确认
     match skillkit_core::upgrade_skill(&state.paths, &id, true) {
-        Ok(_) => render_skills(state, token, false),
+        Ok(_) => render_skills(state, token, None, false),
         Err(e) => {
             tracing::error!(error = ?e, "upgrade 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

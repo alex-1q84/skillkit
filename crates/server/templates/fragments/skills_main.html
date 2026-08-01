@@ -1,4 +1,5 @@
 <h1>Skills</h1>
+  {% if let Some(s) = summary %}<p class="summary">{{ s }}</p>{% endif %}
   <div class="find-bar">
     <input type="text" name="q" placeholder="搜 skills.sh 候选（如 pdf）"
            hx-get="/{{ token }}/skills/find"
