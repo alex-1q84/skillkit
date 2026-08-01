@@ -317,8 +317,12 @@ pub async fn find(
     Path(token): Path<String>,
     Query(q): Query<FindQuery>,
 ) -> Response {
-    match npx::find(&state.paths, &q.q) {
-        Ok(cs) => {
+    // npx::find 同步阻塞（Command::output），用 spawn_blocking 卸到 blocking 线程池，
+    // 避免占用 tokio 工作线程（默认 = CPU 核数）；闭包 move state、clone query。
+    let qstr = q.q.clone();
+    let result = tokio::task::spawn_blocking(move || npx::find(&state.paths, &qstr)).await;
+    match result {
+        Ok(Ok(cs)) => {
             let rendered = FindResultsTpl {
                 token: &token,
                 query: &q.q,
@@ -327,8 +331,12 @@ pub async fn find(
             .render();
             render_str(rendered)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!(error = ?e, "find 失败：{}", q.q);
+            Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "find join 失败：{}", q.q);
             Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
         }
     }
@@ -377,7 +385,7 @@ pub async fn find(
     <input type="text" name="q" placeholder="搜 skills.sh 候选（如 pdf）"
            hx-get="/{{ token }}/skills/find"
            hx-trigger="keyup changed delay:400ms"
-           hx-target="#find-results" hx-swap="innerHTML"
+           hx-target="#find-results" hx-swap="outerHTML"
            hx-indicator="#find-indicator">
     <span id="find-indicator" class="htmx-indicator">搜索中…</span>
     <div id="find-results"></div>
@@ -724,25 +732,42 @@ async fn skills_upgrade_all_batch_upgrades() {
         paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
         token: "test-token".into(),
     };
-    // 造一个 managed skill（computed_hash=Some）供 upgrade_all 命中
-    let canon = state.paths.skillkit_skills_dir().join("foo");
-    std::fs::create_dir_all(&canon).unwrap();
-    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+    // 两个 managed skill：dc/ok 无人锁 → 正常升级；dc/conflict 被项目 P1 锁 oldhash → 冲突进 blocked
     let mut reg = skillkit_core::Registry::default();
-    reg.skills.insert(
-        "dc/foo".into(),
-        skillkit_core::registry::SkillMeta {
-            id: "dc/foo".into(),
-            name: "foo".into(),
-            source: "dc".into(),
-            scope: skillkit_core::Scope::Local,
-            version: None,
-            computed_hash: Some("oldhash".into()),
-            installed_at: "2026-07-31".into(),
-            canonical_path: canon.to_string_lossy().into_owned(),
-        },
-    );
+    for (id, name) in [("dc/ok", "ok"), ("dc/conflict", "conflict")] {
+        let canon = state.paths.skillkit_skills_dir().join(name);
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        reg.skills.insert(
+            id.into(),
+            skillkit_core::registry::SkillMeta {
+                id: id.into(),
+                name: name.into(),
+                source: "dc".into(),
+                scope: skillkit_core::Scope::Local,
+                version: None,
+                computed_hash: Some("oldhash".into()),
+                installed_at: "2026-07-31".into(),
+                canonical_path: canon.to_string_lossy().into_owned(),
+            },
+        );
+    }
     reg.save(&state.paths).unwrap();
+
+    // P1 锁 dc/conflict=oldhash：upgrade_all(false) 必须把它列进 blocked，而非静默升级
+    skillkit_core::Project {
+        id: "P1".into(),
+        name: "P1".into(),
+        path: dir.path().join("p1").to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: [("dc/conflict".to_string(), "oldhash".to_string())]
+            .into_iter()
+            .collect(),
+    }
+    .save(&state.paths)
+    .unwrap();
 
     let _g = common::fake_npx(&state.paths);
     let app = skillkit_server::app(state.clone());
@@ -757,11 +782,24 @@ async fn skills_upgrade_all_batch_upgrades() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
     let after = skillkit_core::Registry::load(&state.paths).unwrap();
+    // dc/ok 无冲突 → 正常升到 hashnew
     assert_eq!(
-        after.get("dc/foo").unwrap().computed_hash.as_deref(),
+        after.get("dc/ok").unwrap().computed_hash.as_deref(),
         Some("hashnew"),
-        "upgrade_all 应把 hash 换成假 npx 写回的 hashnew"
+        "无冲突的 dc/ok 应升级到 hashnew",
+    );
+    // dc/conflict 被锁 → 进 blocked 不升级，hash 保持 oldhash（不静默漂移）
+    assert_eq!(
+        after.get("dc/conflict").unwrap().computed_hash.as_deref(),
+        Some("oldhash"),
+        "被项目锁定的 dc/conflict 应进 blocked 不升级，hash 不变",
+    );
+    // summary 反馈冲突 skill + 受影响项目（列出不静默）
+    assert!(
+        body.contains("dc/conflict") && body.contains("P1"),
+        "summary 应列出冲突 skill 与受影响项目：{body}"
     );
 }
 ```
@@ -773,12 +811,12 @@ Expected: 404。
 
 - [ ] **Step 3: 加 upgrade_all handler**
 
-`crates/server/src/routes/skills.rs`，在 `import` handler 之后追加。GUI 已显式点击，`yes=true`：
+`crates/server/src/routes/skills.rs`，在 `import` handler 之后追加。GUI 单击「全部升级」对齐 CLI `--all` 默认语义（`yes=false`）：冲突 skill 进 blocked 只列出、不静默升级，避免锁了 oldhash 的项目基线漂移而零反馈。
 
 ```rust
-/// 全部升级：批量升级 registry 全部 managed skill，冲突进 blocked 列出。
+/// 全部升级：批量升级 registry 全部 managed skill，冲突进 blocked 列出（不升级）。
 pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    match skillkit_core::upgrade_all(&state.paths, true) {
+    match skillkit_core::upgrade_all(&state.paths, false) {
         Ok(all) => {
             let mut summary = format!("已升级 {} 个", all.upgraded.len());
             for b in &all.blocked {
@@ -1131,7 +1169,7 @@ pub async fn scan(
 `crates/server/templates/fragments/projects_main.html`，注册表单之后加：
 ```html
   <form class="inline" hx-post="/{{ token }}/projects/scan"
-        hx-target="#scan-results" hx-swap="innerHTML"
+        hx-target="#scan-results" hx-swap="outerHTML"
         hx-indicator="#scan-indicator">
     <input type="text" name="dir" placeholder="扫描根目录（如 ~/code）" required>
     <input type="number" name="depth" value="3" min="0" max="5">
@@ -1352,6 +1390,11 @@ async fn projects_apply_profile_merges_skills() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    // 防 P0 回归：handler 必须只返回 status 片段（含 #status-panel），不能返回整页 workspace。
+    // 整页才含 installed_skills 标题；配合模板 hx-target="#status-panel" 才不会整页替换。
+    let body = common::body_string(resp).await;
+    assert!(body.contains("status-panel"), "apply-profile 响应应含 status 片段");
+    assert!(!body.contains("installed_skills"), "apply-profile 不应返回整页 workspace");
     let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
     assert_eq!(after.installed_skills, vec!["dc/logseq".to_string(), "dc/dataviz".to_string()]);
     assert!(after.applied_profiles.contains(&"fe".to_string()));
@@ -1426,10 +1469,10 @@ pub async fn apply_profile(
 
 - [ ] **Step 5: workspace_main.html 加 apply-profile 下拉**
 
-`crates/server/templates/fragments/workspace_main.html`，rebind 表单之后加：
+`crates/server/templates/fragments/workspace_main.html`，rebind 表单之后加。target 用 `#status-panel`（非 body）：handler 返回 status 片段，对齐本文件 set_skills/apply 既有模式（`:8`/`:14`），否则整页 body 会被替换成一行 status 面板：
 ```html
   <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/apply-profile"
-        hx-target="body" hx-swap="outerHTML">
+        hx-target="#status-panel" hx-swap="outerHTML">
     <select name="profile">
       <option value="">（选择 profile）</option>
       {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}

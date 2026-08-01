@@ -70,7 +70,7 @@ CLI `project scan` 改为调 core，删除 cli 层副本。逻辑不变（递归
 
 **全部升级**（缺口 4）：
 - 表格区上方加「全部升级」按钮 → `POST /skills/upgrade-all`。
-- handler 调 `upgrade_all(paths, true)`（GUI 已显式点击，`yes=true` 不二次确认）→ 返回 SkillsMain + 结果摘要（升级 N 个、跳过 M 个冲突并列出受影响项目）。
+- handler 调 `upgrade_all(paths, false)`（对齐 CLI `--all` 默认语义：冲突 skill 只列出不升级，避免锁了 oldhash 的项目基线漂移而零反馈）→ 返回 SkillsMain + 结果摘要（升级 N 个、跳过 M 个冲突并列出受影响项目）。
 - 冲突的 `blocked` 列表不静默，列出受影响项目 id（反馈引导行动：提示去对应项目 apply）。
 
 ### 3.3 Projects 视图（缺口 5/6/7/8）
@@ -100,11 +100,11 @@ CLI `project scan` 改为调 core，删除 cli 层副本。逻辑不变（递归
 | GET | `/skills/find` | `skills::find` | `npx::find(paths, q)` | `find_results.html` 片段 |
 | POST | `/skills/install-candidate` | `skills::install_candidate` | `install(paths,"skills.sh",skill,spec,scope)` | SkillsMain（body outerHTML） |
 | POST | `/skills/import` | `skills::import` | `import_existing(paths,false)` | SkillsMain + 摘要 |
-| POST | `/skills/upgrade-all` | `skills::upgrade_all` | `upgrade_all(paths,true)` | SkillsMain + 摘要 |
+| POST | `/skills/upgrade-all` | `skills::upgrade_all` | `upgrade_all(paths,false)` | SkillsMain + 摘要 |
 | POST | `/projects` | `projects::add` | `Project::register`+`save` | 列表（body outerHTML） |
 | POST | `/projects/scan` | `projects::scan` | `scan_projects(dir,depth)` | `scan_results.html` 片段 |
 | POST | `/projects/{id}/rebind` | `projects::rebind` | `proj.rebind`+`save` | 工作台（body outerHTML） |
-| POST | `/projects/{id}/apply-profile` | `projects::apply_profile` | `Profile::load`+`proj.apply_profile`+`save` | status 片段 |
+| POST | `/projects/{id}/apply-profile` | `projects::apply_profile` | `Profile::load`+`proj.apply_profile`+`save` | `#status-panel` 片段（hx-target=`#status-panel`，非 body） |
 
 GET 类（find、scan 结果）返回局部片段；POST 写类按 §7.5 返回完整页面 body outerHTML。
 
@@ -130,7 +130,7 @@ GET 类（find、scan 结果）返回局部片段；POST 写类按 §7.5 返回�
 
 find 调 `npx skills find` 是同步阻塞子进程 + 网络，典型 2-5 秒。
 
-- **选同步 htmx + `hx-indicator` loading**。理由：npx find/add 带 `-y` 非交互不会卡死等待输入；Axum 异步 runtime 下同步阻塞只占一个 blocking 线程（tokio 默认 512），不阻塞其他请求；async 任务 + SSE 推送需引入任务表/状态机，是过度设计（YAGNI）。
+- **选同步 htmx + `hx-indicator` loading**。理由：npx find/add 带 `-y` 非交互不会卡死等待输入；find handler 用 `tokio::task::spawn_blocking` 把同步 `npx::find`（`Command::output()`）卸到 blocking 线程池（默认上限 512），不占用 tokio 工作线程（默认 = CPU 核数），不阻塞其他请求；async 任务 + SSE 推送需引入任务表/状态机，是过度设计（YAGNI）。
 - 兜底：若实测 find 偶发超 10s，再评估加客户端 `hx-trigger="delay:..."` 或服务端超时，不在本次预设。
 
 ## 5. 测试策略
@@ -141,7 +141,7 @@ find 调 `npx skills find` 是同步阻塞子进程 + 网络，典型 2-5 秒。
 - **server 集成测试**（`crates/server/tests/`，已有 `routes.rs` 范式）：
   - find/install-candidate：用 fake npx（复用 `core/src/upgrade.rs` 的 `install_fake_npx` 范式），断言候选渲染 + install 后 registry 出现新 skill。
   - import：tempdir 造 `~/.agents/skills/foo`，POST /skills/import，断言 registry 出现 `unmanaged/foo`。
-  - upgrade-all：fake npx，断言批量升级 + blocked 列表。
+  - upgrade-all：fake npx，断言无冲突 skill 正常升级 + 被项目锁定的 skill 进 blocked 列出（hash 不变、summary 反馈受影响项目）。
   - project add/scan/rebind/apply-profile：tempdir 造项目目录 + profile，断言 project.toml 落地正确、scan 发现 .git 目录、rebind 后 path 更新、apply-profile 后 installed_skills 增多。
 - **--json schema 不涉及**：GUI 端点无 JSON 输出，不破坏 CLI 的 `--json` 契约测试。
 - 改完跑 `make check`（format + lint + test）双绿；模板改动额外 `make check` 能暴露 Askama 编译错。
