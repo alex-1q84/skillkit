@@ -2,7 +2,7 @@
 
 > 用途：新会话读 §1（当前状态）+ §3（必读背景）+ §5（当前待办）三段够用；验证/路径/命令回查 §4/§6/§7；历史改动与前端坑归档在 §8，回查用。
 >
-> **当前阶段**：M0-M3 全部完成（import-existing / upgrade / unmanaged / justfile 打包），手动验证已固化为自动化 e2e（`04626fc`，CLI assert_cmd 10 用例 + GUI playwright 6 用例）。下次接续 **基建债**（CI / README / Cargo.toml 元数据）。
+> **当前阶段**：M0-M3 全部完成（import-existing / upgrade / unmanaged / justfile 打包），手动验证已固化为自动化 e2e（`04626fc`，CLI assert_cmd 10 用例 + GUI playwright 6 用例），README 已落地（本会话，未提交）。下次接续 **基建债**（CI / Cargo.toml 元数据）。
 
 ## 1. 当前状态
 
@@ -41,7 +41,9 @@ cargo test -p skillkit-core -- --ignored      # core 端到端真跑 npx skills�
 make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 ```
 
-## 2. 最近完成（M3 全量 + e2e 固化，commit `a87cf6d`..`04626fc`）
+## 2. 最近完成（M3 全量 + e2e 固化 + README）
+
+18. **README 落地**（本会话，未提交）：新建 `README.md`——从交接 §1.1 命令表面 + CLI `--help` 真实输出提炼（不编造命令），覆盖安装（`cargo install --path crates/cli`）、快速开始、全部命令参考（source/install/project/profile/upgrade/import-existing/uninstall/serve）、支持的 agent 表格（Claude/Cursor/OpenCode/Codex，新增 agent 只改配置）、开发命令（make check/e2e/e2e-cli）、三层架构。README 顶部声明 MIT（license 字段待 Cargo.toml 补齐对齐）。基建债 README 项完成，剩 Cargo.toml 元数据 + CI。
 
 17. **手动验证固化 e2e**（本会话，`04626fc`）：把 M3 手工验证的 case 固化为自动化。① `crates/cli/tests/e2e_cli.rs`——assert_cmd 驱动真实 skillkit 二进制 + 临时 HOME 隔离，BDD 风格（Given/When/Then 注释分段），10 用例：import-existing（登记/去重/dry-run/幂等/--json，5 常规）+ uninstall 保护 unmanaged 目录 + upgrade（冲突 y/n 交互/--yes/--json 走 stderr/--all 列出/UpgradeAllReport，5 `#[ignore]` 真跑 npx）。cli 加 `assert_cmd` + `tempfile` dev-dep。② `e2e/test_ui.py` 补 2 用例（unmanaged 角标、upgrade 按钮仅 managed + install 表单保留回归），TESTS 表加每用例目标页。③ Makefile 加 `e2e-cli` target；CLAUDE.md/交接文档补运行方式。**踩坑**：CLI 输出 hash 带中文括号「（hash: ...）」提取易错；upgrade 冲突的受影响项目在 stdout 非 stderr；unmanaged 行 td 里 badge 文本混入 id 提取（需 split()[0]）。
 
@@ -80,7 +82,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 - [ ] `make e2e`：GUI e2e 6 用例过（导航不重复回归 / 实时预览 / 默认源 / 增删闭环 / unmanaged 角标 / upgrade 按钮仅 managed）。
 - [ ] `make run ARGS="serve --port 7317"` 走查：Sources 显示 skills.sh 默认源（不再空白）、package 输入实时预览推导名（git url → repo 名）、name 框可覆盖且手动编辑后不再被覆盖、Skills install skills.sh 源走 find 交互选候选、apply 闭环到 `~/.agents/skills/`。
 - [ ] `install add` 的 `--json` 行为：固定源输出 SkillMeta JSON；skills.sh 源输出候选数组（不交互不安装）。
-- [ ] `git status` 干净度：工作树干净（M3 全部已提交 04626fc）。
+- [ ] `git status` 干净度：本会话后 `README.md` 未跟踪未提交（待主人提交）；其余应干净。
 - [ ] **回归信号**：install 后 canonical 落 `~/.skillkit/.agents/skills/`（不是 `~/.agents/skills/`）；registry.json 字段是 `computed_hash` 不是 `commit_sha`；`crates/core/src/git.rs` 不存在；无 `~/.skillkit/.lock/*.lock` 残留。GUI Skills 页若 unmanaged 行没有「install 表单」= M3 计划误删 install 的回归（Task 7 fix 曾修复）。
 
 ## 5. 已知遗留 / 待办
@@ -89,7 +91,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
    - ~~`skillkit import-existing`~~ ✅ 完成——扫描存量 skill 目录 → 可溯重装入池 + 无源登记 unmanaged；`--dry-run` 只输出不写，`--json` 输出 ImportReport。
    - ~~`skillkit upgrade <id>`~~ ✅ 完成——`npx skills update` + 重读 computed_hash 更新 registry；`--all` 批量（冲突列出不拦截，blocked 列受影响项目）；单 skill 冲突需 `--yes` 或交互确认。
    - ~~打包进 mac-config Brewfile~~ ✅ 完成（`just install_skillkit` 构建 + 装进 PATH；未发布前不进 Brewfile）。
-2. **基建债**（下次焦点）：CI（GitHub Actions `make check`）、README、Cargo.toml `[package]` 元数据（description/license/repository）。
+2. **基建债**（下次焦点）：CI（GitHub Actions `make check`）、Cargo.toml `[package]` 元数据（description/license/repository）。~~README~~ ✅ 完成（本会话，未提交）。
 3. **`button.u` 无 CSS 规则**：升级按钮渲染默认样式，可加一条 `button.u { color: var(--ok) }` 风格化（Minor）。
 4. **GUI Skills 页 install 表单无回归测试**：e2e 已断言 install 表单存在（`test_skills_upgrade_button_only_managed`），后续若改模板需留意（Minor）。
 5. **e2e 三层不统一入口**：`make check`（无 e2e）、`make e2e-cli`、`make e2e` 分开跑；未来可加 `make e2e-all` 聚合（Minor）。
@@ -98,7 +100,7 @@ make run ARGS="serve --port 7317"             # 起 GUI 手动走查
 
 ```
 /Users/mywo/lab/skillkit/
-├── CLAUDE.md / Cargo.toml / Makefile / rustfmt.toml
+├── CLAUDE.md / README.md / Cargo.toml / Makefile / rustfmt.toml
 ├── crates/
 │   ├── core/                  # skillkit-core（lib）—— 业务逻辑
 │   │   ├── src/{lib,paths,error,config,source,registry,npx,install,import,upgrade,symlink,profile,project,apply,lock}.rs
@@ -143,15 +145,14 @@ cargo test -p skillkit-core -- --ignored  # core 端到端真跑 npx（m0 2 + m3
 
 **必读**：§3.1（npx skills 行为，含 local source upgrade no-op 限制）+ `docs/design-decisions-2026-07-29.md` 决策 13。若涉及 GUI 扩展或新 htmx 端点，按 §8.2 的 13 条坑实现。
 
-### 7.2 焦点：基建债（三件）
+### 7.2 焦点：基建债（两件）
 
-1. **CI**：GitHub Actions 跑 `make check`（`crates/*` 变更时触发）。注意 e2e 三层不进 check——CI 是否额外跑 `e2e-cli`（需 npx）由主人定。参考 mac-config 或相邻项目的 CI 惯例。
-2. **README**：从交接文档 §1.1 提炼命令表面 + 安装（`cargo install --path crates/cli`）+ 验证 flow。
-3. **Cargo.toml `[package]` 元数据**：description/license/repository 三件，core/cli/server 三个 crate 都补。
+1. **Cargo.toml `[package]` 元数据**：description/license/repository 三件，core/cli/server 三个 crate 都补。README 已声明 MIT，license 字段对齐即可。
+2. **CI**：GitHub Actions 跑 `make check`（`crates/*` 变更时触发）。注意 e2e 三层不进 check——CI 是否额外跑 `e2e-cli`（需 npx）由主人定。参考 mac-config 或相邻项目的 CI 惯例。
 
 ### 7.3 优先级
 
-1. Cargo.toml 元数据（最简，几行）→ 2. README → 3. CI（需决策是否含 e2e-cli）。
+1. Cargo.toml 元数据（最简，几行）→ 2. CI（需决策是否含 e2e-cli）。README 已完成。
 
 ## 7.1 (archive) 之前接续的最短路径（M3 迁移打磨）
 
