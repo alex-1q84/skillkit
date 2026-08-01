@@ -713,3 +713,32 @@ async fn skills_install_candidate_registers_skill() {
     let m = reg.get("skills.sh/pdf").expect("应登记 skills.sh/pdf");
     assert_eq!(m.computed_hash.as_deref(), Some("hashnew"));
 }
+
+#[tokio::test]
+async fn skills_import_registers_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 造存量 skill：~/.agents/skills/foo/SKILL.md
+    let foo = state.paths.agents_skills_dir().join("foo");
+    std::fs::create_dir_all(&foo).unwrap();
+    std::fs::write(foo.join("SKILL.md"), "---\nname: foo\n---\n# foo\n").unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/import")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    let m = reg.get("unmanaged/foo").expect("应登记 unmanaged/foo");
+    assert!(m.computed_hash.is_none());
+}

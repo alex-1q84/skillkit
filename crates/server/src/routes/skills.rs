@@ -229,6 +229,26 @@ pub async fn upgrade(
     }
 }
 
+/// 导入存量 skill 目录，登记进 registry（无源 → unmanaged）。
+pub async fn import(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+    match skillkit_core::import_existing(&state.paths, false) {
+        Ok(r) => {
+            let summary = format!(
+                "imported {}，unmanaged {}，reinstalled {}，skipped {}",
+                r.imported.len(),
+                r.unmanaged.len(),
+                r.reinstalled.len(),
+                r.skipped.len()
+            );
+            render_skills(state, token, Some(&summary), false)
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "import 失败");
+            Html("<p class=\"err\">导入失败</p>").into_response()
+        }
+    }
+}
+
 fn render_str(rendered: askama::Result<String>) -> Response {
     match rendered {
         Ok(html) => Html(html).into_response(),

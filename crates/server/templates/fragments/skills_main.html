@@ -9,6 +9,11 @@
     <span id="find-indicator" class="htmx-indicator">搜索中…</span>
     <div id="find-results"></div>
   </div>
+  <form class="inline" hx-post="/{{ token }}/skills/import"
+        hx-target="body" hx-swap="outerHTML" hx-indicator="#import-indicator">
+    <button>导入存量 skill</button>
+    <span id="import-indicator" class="htmx-indicator">导入中…</span>
+  </form>
   <table class="data">
   <thead><tr><th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th></tr></thead>
   <tbody>
