@@ -863,6 +863,48 @@ async fn projects_rebind_updates_path() {
 }
 
 #[tokio::test]
+async fn project_sync_agents_updates_to_config_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_dir = dir.path().join("proj");
+    std::fs::create_dir_all(&proj_dir).unwrap();
+    // 旧项目只绑了 claude-code（旧默认）
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "proj".into(),
+        path: proj_dir.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF12/sync-agents")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert_eq!(
+        after.agents,
+        vec!["claude-code".to_string(), "cursor".into(), "codex".into()],
+        "sync-agents 应把 agents 同步成 Config 默认全 agent"
+    );
+}
+
+#[tokio::test]
 async fn projects_browse_lists_subdirs_skips_hidden_and_files() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {

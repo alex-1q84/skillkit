@@ -220,20 +220,25 @@ fn scan_local_landed(project_root: &Path, agent: &str, skm_skills: &Path) -> Res
 pub fn scan_shared(project_root: &Path, agents: &[String]) -> Vec<String> {
     let mut found = Vec::new();
     for agent in agents {
-        let dir = project_root.join(format!(".{}/skills", agent_dir_name(agent)));
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            // 真实目录、非 symlink、无 skillkit-local 标记 → shared
-            if p.is_dir() && !p.is_symlink() && !p.join(".skillkit-sha").exists() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                found.push(format!("{agent}/{name}"));
-            }
+        collect_shared(project_root, agent_dir_name(agent), agent, &mut found);
+    }
+    // 项目级 .agents/skills：跨 agent 共享池（cursor/codex 直读），与 proj.agents 声明无关
+    collect_shared(project_root, "agents", "agents", &mut found);
+    found
+}
+
+/// 扫 `.<dir>/skills` 下真实目录（非 symlink、无 .skillkit-sha local 标记），按 `label/<name>` 推入 found。
+fn collect_shared(project_root: &Path, dir: &str, label: &str, found: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(project_root.join(format!(".{dir}/skills"))) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() && !p.is_symlink() && !p.join(".skillkit-sha").exists() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            found.push(format!("{label}/{name}"));
         }
     }
-    found
 }
 
 /// apply 主流程：global ensure + local 落地 + extra 清理 + locked_shas 更新 + --frozen 冲突。
@@ -574,5 +579,40 @@ mod tests {
         };
         let err = run_apply(&paths, &mut proj, true).unwrap_err();
         assert!(matches!(err, SkillkitError::Tool { .. }));
+    }
+
+    #[test]
+    fn scan_shared_includes_project_agents_pool() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // 项目级 .agents/skills 是跨 agent 共享池（cursor/codex 直读），
+        // 与 proj.agents 声明无关——即使项目只声明 claude-code 也应被发现
+        std::fs::create_dir_all(root.join(".agents/skills/pool-skill")).unwrap();
+        let found = scan_shared(root, &["claude-code".into()]);
+        assert!(
+            found.contains(&"agents/pool-skill".to_string()),
+            "项目级 .agents/skills 共享池应被发现，got: {found:?}"
+        );
+    }
+
+    #[test]
+    fn scan_shared_finds_per_agent_dirs_and_skips_local() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // cursor shared：真实目录，应发现
+        std::fs::create_dir_all(root.join(".cursor/skills/cursor-shared")).unwrap();
+        // claude-code local：有 .skillkit-sha 标记（skillkit 管的 local），不应算 shared
+        let local = root.join(".claude/skills/local-managed");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join(".skillkit-sha"), "sha").unwrap();
+        let found = scan_shared(root, &["claude-code".into(), "cursor".into()]);
+        assert!(
+            found.contains(&"cursor/cursor-shared".to_string()),
+            "cursor shared 应被发现，got: {found:?}"
+        );
+        assert!(
+            !found.iter().any(|s| s.contains("local-managed")),
+            "有 .skillkit-sha 标记的 local 不应算 shared，got: {found:?}"
+        );
     }
 }

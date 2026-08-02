@@ -156,3 +156,21 @@
 - 去掉 name 字段、纯自动推导：撞名场景无法覆盖（两个仓库都叫 skills 时只能换包名绕开），保留可选覆盖成本极低。
 
 **后续提醒**：本次只做新增时推导，不做已有 source 的改名编辑；若未来加「编辑 source name」，必须连带处理 registry 里 `<旧name>/<skill>` 的引用。
+
+## 决策 16：默认声明主流 agent + scan_shared 认项目级 .agents 共享池
+
+**背景**：sea-office-workspace 项目里有 `.cursor/skills` 下的 shared skill，skillkit 完全没认出。根因有二：① `Config::default()` 只声明 claude-code，用户不手写 config.toml 就不启用 cursor/codex；② `scan_shared` 只扫 `proj.agents` 里的 agent 目录，把「shared 只读发现」耦合到了「skillkit 声明管哪些 agent」。而 spec §7 的能力矩阵和 §6.2 的 config 示例本就设想要支持 cursor/codex，实现漏了。
+
+**决策**：
+- `Config::default()` 默认声明三大主流 agent：claude-code（symlink 桥接）、cursor、codex（均 copy 落地、直读池子）。其余 agent（OpenCode/Gemini 等）用户按需在 config.toml 追加，新增 agent 只改配置不改代码的原则不变。
+- `scan_shared` 在遍历 `proj.agents` 各 agent 目录之外，额外扫项目级 `.agents/skills/`——它是 cursor/codex 直读的跨 agent 共享池，与 proj.agents 声明无关，发现的 skill 以 `agents/<name>` 归属展示。
+- GUI 详情页加 `POST /projects/{id}/sync-agents` 端点 + 「同步默认 agents」按钮：把 `proj.agents` 设为 Config 当前全 agent，用于旧项目（只绑 claude-code）一键补全。
+
+**理由**：开箱即用覆盖 .claude/.cursor/.codex 三大主流目录，符合 spec §7 已有意图（补齐实现而非新设计）；shared 只读发现的语义本就该反映项目里实际有什么，不该被 skillkit 是否声明管某 agent 限制；旧项目用显式按钮同步，可见可控，不偷偷改用户配置。
+
+**否定的备选**：
+- 启动时自动迁移旧项目 agents：省事但静默改用户配置，违背「不静默跳过」。
+- scan_shared 完全解耦 proj.agents、扫所有 `.<name>/skills`：通用但有误扫风险（如 .git/skills），且需维护已知 agent 目录集合；当前需求（主流三件套 + .agents 共享池）用 Config 驱动 + 显式 .agents 已够。
+- 不加 sync-agents、只改 default 治新项目：旧项目（多为 claude-code）永远漏，当前痛点不解。
+
+**后续提醒**：项目级 `.agents/skills/` 是 spec 原本没有的新概念（spec 的 .agents 全是全局池子），本次新增，仅只读发现；若未来要让它参与 apply 落地，需另立决策。

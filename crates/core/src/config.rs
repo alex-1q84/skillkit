@@ -18,14 +18,28 @@ pub struct Agent {
 }
 
 impl Default for Config {
-    /// 默认只声明 Claude（需要 symlink 桥接）。
+    /// 默认声明三大主流 agent（claude-code/cursor/codex），开箱即用覆盖
+    /// .claude / .cursor / .codex 三个项目级 skills 目录。其余 agent（OpenCode/
+    /// Gemini 等）用户按需在 config.toml 追加，新增 agent 只改配置不改代码。
     fn default() -> Self {
         Self {
-            agents: vec![Agent {
-                name: "claude-code".to_string(),
-                supports_symlink: true,
-                reads_agents_dir: false,
-            }],
+            agents: vec![
+                Agent {
+                    name: "claude-code".to_string(),
+                    supports_symlink: true,
+                    reads_agents_dir: false,
+                },
+                Agent {
+                    name: "cursor".to_string(),
+                    supports_symlink: false,
+                    reads_agents_dir: true,
+                },
+                Agent {
+                    name: "codex".to_string(),
+                    supports_symlink: false,
+                    reads_agents_dir: true,
+                },
+            ],
         }
     }
 }
@@ -71,10 +85,20 @@ mod tests {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         let cfg = Config::load(&paths).unwrap();
-        assert_eq!(cfg.agents.len(), 1);
+        // 默认声明三大主流 agent，开箱即用覆盖 .claude/.cursor/.codex 目录
+        assert_eq!(cfg.agents.len(), 3);
+        // claude-code：symlink 桥接，不直读池子
         assert_eq!(cfg.agents[0].name, "claude-code");
         assert!(cfg.agents[0].supports_symlink);
         assert!(!cfg.agents[0].reads_agents_dir);
+        // cursor：不支持 symlink，copy 落地，直读池子
+        assert_eq!(cfg.agents[1].name, "cursor");
+        assert!(!cfg.agents[1].supports_symlink);
+        assert!(cfg.agents[1].reads_agents_dir);
+        // codex：同 cursor
+        assert_eq!(cfg.agents[2].name, "codex");
+        assert!(!cfg.agents[2].supports_symlink);
+        assert!(cfg.agents[2].reads_agents_dir);
     }
 
     #[test]

@@ -64,6 +64,10 @@ pub fn protected() -> Router<AppState> {
         )
         .route("/{token}/projects/{id}/rebind", post(projects::rebind))
         .route(
+            "/{token}/projects/{id}/sync-agents",
+            post(projects::sync_agents),
+        )
+        .route(
             "/{token}/projects/{id}/profiles",
             post(projects::set_profiles),
         )

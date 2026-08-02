@@ -21,6 +21,12 @@
     <button>重绑定</button>
   </form>
   <div id="browse-panel-rebind"></div>
+  <hr>
+  <p class="hint">agents: {{ project.agents.join(", ") }} — 新增 .cursor/.codex 等目录后，一键同步 config 声明的默认 agent（claude-code/cursor/codex）。</p>
+  <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/sync-agents"
+        hx-target="body" hx-swap="outerHTML">
+    <button class="u">同步默认 agents</button>
+  </form>
 </section>
 
 <section class="card">

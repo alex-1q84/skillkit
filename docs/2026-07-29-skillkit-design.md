@@ -129,7 +129,10 @@ local skill 与 shared skill **同级平铺**在 `<agent>/skills/<skill-name>/`�
   .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/.agents/skills/<skill-name>/
   .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skillkit/.agents/skills/<skill-name>/
   .codex/skills/...                   # 同理
+  .agents/skills/<skill-name>/        # 跨 agent 共享池（cursor/codex 直读），shared 真实文件，skillkit 只读发现（不参与 apply 落地）
 ```
+
+项目级 `.agents/skills/` 是 cursor/codex 直读的跨 agent 共享池（区别于全局 `~/.agents/skills/` canonical 池子），由项目 git 自管，skillkit 只扫描展示、以 `agents/<skill-name>` 归属，不安装/升级/卸载。
 
 **local skill 的 git 忽略用 git 自带的本地忽略文件 `<project>/.git/info/exclude`，不碰项目 `.gitignore`**。`apply` 把当前 local skill 清单写入 exclude（每行一条 `<agent>/skills/<skill-name>`）；该文件天然本地、不入库，每个开发者 clone 后跑自己的 apply 自动生成，团队成员互不冲突。示例：
 
@@ -155,7 +158,7 @@ skillkit 不在项目目录写入自己的配置文件（项目元数据全部�
 | Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skillkit/.agents/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
 | OpenCode / Codex / Gemini | 是 | 是 | 无需操作（直读） | symlink 或 copy 均可，默认 symlink |
 
-agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 computed_hash 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
+agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。`Config::default()` 默认声明 claude-code/cursor/codex 三大主流 agent，开箱即用覆盖 `.claude`/`.cursor`/`.codex` 目录；其余 agent（OpenCode/Gemini 等）按需在 config.toml 追加。旧项目（注册时只绑 claude-code）用 `POST /projects/{id}/sync-agents`（GUI 详情页「同步默认 agents」按钮）一键把 `proj.agents` 补全到 Config 全 agent，让 `.cursor/skills`、`.codex/skills`、`.agents/skills` 的 shared skill 被识别。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 computed_hash 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
 
 ## 8. 数据模型
 

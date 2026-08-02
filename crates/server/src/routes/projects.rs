@@ -198,6 +198,24 @@ pub async fn rebind(
     render_workspace(state, token, proj, false, None)
 }
 
+/// 同步默认 agents：把 proj.agents 设为 Config 当前全 agent。
+/// 用于旧项目（只绑 claude-code）一键补全新 agent，让 scan_shared 认 .cursor/.codex 目录。
+pub async fn sync_agents(
+    State(state): State<AppState>,
+    Path((token, id)): Path<(String, String)>,
+) -> Response {
+    let Ok(mut proj) = Project::load(&state.paths, &id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    proj.agents = skillkit_core::config::Config::load(&state.paths)
+        .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
+        .unwrap_or_default();
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    render_workspace(state, token, proj, false, None)
+}
+
 /// 设定 profile 绑定（替换语义）+ 重算 installed_skills + 落地，一步到位。
 /// 返回完整工作台页（含落地报告）。未知 profile 给可读 err 片段，不 500。
 pub async fn set_profiles(
