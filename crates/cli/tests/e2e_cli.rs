@@ -488,3 +488,47 @@ fn upgrade_all_json_emits_upgrade_all_report() {
         .iter()
         .any(|b| b["id"] == "src/demo-skill"));
 }
+
+// ===========================================================================
+// project remove（注销：删 toml 注册信息，不碰项目目录本身）
+// ===========================================================================
+
+#[test]
+fn project_remove_yes_deletes_registration_but_keeps_project_dir() {
+    // Given：注册一个项目（真实目录 + 文件）
+    let env = Env::new();
+    let proj_dir = env.home_path().join("myproj");
+    fs::create_dir_all(&proj_dir).unwrap();
+    fs::write(proj_dir.join("README.md"), "hello").unwrap();
+    env.skillkit()
+        .args(["project", "add", &proj_dir.to_string_lossy()])
+        .assert()
+        .success();
+    let pid = fs::read_dir(env.home_path().join(".skillkit/projects"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .replace(".toml", "");
+
+    // When：remove --yes 注销
+    let out = env
+        .skillkit()
+        .args(["project", "remove", &pid, "--yes"])
+        .assert()
+        .success();
+
+    // Then：注册 toml 删除，项目目录与文件保留（只移除注册信息，不删项目本身）
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout);
+    assert!(stdout.contains("已注销项目"), "应提示已注销：{stdout}");
+    assert!(
+        !env.home_path()
+            .join(format!(".skillkit/projects/{pid}.toml"))
+            .exists(),
+        "注册 toml 应已删除"
+    );
+    assert!(proj_dir.exists(), "项目目录必须保留");
+    assert!(proj_dir.join("README.md").exists(), "项目文件必须保留");
+}

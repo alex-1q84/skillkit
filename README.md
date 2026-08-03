@@ -66,6 +66,7 @@ skillkit list --json                             # SkillMeta[]
 
 ```bash
 skillkit project add <path> [--name <名称>]
+skillkit project remove <project> [--yes]            # 注销：只删注册信息，不碰项目目录
 skillkit project status                           # 查看 diff（该有/缺/多/冲突）
 skillkit project apply                           # 幂等落地到 agent 目录
 skillkit project list

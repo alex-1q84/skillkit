@@ -19,6 +19,13 @@ enum ProjectSub {
     },
     /// 重绑定：项目移动/改名后更新 path/name，id 不变
     Rebind { id: String, path: PathBuf },
+    /// 注销项目：只删 skillkit 注册信息（toml），不碰项目目录本身
+    Remove {
+        project: String,
+        /// 跳过交互确认
+        #[arg(long)]
+        yes: bool,
+    },
     /// 扫描目录发现项目（只列 path，不自动注册）
     Scan {
         dir: PathBuf,
@@ -68,6 +75,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             proj.save(&paths)?;
             println!("✓ 已重绑定 {id} → {}", proj.path);
         }
+        ProjectSub::Remove { project, yes } => run_remove(&paths, &project, yes)?,
         ProjectSub::Scan { dir, depth } => {
             let found = skillkit_core::scan_projects(&dir, depth)?;
             if found.is_empty() {
@@ -149,4 +157,55 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// remove：skillkit project remove <project> [--yes]，注销项目（只删 toml 注册信息，不碰项目目录）。
+/// 默认交互确认；--yes 跳过（CI/agent 友好）。对齐 skill remove 的确认模式。
+fn run_remove(paths: &Paths, project: &str, yes: bool) -> anyhow::Result<()> {
+    if !yes {
+        println!("将注销项目 {project}（仅删 skillkit 注册信息，不碰项目目录），确认？(y/n)");
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        if line.trim() != "y" {
+            println!("已取消");
+            return Ok(());
+        }
+    }
+    Project::remove(paths, project)?;
+    println!("✓ 已注销项目 {project}（注册信息已移除，项目目录未动）");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// 测试入口：ProjectSub 直接作为 subcommand 字段（mod tests 内可访问私有 enum）。
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        cmd: ProjectSub,
+    }
+
+    /// `project remove <id> --yes`：解析出 project 位置参数 + yes=true（对齐 skill remove 的 CI/agent 契约）。
+    #[test]
+    fn remove_parses_project_and_yes() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "remove", "abc12345", "--yes"]);
+        let ProjectSub::Remove { project, yes } = cmd else {
+            panic!("expected Remove");
+        };
+        assert_eq!(project, "abc12345");
+        assert!(yes);
+    }
+
+    /// 默认 yes=false（走交互确认），防误注销。
+    #[test]
+    fn remove_defaults_yes_false() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "remove", "abc12345"]);
+        let ProjectSub::Remove { yes, .. } = cmd else {
+            panic!("expected Remove");
+        };
+        assert!(!yes);
+    }
 }
