@@ -700,6 +700,16 @@ Expected: 现有 6 用例不回归（不覆盖 projects 视图）。增量覆盖
 - Task 8 bug 修复根因（hx-swap 继承）+ 修复（显式 innerHTML）+ 验证（playwright 复现通过）。✓
 - commit cc06909 含 Task 1-8 全部改动。
 
+### Task 9: review 后 5 项改进（commit 7b6f94c）
+
+**Files:** `src/routes/projects.rs`（`BrowseQuery.path` alias / `ScanForm` 去 depth / `ProjectAddForm` 去 agents / add 查重 + resolve_dir / scan resolve_dir / Tpl message / render_list message）、`templates/fragments/projects_main.html`（去 agents/浏览/depth + message 顶部提示）、`tests/routes.rs`（断言更新 + browse dir alias + add 查重）。
+
+- browse `path` 加 `#[serde(alias="dir")]`（扫描浏览 name=dir 正确传入）。
+- scan/browse 用 `resolve_dir` 展开 `~`（修 `~/...` 不识别）。
+- 注册去 agents/浏览；扫描去 depth（固定默认 3）。
+- add 查重（canonical 精确匹配）+ `ProjectsTpl.message` 顶部提示。
+- 验证：curl（browse?dir=~ cwd 正确 / scan ~ 35 候选 / add 重复拒绝）+ 测试（projects_main_renders 反向断言 / browse dir alias / add 查重）+ make check 全绿（server 41）。
+
 ---
 
 ## Self-Review（plan vs spec）

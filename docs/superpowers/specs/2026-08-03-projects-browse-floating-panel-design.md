@@ -298,3 +298,13 @@ document.addEventListener('keydown', (e) => {
 - 根因：浏览/扫描按钮在 `<form hx-swap="outerHTML">` 内、自己没写 hx-swap——htmx 的 hx-swap **从最近祖先继承**，按钮继承 form 的 outerHTML，把整个挂载点 `#browse-panel-add`/`#scan-results` 替换成浮层（浮层顶层无 id），挂载点 id 丢失，后续「进入」「再浏览」的 `hx-target="#挂载点"` 找不到目标。浮层化前 browse.html 顶层有 `id={{panel}}` 正好掩盖此 bug，去 id 后暴露。
 - 修复：三个触发按钮（注册浏览 / 扫描浏览 / 扫描 form）显式 `hx-swap="innerHTML"`，挂载点保留、浮层作为子节点（fixed 定位照常全屏遮罩）。
 - 验证：playwright 复现 Bug1（浏览→进入，cwd 变化 + 挂载点保留）+ Bug2（选定→再浏览，浮层重弹）+ scan 两次扫描；`make check` 全绿。
+
+## 10. 实现期增量 II（commit 7b6f94c）
+
+主人 review 后提的 5 个改进，均在 commit 7b6f94c 落地：
+
+- **browse dir alias**：扫描浏览按钮 `hx-include="#dir"`（input `name=dir`），但 browse 端点解析 `path` 字段 → 值没传进去（列了 home）。修：`BrowseQuery.path` 加 `#[serde(alias = "dir")]`。
+- **~ 路径支持**：scan/browse 改用 `resolve_dir`（展开 `~` + canonicalize）。此前 scan handler `StdPath::new(&f.dir)` 不展开 `~`，`~/...` 扫描 0 候选。
+- **注册表单简化**：去 agents 输入（用默认 agents）+ 去浏览按钮（浏览由扫描表单承担）。
+- **扫描表单简化**：去 depth 输入，固定默认层深 3。
+- **注册查重**：add handler 注册前按 canonical path 精确匹配查重，重复→拒绝 + `ProjectsTpl` 顶部 `message` 提示（`render_list` 加 message 参数透传）。
