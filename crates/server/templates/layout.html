@@ -29,7 +29,88 @@
     // 响应是片段而非完整页，从根上杜绝「nav 被塞进 main」的导航重复。
     var es = new EventSource('/{{ token }}/events');
     es.addEventListener('changed', function () {
+      // scan 浮层开时跳过整页刷新（注册写 toml 触发 SSE，刷 main 会清浮层，破坏连续注册）
+      if (document.querySelector('.scan-flyout')) return;
       htmx.ajax('GET', location.pathname + '?fragment=1', { target: 'main', swap: 'innerHTML' });
+    });
+
+    // ===== 目录浏览浮层关闭：✕ / 点遮罩 / ESC（纯 UI 收起，不涉业务） =====
+    function closeBrowseOverlay(overlay) {
+      var isScan = overlay.classList.contains('scan-flyout');
+      overlay.remove();
+      if (isScan) {
+        // scan 浮层关闭：刷新 main 同步已注册列表（浮层开期间 SSE 被跳过）
+        htmx.ajax('GET', location.pathname + '?fragment=1', { target: 'main', swap: 'innerHTML' });
+      }
+    }
+    document.body.addEventListener('click', function (e) {
+      var overlay = e.target.closest('.browse-overlay');
+      if (!overlay) return;
+      if (e.target.closest('.browse-close') || e.target === overlay) {
+        e.preventDefault();
+        closeBrowseOverlay(overlay);
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.browse-overlay').forEach(closeBrowseOverlay);
+      }
+    });
+    // scan 候选 toggle：靠 toggle 端点 hx-swap=outerHTML 替换按钮片段，无需 JS 标记
+
+    // ===== 路径输入框 Tab 补全 =====
+    var SK_TOKEN = '{{ token }}';
+    function moveCompleteActive(items, dir) {
+      if (!items.length) return;
+      var arr = Array.prototype.slice.call(items);
+      var idx = arr.findIndex(function (i) { return i.classList.contains('active'); });
+      if (idx < 0) idx = 0;
+      arr[idx].classList.remove('active');
+      idx = (idx + dir + arr.length) % arr.length;
+      arr[idx].classList.add('active');
+      arr[idx].scrollIntoView({ block: 'nearest' });
+    }
+    function setupComplete(input, panelId) {
+      var panel = document.getElementById(panelId);
+      if (!panel) return;
+      input.addEventListener('keydown', function (e) {
+        var items = panel.querySelectorAll('.complete-item');
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          var val = encodeURIComponent(input.value);
+          htmx.ajax('GET', '/' + SK_TOKEN + '/projects/complete?path=' + val + '&panel=' + panelId,
+                    { target: panel, swap: 'innerHTML' });
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          moveCompleteActive(items, 1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          moveCompleteActive(items, -1);
+        } else if (e.key === 'Enter') {
+          var active = panel.querySelector('.complete-item.active');
+          if (active) { e.preventDefault(); input.value = active.dataset.path; panel.innerHTML = ''; }
+        } else if (e.key === 'Escape') {
+          panel.innerHTML = '';
+        }
+      });
+      panel.addEventListener('htmx:afterSettle', function () {
+        var first = panel.querySelector('.complete-item');
+        if (first) first.classList.add('active');
+      });
+      input.addEventListener('blur', function () {
+        setTimeout(function () { panel.innerHTML = ''; }, 150);
+      });
+      panel.addEventListener('mousedown', function (e) {
+        var item = e.target.closest('.complete-item');
+        if (item) { input.value = item.dataset.path; panel.innerHTML = ''; }
+      });
+    }
+    // SSE 刷新 main 后幂等重绑（data-complete-bound 防重复，仿 Sortable）
+    document.body.addEventListener('htmx:afterSettle', function () {
+      document.querySelectorAll('input[data-complete]:not([data-complete-bound])').forEach(function (input) {
+        input.setAttribute('data-complete-bound', '1');
+        setupComplete(input, input.dataset.complete);
+      });
     });
   </script>
 </body>

@@ -295,7 +295,8 @@ main > ul li a { font-weight: 500; }
 }
 .profile-card:hover { background: var(--surface-2); border-color: var(--ink-3); }
 .profile-card input { position: absolute; opacity: 0; pointer-events: none; }
-.profile-card.bound {
+/* 选中态跟随 checkbox 实时变化：点击卡片即勾选/取消，高亮随之增减——支持绑定与解绑（提交集合走后端替换语义） */
+.profile-card:has(input:checked) {
   border-color: var(--accent-2);
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent-2) inset;
@@ -311,3 +312,73 @@ ul.project-list li {
 }
 ul.project-list li a { font-weight: 500; min-width: 120px; }
 ul.project-list .muted { color: var(--ink-3); font-family: var(--mono); font-size: 12px; flex: 1; min-width: 200px; }
+
+/* ---------- 目录浏览浮层 ---------- */
+.browse-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(28, 25, 23, .42);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.browse-modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  width: 560px; max-width: 100%;
+  max-height: min(70vh, 560px);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.browse-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.browse-cwd {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.browse-close {
+  padding: 2px 8px; color: var(--ink-3); border: none; background: none;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.browse-close:hover { color: var(--danger); }
+.browse-toolbar { padding: 8px 14px; border-bottom: 1px solid var(--line-2); }
+.browse-body { overflow: auto; flex: 1; padding: 4px 0; }
+.browse-empty { padding: 16px 14px; }
+.browse-list { list-style: none; }
+.browse-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 14px; border-bottom: 1px solid var(--line-2);
+}
+.browse-list li:last-child { border-bottom: none; }
+.browse-list li:hover { background: var(--surface-2); }
+.browse-name {
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.browse-ops { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.registered { color: var(--ok); font-family: var(--mono); font-size: 12px; }
+.scan-toggle-btn.registered { color: var(--ok); border-color: var(--ok); }
+
+/* ---------- 路径输入框 Tab 补全 ---------- */
+.input-wrap { position: relative; display: inline-flex; align-items: center; }
+.complete-list {
+  position: absolute; top: calc(100% + 2px); left: 0;
+  min-width: 100%; max-width: 440px;
+  max-height: 240px; overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 90;
+}
+.complete-item {
+  padding: 6px 12px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.complete-item:hover, .complete-item.active { background: var(--accent-soft); color: var(--accent); }

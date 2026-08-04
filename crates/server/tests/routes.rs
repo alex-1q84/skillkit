@@ -938,6 +938,9 @@ async fn projects_browse_lists_subdirs_skips_hidden_and_files() {
     assert!(body.contains("进入"), "每条有进入按钮");
     assert!(body.contains("选定"), "每条有选定按钮");
     assert!(body.contains("上级"), "有上级按钮");
+    assert!(body.contains(r#"class="browse-overlay""#), "浮层遮罩");
+    assert!(body.contains(r#"class="browse-modal""#), "模态卡片");
+    assert!(body.contains(r#"class="browse-close""#), "关闭按钮");
 }
 
 #[tokio::test]
@@ -1035,6 +1038,17 @@ async fn projects_main_renders_browse_buttons_and_panels() {
         "扫描浏览按钮调 browse"
     );
     assert!(body.contains(r#"id="browse-panel-scan""#), "扫描面板 div");
+    assert!(body.contains(r#"class="input-wrap""#), "输入框包裹层");
+    assert!(
+        body.contains(r#"data-complete="complete-path""#),
+        "注册输入框 data-complete"
+    );
+    assert!(body.contains(r#"id="complete-path""#), "注册候选挂载点");
+    assert!(
+        body.contains(r#"data-complete="complete-dir""#),
+        "扫描输入框 data-complete"
+    );
+    assert!(body.contains(r#"id="complete-dir""#), "扫描候选挂载点");
 }
 
 #[tokio::test]
@@ -1361,4 +1375,94 @@ async fn projects_list_renders_section_cards_delete_and_local_count() {
         "列表项含删除按钮"
     );
     assert!(body.contains("1 local skills"), "local skill 数过滤");
+}
+
+#[tokio::test]
+async fn projects_complete_lists_prefix_matched_subdirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().display().to_string();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("lab")).unwrap();
+    std::fs::create_dir_all(dir.path().join("labx")).unwrap();
+    std::fs::create_dir_all(dir.path().join("other")).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/complete?path={base}/la&panel=complete-path"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("lab/"), "前缀 la 匹配含 lab");
+    assert!(body.contains("labx/"), "前缀 la 匹配含 labx");
+    assert!(!body.contains("other"), "不含非前缀目录");
+    assert!(
+        body.contains(&format!(r#"data-path="{base}/lab/""#)),
+        "data-path 是完整路径带尾斜杠"
+    );
+}
+
+#[tokio::test]
+async fn projects_complete_trailing_slash_lists_all_subdirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().display().to_string();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("b")).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/complete?path={base}/&panel=complete-path"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("a/"), "尾斜杠=prefix 空，列全部子目录");
+    assert!(body.contains("b/"));
+}
+
+#[tokio::test]
+async fn projects_complete_no_match_returns_empty_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().display().to_string();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("lab")).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/complete?path={base}/zzz&panel=complete-path"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains(r#"class="complete-list""#), "空也返回容器");
+    assert!(!body.contains("complete-item"), "无匹配项不含候选");
 }

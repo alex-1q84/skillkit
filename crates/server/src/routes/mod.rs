@@ -57,7 +57,9 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/profiles/{name}/reorder", post(profiles::reorder))
         .route("/{token}/projects", get(projects::list).post(projects::add))
         .route("/{token}/projects/scan", post(projects::scan))
+        .route("/{token}/projects/toggle", post(projects::toggle))
         .route("/{token}/projects/browse", get(projects::browse))
+        .route("/{token}/projects/complete", get(projects::complete))
         .route(
             "/{token}/projects/{id}",
             get(projects::workspace).delete(projects::remove),

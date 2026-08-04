@@ -143,29 +143,53 @@ pub struct ScanForm {
     pub depth: Option<u32>,
 }
 
+/// scan 候选项：path=全路径，registered=是否已注册（按全路径 canonical 精确匹配）。
+pub struct ScanCandidate {
+    pub path: String,
+    pub registered: bool,
+}
+
 #[derive(Template)]
 #[template(path = "fragments/scan_results.html")]
 pub struct ScanResultsTpl<'a> {
     pub token: &'a str,
-    pub dirs: Vec<String>,
+    pub candidates: Vec<ScanCandidate>,
 }
 
-/// 扫描目录发现项目，渲染候选（每条带注册按钮，复用 POST /projects）。
+/// 扫描目录发现项目，渲染候选（每条带 toggle 按钮）。已注册按全路径 canonical 精确匹配标记。
 pub async fn scan(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(token): Path<String>,
     Form(f): Form<ScanForm>,
 ) -> Response {
     let depth = f.depth.unwrap_or(3);
     match skillkit_core::scan_projects(StdPath::new(&f.dir), depth) {
         Ok(dirs) => {
-            let dirs: Vec<String> = dirs
+            let registered: std::collections::HashSet<String> =
+                skillkit_core::list_project_ids(&state.paths)
+                    .map(|ids| {
+                        ids.iter()
+                            .filter_map(|id| Project::load(&state.paths, id).ok())
+                            .map(|p| p.path)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            let candidates = dirs
                 .into_iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect();
+                .map(|p| {
+                    let path = p.to_string_lossy().into_owned();
+                    let canon = StdPath::new(&path)
+                        .canonicalize()
+                        .map_or_else(|_| path.clone(), |c| c.to_string_lossy().into_owned());
+                    ScanCandidate {
+                        registered: registered.contains(&canon),
+                        path,
+                    }
+                })
+                .collect::<Vec<_>>();
             let rendered = ScanResultsTpl {
                 token: &token,
-                dirs,
+                candidates,
             }
             .render();
             render_str(rendered)
@@ -175,6 +199,61 @@ pub async fn scan(
             Html("<p class=\"err\">扫描失败，检查目录路径</p>").into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct ToggleForm {
+    pub path: String,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/scan_toggle.html")]
+pub struct ToggleTpl<'a> {
+    pub token: &'a str,
+    pub path: &'a str,
+    pub registered: bool,
+}
+
+/// scan 候选 toggle：按全路径 canonical 精确匹配，已注册→注销、未注册→注册。
+/// 返回新按钮片段（hx-swap=outerHTML 替换 form），浮层保持可连续 toggle。
+pub async fn toggle(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Form(f): Form<ToggleForm>,
+) -> Response {
+    let abs = PathBuf::from(&f.path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&f.path));
+    let abs_str = abs.to_string_lossy().into_owned();
+    let existing = skillkit_core::list_project_ids(&state.paths)
+        .ok()
+        .and_then(|ids| {
+            ids.iter()
+                .filter_map(|id| Project::load(&state.paths, id).ok())
+                .find(|p| p.path == abs_str)
+        });
+    let registered = if let Some(proj) = existing {
+        if let Err(e) = skillkit_core::Project::remove(&state.paths, &proj.id) {
+            tracing::error!(error = ?e, "toggle 注销失败：{}", proj.id);
+        }
+        false
+    } else {
+        let agents = skillkit_core::config::Config::load(&state.paths)
+            .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
+            .unwrap_or_default();
+        let proj = Project::register(abs, agents);
+        if let Err(e) = proj.save(&state.paths) {
+            tracing::error!(error = ?e, "toggle 注册失败：{}", f.path);
+        }
+        true
+    };
+    let rendered = ToggleTpl {
+        token: &token,
+        path: &f.path,
+        registered,
+    }
+    .render();
+    render_str(rendered)
 }
 
 #[derive(Deserialize)]
@@ -486,6 +565,67 @@ pub async fn browse(Path(token): Path<String>, Query(q): Query<BrowseQuery>) -> 
             Html("<p class=\"err\">目录不可读，检查路径或权限</p>").into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct CompleteQuery {
+    pub path: String,
+    pub panel: String,
+}
+
+/// 候选项：short=子目录名（显示），full=base/子目录（data-path 回填）。
+pub struct Candidate {
+    pub short: String,
+    pub full: String,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/complete.html")]
+pub struct CompleteTpl<'a> {
+    pub panel: &'a str,
+    pub candidates: Vec<Candidate>,
+}
+
+/// 路径输入框 Tab 补全：拆「基准目录 + 前缀」。
+/// - 尾斜杠或空 → base=path（解析后），prefix=""（列全部子目录）
+/// - 否则 → base=parent，prefix=末段（前缀匹配）
+///
+/// `~` 与空按 home 解析（复用 resolve_dir）。
+fn split_prefix(raw: &str) -> (PathBuf, String) {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.ends_with('/') {
+        return (resolve_dir(Some(raw)), String::new());
+    }
+    let resolved = resolve_dir(Some(raw));
+    let prefix = resolved
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let base = match resolved.parent() {
+        Some(p) => p.to_path_buf(),
+        None => resolved,
+    };
+    (base, prefix)
+}
+
+/// Tab 补全：列 base 下前缀匹配的子目录候选，渲染 complete.html。
+pub async fn complete(Path(_token): Path<String>, Query(q): Query<CompleteQuery>) -> Response {
+    let (base, prefix) = split_prefix(&q.path);
+    let candidates: Vec<Candidate> = list_subdirs(&base)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .map(|name| {
+            let full = base.join(&name).to_string_lossy().into_owned();
+            Candidate { short: name, full }
+        })
+        .collect();
+    let rendered = CompleteTpl {
+        panel: &q.panel,
+        candidates,
+    }
+    .render();
+    render_str(rendered)
 }
 
 /// 解析路径：空 → home；`~` 开头 → home + rest；否则 canonicalize（失败用原值，不 panic）。

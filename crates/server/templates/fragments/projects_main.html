@@ -5,10 +5,14 @@
   <p class="hint">已知项目路径？直接填路径注册。</p>
   <form class="inline" hx-post="/{{ token }}/projects"
         hx-target="body" hx-swap="outerHTML">
-    <input id="path" name="path" type="text" placeholder="项目绝对路径（如 /Users/me/app）" required>
+    <div class="input-wrap">
+      <input id="path" name="path" type="text" placeholder="项目绝对路径（如 /Users/me/app）" required data-complete="complete-path">
+      <div class="complete-panel" id="complete-path"></div>
+    </div>
     <button type="button"
             hx-get="/{{ token }}/projects/browse?into=path&panel=browse-panel-add"
             hx-target="#browse-panel-add"
+            hx-swap="innerHTML"
             hx-include="#path">浏览...</button>
     <input name="agents" placeholder="agents（可选，逗号分隔）">
     <button>注册</button>
@@ -20,12 +24,16 @@
   <h2>扫描发现</h2>
   <p class="hint">不确定有哪些项目？扫目录树自动发现候选。</p>
   <form class="inline" hx-post="/{{ token }}/projects/scan"
-        hx-target="#scan-results" hx-swap="outerHTML"
+        hx-target="#scan-results" hx-swap="innerHTML"
         hx-indicator="#scan-indicator">
-    <input id="dir" name="dir" type="text" placeholder="扫描根目录（如 ~/code）" required>
+    <div class="input-wrap">
+      <input id="dir" name="dir" type="text" placeholder="扫描根目录（如 ~/code）" required data-complete="complete-dir">
+      <div class="complete-panel" id="complete-dir"></div>
+    </div>
     <button type="button"
             hx-get="/{{ token }}/projects/browse?into=dir&panel=browse-panel-scan"
             hx-target="#browse-panel-scan"
+            hx-swap="innerHTML"
             hx-include="#dir">浏览...</button>
     <input type="number" name="depth" value="3" min="0" max="5">
     <button>扫描</button>

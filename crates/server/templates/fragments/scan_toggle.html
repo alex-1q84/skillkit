@@ -1,0 +1,4 @@
+<form class="inline scan-toggle-form" hx-post="/{{ token }}/projects/toggle" hx-swap="outerHTML">
+  <input type="hidden" name="path" value="{{ path }}">
+  <button class="scan-toggle-btn {% if registered %}registered{% endif %}">{% if registered %}已注册 ✓{% else %}注册{% endif %}</button>
+</form>

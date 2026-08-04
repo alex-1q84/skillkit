@@ -1,26 +1,36 @@
-<div id="{{ panel }}" class="browse-panel">
-  <div class="browse-cwd">📁 {{ current }}
+<div class="browse-overlay">
+  <div class="browse-modal" role="dialog" aria-label="选择目录">
+    <header class="browse-header">
+      <span class="browse-cwd" title="{{ current }}">📁 {{ current }}</span>
+      <button type="button" class="browse-close" aria-label="关闭">✕</button>
+    </header>
     {% if parent != current %}
-    <button type="button"
-            hx-get="/{{ token }}/projects/browse?path={{ parent }}&into={{ into }}&panel={{ panel }}"
-            hx-target="#{{ panel }}">↑ 上级</button>
+    <div class="browse-toolbar">
+      <button type="button"
+              hx-get="/{{ token }}/projects/browse?path={{ parent }}&into={{ into }}&panel={{ panel }}"
+              hx-target="#{{ panel }}">↑ 上级</button>
+    </div>
     {% endif %}
+    <div class="browse-body">
+      {% if dirs.is_empty() %}
+      <p class="muted browse-empty">（无子目录）</p>
+      {% else %}
+      <ul class="browse-list">
+        {% for d in dirs %}
+        <li>
+          <span class="browse-name">📁 {{ d }}/</span>
+          <span class="browse-ops">
+            <button type="button"
+                    hx-get="/{{ token }}/projects/browse?path={{ current }}/{{ d }}&into={{ into }}&panel={{ panel }}"
+                    hx-target="#{{ panel }}">进入</button>
+            <button type="button"
+                    hx-get="/{{ token }}/projects/browse?path={{ current }}&select={{ d }}&into={{ into }}&panel={{ panel }}"
+                    hx-swap="none">✓ 选定</button>
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
   </div>
-  {% if dirs.is_empty() %}
-  <p class="muted">（无子目录）</p>
-  {% else %}
-  <ul class="browse-list">
-    {% for d in dirs %}
-    <li>
-      <span>{{ d }}/</span>
-      <button type="button"
-              hx-get="/{{ token }}/projects/browse?path={{ current }}/{{ d }}&into={{ into }}&panel={{ panel }}"
-              hx-target="#{{ panel }}">进入</button>
-      <button type="button"
-              hx-get="/{{ token }}/projects/browse?path={{ current }}&select={{ d }}&into={{ into }}&panel={{ panel }}"
-              hx-swap="none">✓ 选定</button>
-    </li>
-    {% endfor %}
-  </ul>
-  {% endif %}
 </div>

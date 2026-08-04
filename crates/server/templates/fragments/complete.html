@@ -1,0 +1,5 @@
+<div id="{{ panel }}" class="complete-list">
+  {% for c in &candidates %}
+  <div class="complete-item" data-path="{{ c.full }}/">{{ c.short }}/</div>
+  {% endfor %}
+</div>
