@@ -47,8 +47,7 @@
     <span class="badge">{{ row.local_count }} local skills</span>
     <button class="x"
             hx-delete="/{{ token }}/projects/{{ row.id }}"
-            hx-target="body" hx-swap="outerHTML"
-            hx-confirm="注销后该项目不再被 skillkit 管理，已落地文件保留。确定？">删除</button>
+            hx-target="body" hx-swap="outerHTML">删除</button>
   </li>
   {% else %}
   <li class="muted">— 还没有注册的项目</li>
