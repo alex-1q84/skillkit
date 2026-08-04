@@ -21,6 +21,7 @@ use crate::AppState;
 pub struct ProjectsTpl<'a> {
     pub token: &'a str,
     pub rows: Vec<ProjectRow>,
+    pub message: Option<&'a str>,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -29,6 +30,7 @@ pub struct ProjectsTpl<'a> {
 pub struct ProjectsMainTpl<'a> {
     pub token: &'a str,
     pub rows: Vec<ProjectRow>,
+    pub message: Option<&'a str>,
 }
 
 /// 列表项展示数据（handler 预计算 local_count，避免模板调 registry）。
@@ -99,33 +101,18 @@ pub struct BrowseSelectTpl<'a> {
 #[derive(Deserialize)]
 pub struct ProjectAddForm {
     pub path: String,
-    /// 可选，逗号分隔；留空用 config 全 agent。
-    pub agents: Option<String>,
 }
 
-/// 注册新项目：canonicalize path → Project::register → save → 刷新列表。
+/// 注册新项目：resolve_dir（展开 ~ + canonicalize）→ 查重 → register（默认 agents）→ save。
+/// 重复 path（canonical 全路径精确匹配）拒绝，返回列表 + 顶部提示。
 pub async fn add(
     State(state): State<AppState>,
     Path(token): Path<String>,
     Form(f): Form<ProjectAddForm>,
 ) -> Response {
-    let abs = PathBuf::from(&f.path)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&f.path));
-    let agents = match f.agents.as_deref() {
-        Some(a) if !a.trim().is_empty() => a
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>(),
-        _ => skillkit_core::config::Config::load(&state.paths)
-            .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
-            .unwrap_or_default(),
-    };
-    let proj = Project::register(abs, agents);
-    if proj.save(&state.paths).is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+    let abs = resolve_dir(Some(&f.path));
+    let abs_str = abs.to_string_lossy().into_owned();
+    // load 现有 + 查重（canonical 全路径精确匹配）
     let mut projects = Vec::new();
     if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
         for id in ids {
@@ -134,13 +121,29 @@ pub async fn add(
             }
         }
     }
-    render_list(&state, token, projects, false)
+    if projects.iter().any(|p| p.path == abs_str) {
+        return render_list(
+            &state,
+            token,
+            projects,
+            false,
+            Some("该项目已注册，不可重复注册"),
+        );
+    }
+    let agents = skillkit_core::config::Config::load(&state.paths)
+        .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
+        .unwrap_or_default();
+    let proj = Project::register(abs, agents);
+    if proj.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    projects.push(proj);
+    render_list(&state, token, projects, false, None)
 }
 
 #[derive(Deserialize)]
 pub struct ScanForm {
     pub dir: String,
-    pub depth: Option<u32>,
 }
 
 /// scan 候选项：path=全路径，registered=是否已注册（按全路径 canonical 精确匹配）。
@@ -162,8 +165,7 @@ pub async fn scan(
     Path(token): Path<String>,
     Form(f): Form<ScanForm>,
 ) -> Response {
-    let depth = f.depth.unwrap_or(3);
-    match skillkit_core::scan_projects(StdPath::new(&f.dir), depth) {
+    match skillkit_core::scan_projects(&resolve_dir(Some(&f.dir)), 3) {
         Ok(dirs) => {
             let registered: std::collections::HashSet<String> =
                 skillkit_core::list_project_ids(&state.paths)
@@ -356,7 +358,7 @@ pub async fn remove(
             }
         }
     }
-    render_list(&state, token, projects, false)
+    render_list(&state, token, projects, false, None)
 }
 
 pub async fn list(
@@ -372,7 +374,7 @@ pub async fn list(
             }
         }
     }
-    render_list(&state, token, projects, q.is_fragment())
+    render_list(&state, token, projects, q.is_fragment(), None)
 }
 
 pub async fn workspace(
@@ -485,6 +487,7 @@ fn render_list(
     token: String,
     projects: Vec<Project>,
     fragment: bool,
+    message: Option<&str>,
 ) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
     let rows: Vec<ProjectRow> = projects
@@ -507,12 +510,14 @@ fn render_list(
         ProjectsMainTpl {
             token: &token,
             rows,
+            message,
         }
         .render()
     } else {
         ProjectsTpl {
             token: &token,
             rows,
+            message,
         }
         .render()
     };
@@ -521,7 +526,8 @@ fn render_list(
 
 #[derive(Deserialize)]
 pub struct BrowseQuery {
-    /// 要列的目录（空/无效 → home）。
+    /// 要列的目录（空/无效 → home）。alias "dir"：扫描表单 input name=dir 也走这里。
+    #[serde(alias = "dir")]
     pub path: Option<String>,
     /// 选定时回填的输入框 id（= name，如 path / dir）。
     pub into: String,

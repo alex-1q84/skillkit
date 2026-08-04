@@ -1,3 +1,6 @@
+{% if let Some(m) = message %}
+<p class="err msg">{{ m }}</p>
+{% endif %}
 <h1>Projects</h1>
 
 <section class="card">
@@ -9,15 +12,8 @@
       <input id="path" name="path" type="text" placeholder="项目绝对路径（如 /Users/me/app）" required data-complete="complete-path">
       <div class="complete-panel" id="complete-path"></div>
     </div>
-    <button type="button"
-            hx-get="/{{ token }}/projects/browse?into=path&panel=browse-panel-add"
-            hx-target="#browse-panel-add"
-            hx-swap="innerHTML"
-            hx-include="#path">浏览...</button>
-    <input name="agents" placeholder="agents（可选，逗号分隔）">
     <button>注册</button>
   </form>
-  <div id="browse-panel-add"></div>
 </section>
 
 <section class="card">
@@ -35,7 +31,6 @@
             hx-target="#browse-panel-scan"
             hx-swap="innerHTML"
             hx-include="#dir">浏览...</button>
-    <input type="number" name="depth" value="3" min="0" max="5">
     <button>扫描</button>
     <span id="scan-indicator" class="htmx-indicator">扫描中…</span>
   </form>

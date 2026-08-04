@@ -1028,10 +1028,14 @@ async fn projects_main_renders_browse_buttons_and_panels() {
     let body = common::body_string(resp).await;
     assert!(body.contains(r#"id="path""#), "注册 input id=path");
     assert!(
-        body.contains("/projects/browse?into=path&panel=browse-panel-add"),
-        "注册浏览按钮调 browse"
+        !body.contains("browse-panel-add"),
+        "注册表单已去浏览按钮与挂载点"
     );
-    assert!(body.contains(r#"id="browse-panel-add""#), "注册面板 div");
+    assert!(
+        !body.contains(r#"name="agents""#),
+        "注册表单已去 agents 输入"
+    );
+    assert!(!body.contains(r#"name="depth""#), "扫描表单已去 depth 输入");
     assert!(body.contains(r#"id="dir""#), "扫描 input id=dir");
     assert!(
         body.contains("/projects/browse?into=dir&panel=browse-panel-scan"),
@@ -1465,4 +1469,76 @@ async fn projects_complete_no_match_returns_empty_list() {
     let body = common::body_string(resp).await;
     assert!(body.contains(r#"class="complete-list""#), "空也返回容器");
     assert!(!body.contains("complete-item"), "无匹配项不含候选");
+}
+
+#[tokio::test]
+async fn projects_browse_accepts_dir_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    let base = dir.path().display().to_string();
+
+    let app = skillkit_server::app(state);
+    // dir=（扫描表单 input name=dir）经 serde alias 映射到 path，列该目录子项
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/test-token/projects/browse?dir={base}&into=dir&panel=browse-panel-scan"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("sub/"), "dir alias 应列出该目录子项");
+    assert!(body.contains(&base), "cwd 应是传入目录（非 home）");
+}
+
+#[tokio::test]
+async fn projects_add_rejects_duplicate_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("proj");
+    std::fs::create_dir_all(&target).unwrap();
+    let target_str = target.display().to_string();
+    let mk = || skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+
+    // 第一次注册（成功）
+    let resp = skillkit_server::app(mk())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!("path={target_str}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // 第二次同 path → 拒绝 + 顶部提示，不新增
+    let resp2 = skillkit_server::app(mk())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!("path={target_str}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp2).await;
+    assert!(body.contains("已注册"), "重复注册应给提示：{body}");
+    let ids = skillkit_core::list_project_ids(&skillkit_core::Paths::new(dir.path().to_path_buf()))
+        .unwrap();
+    assert_eq!(ids.len(), 1, "重复注册不应新增 toml");
 }
