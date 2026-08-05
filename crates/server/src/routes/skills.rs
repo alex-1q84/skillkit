@@ -25,6 +25,7 @@ pub struct SkillsTpl<'a> {
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
+    pub scope: String,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -39,6 +40,7 @@ pub struct SkillsMainTpl<'a> {
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
+    pub scope: String,
 }
 
 pub async fn page(
@@ -46,22 +48,25 @@ pub async fn page(
     Path(token): Path<String>,
     Query(q): Query<SkillsQuery>,
 ) -> Response {
-    render_skills(
+    render_skills_with_scope(
         state,
         token,
         None,
         q.is_fragment(),
         q.selected_list(),
         q.profile_filter(),
+        q.scope_filter(),
     )
 }
 
-/// 数据准备：建 skill_id→profile 反向 map（一次遍历），按 profile_filter 过滤 skill 列表。
-/// filter 空 = 全部（含 global）；非空 = OR 语义（属任一选中 profile 的 local skill，global 不显示）。
+/// 数据准备：建 skill_id→profile 反向 map（一次遍历），按 profile_filter + scope_filter 过滤 skill 列表。
+/// profile_filter 空 = 全部（含 global）；非空 = OR 语义（属任一选中 profile 的 local skill，global 不显示）。
+/// scope_filter 非空 = 只 global 或只 local。
 #[allow(clippy::type_complexity)] // 元组承载三组返回值，调用方解构
 fn build_skills_view(
     paths: &skillkit_core::Paths,
     profile_filter: &[String],
+    scope_filter: Option<Scope>,
 ) -> skillkit_core::Result<(
     Vec<(SkillMeta, String)>,
     HashMap<String, Vec<String>>,
@@ -84,6 +89,11 @@ fn build_skills_view(
         .skills
         .values()
         .filter(|m| {
+            if let Some(ref s) = scope_filter {
+                if m.scope != *s {
+                    return false;
+                }
+            }
             if profile_filter.is_empty() {
                 true
             } else {
@@ -105,9 +115,33 @@ fn render_skills(
     selected: Vec<String>,
     profile_filter: Vec<String>,
 ) -> Response {
-    match build_skills_view(&state.paths, &profile_filter) {
+    render_skills_with_scope(
+        state,
+        token,
+        summary,
+        fragment,
+        selected,
+        profile_filter,
+        None,
+    )
+}
+
+fn render_skills_with_scope(
+    state: AppState,
+    token: String,
+    summary: Option<&str>,
+    fragment: bool,
+    selected: Vec<String>,
+    profile_filter: Vec<String>,
+    scope_filter: Option<Scope>,
+) -> Response {
+    match build_skills_view(&state.paths, &profile_filter, scope_filter) {
         Ok((skills, profiles_of, all_profile_names)) => {
             let selected_csv = selected.join(",");
+            let scope_str = scope_filter
+                .as_ref()
+                .map(Scope::to_string)
+                .unwrap_or_default();
             let rendered = if fragment {
                 SkillsMainTpl {
                     token: &token,
@@ -118,6 +152,7 @@ fn render_skills(
                     profiles_of,
                     all_profile_names,
                     selected_csv,
+                    scope: scope_str,
                 }
                 .render()
             } else {
@@ -130,6 +165,7 @@ fn render_skills(
                     profiles_of,
                     all_profile_names,
                     selected_csv,
+                    scope: scope_str,
                 }
                 .render()
             };
@@ -628,7 +664,7 @@ mod tests {
         .unwrap();
 
         // 全部（filter 空）：含 global
-        let (all, m, _) = build_skills_view(&p, &[]).unwrap();
+        let (all, m, _) = build_skills_view(&p, &[], None).unwrap();
         assert_eq!(all.len(), 3);
         assert_eq!(
             m.get("dc/fe").cloned().unwrap_or_default(),
@@ -637,7 +673,7 @@ mod tests {
         assert!(!m.contains_key("dc/g"), "global 不在反向 map");
 
         // 过滤 fe：只 local 且属 fe 的（global 不显示）
-        let (filtered, _, _) = build_skills_view(&p, &["fe".into()]).unwrap();
+        let (filtered, _, _) = build_skills_view(&p, &["fe".into()], None).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0.id, "dc/fe");
     }
@@ -694,6 +730,7 @@ mod tests {
             profiles_of,
             all_profile_names: vec!["fe".into()],
             selected_csv: "dc/fe".into(),
+            scope: String::new(),
         }
         .render()
         .unwrap();

@@ -20,8 +20,20 @@
     <span id="upgrade-all-indicator" class="htmx-indicator">升级中…</span>
   </form>
 
+  {# 过滤条：scope 筛选（全部 / global / local）+ profile 筛选 #}
+  <div class="filter-chips" id="skill-scope-filter">
+    <a class="chip{% if scope.is_empty() && profile_filter.is_empty() %} on{% endif %}"
+       hx-get="/{{ token }}/skills?fragment=1{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
+       hx-target="main" hx-swap="innerHTML">全部</a>
+    <a class="chip{% if scope == "global" %} on{% endif %}"
+       hx-get="/{{ token }}/skills?fragment=1&amp;scope=global{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
+       hx-target="main" hx-swap="innerHTML">global</a>
+    <a class="chip{% if scope == "local" %} on{% endif %}"
+       hx-get="/{{ token }}/skills?fragment=1&amp;scope=local{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
+       hx-target="main" hx-swap="innerHTML">local</a>
+  </div>
   {# profile 过滤条：「全部」含 global；点具体 profile 只显属它的 local skill #}
-  <div class="filter-chips" id="skill-filter">
+  <div class="filter-chips" id="skill-profile-filter">
     <a class="chip{% if profile_filter.is_empty() %} on{% endif %}"
        hx-get="/{{ token }}/skills?fragment=1{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
        hx-target="main" hx-swap="innerHTML">全部</a>

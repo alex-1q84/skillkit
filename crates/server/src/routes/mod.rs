@@ -48,6 +48,9 @@ pub struct SkillsQuery {
     pub selected: Option<String>,
     #[serde(default)]
     pub profiles: Option<String>,
+    /// 按 scope 筛选：global | local。None=全部。
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 impl SkillsQuery {
@@ -59,6 +62,13 @@ impl SkillsQuery {
     }
     pub fn profile_filter(&self) -> Vec<String> {
         parse_csv(self.profiles.as_deref())
+    }
+    pub fn scope_filter(&self) -> Option<skillkit_core::Scope> {
+        match self.scope.as_deref() {
+            Some("global") => Some(skillkit_core::Scope::Global),
+            Some("local") => Some(skillkit_core::Scope::Local),
+            _ => None,
+        }
     }
 }
 
