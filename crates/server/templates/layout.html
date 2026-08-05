@@ -31,7 +31,10 @@
     es.addEventListener('changed', function () {
       // scan 浮层开时跳过整页刷新（注册写 toml 触发 SSE，刷 main 会清浮层，破坏连续注册）
       if (document.querySelector('.scan-flyout')) return;
-      htmx.ajax('GET', location.pathname + '?fragment=1', { target: 'main', swap: 'innerHTML' });
+      // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1
+      var params = new URLSearchParams(location.search);
+      params.set('fragment', '1');
+      htmx.ajax('GET', location.pathname + '?' + params.toString(), { target: 'main', swap: 'innerHTML' });
     });
 
     // ===== 目录浏览浮层关闭：✕ / 点遮罩 / ESC（纯 UI 收起，不涉业务） =====
