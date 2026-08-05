@@ -7,10 +7,6 @@
 <section class="card">
   <h2>{{ profile.name }}</h2>
   <p>{{ profile.description }}</p>
-  <form hx-post="/{{ token }}/profiles/{{ profile.name }}/skills" hx-target="#skills-{{ profile.name }}" hx-swap="outerHTML">
-    <input name="id" placeholder="source/skill" required>
-    <button>add</button>
-  </form>
   <div id="skills-{{ profile.name }}">
     {% include "fragments/profile_skills.html" %}
   </div>
