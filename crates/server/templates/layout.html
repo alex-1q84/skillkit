@@ -152,6 +152,29 @@
       refreshSkillBatch();
     }
     document.body.addEventListener('htmx:afterSettle', refreshSkillBatch);
+
+    // ===== 写操作错误 toast（4xx 响应不刷页，弹提示框）=====
+    function showToast(msg) {
+      var t = document.getElementById('toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'toast';
+        t.className = 'toast';
+        document.body.appendChild(t);
+      }
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4500);
+    }
+    document.body.addEventListener('htmx:afterRequest', function (e) {
+      var xhr = e.detail && e.detail.xhr;
+      if (xhr && xhr.status >= 400) {
+        var msg = '操作失败';
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch (_) {}
+        showToast(msg);
+      }
+    });
   </script>
 </body>
 </html>

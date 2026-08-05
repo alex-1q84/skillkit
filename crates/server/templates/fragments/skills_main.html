@@ -36,6 +36,7 @@
     <span>已选 <b id="skill-batch-count">{{ selected.len() }}</b></span>
     <select name="profile">{% for name in &all_profile_names %}<option>{{ name }}</option>{% endfor %}</select>
     <button>归入</button>
+    <button type="button" hx-post="/{{ token }}/skills/unassign" hx-include="#skill-batch" hx-target="body" hx-swap="outerHTML">移出</button>
   </form>
   <form id="skill-batch-new" class="batch-bar"{% if selected.is_empty() %} style="display:none"{% endif %}
         hx-post="/{{ token }}/skills/assign-new" hx-target="body" hx-swap="outerHTML">

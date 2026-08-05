@@ -403,3 +403,7 @@ a.chip { text-decoration: none; color: var(--ink-2); }
 .batch-bar { background: var(--surface-2); border: 1px dashed var(--line); padding: 6px 8px; border-radius: 4px; margin: 6px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #skills tr.selected td { background: var(--accent-soft); }
 #skills tr[data-id] { cursor: pointer; }
+
+/* 错误 toast（写操作失败弹提示框，不刷页）*/
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--danger); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 100; max-width: 80vw; font-size: 14px; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

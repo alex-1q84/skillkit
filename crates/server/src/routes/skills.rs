@@ -9,7 +9,7 @@ use serde::Deserialize;
 use skillkit_core::{registry::SkillMeta, Candidate, Registry, Scope, SourcesStore};
 use std::collections::HashMap;
 
-use crate::routes::SkillsQuery;
+use crate::routes::{error_response, SkillsQuery};
 use crate::AppState;
 
 #[derive(Template)]
@@ -179,11 +179,11 @@ pub async fn find(
         }
         Ok(Err(e)) => {
             tracing::error!(error = ?e, "find 失败：{}", q.q);
-            Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
+            error_response("搜索失败，检查网络/Node 后重试")
         }
         Err(e) => {
             tracing::error!(error = ?e, "find join 失败：{}", q.q);
-            Html("<p class=\"err\">搜索失败，检查网络/Node 后重试</p>").into_response()
+            error_response("搜索失败，检查网络/Node 后重试")
         }
     }
 }
@@ -263,12 +263,11 @@ pub async fn install_candidate(
             vec![],
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
-            Html("<p class=\"err\">该 skill 已安装，可在列表中 upgrade 或 remove</p>")
-                .into_response()
+            error_response("该 skill 已安装，可在列表中 upgrade 或 remove")
         }
         Err(e) => {
             tracing::error!(error = ?e, "install-candidate 失败：{}", f.spec);
-            Html("<p class=\"err\">安装失败，检查网络/Node 后重试</p>").into_response()
+            error_response("安装失败，检查网络/Node 后重试")
         }
     }
 }
@@ -315,7 +314,7 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
         }
         Err(e) => {
             tracing::error!(error = ?e, "import 失败");
-            Html("<p class=\"err\">导入失败</p>").into_response()
+            error_response("导入失败")
         }
     }
 }
@@ -338,7 +337,7 @@ pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String
         }
         Err(e) => {
             tracing::error!(error = ?e, "upgrade-all 失败");
-            Html("<p class=\"err\">批量升级失败</p>").into_response()
+            error_response("批量升级失败")
         }
     }
 }
@@ -357,6 +356,66 @@ fn apply_assign(
         }
     }
     Ok(())
+}
+
+/// 批量移出核心：循环 remove_skill，SkillNotInstalled（不属该 profile）跳过，其余抛错。
+fn apply_unassign(
+    profile: &mut skillkit_core::Profile,
+    ids: &[String],
+) -> skillkit_core::Result<()> {
+    for id in ids {
+        match profile.remove_skill(id) {
+            Ok(()) | Err(skillkit_core::SkillkitError::SkillNotInstalled { .. }) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// 批量移出 profile。body: profile=<名>&id=<...>。从 profile 移除 ids（不属的跳过）。返回完整 Skills 页。
+pub async fn unassign(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<SkillsQuery>,
+    body: Bytes,
+) -> Response {
+    let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let name = pairs
+        .iter()
+        .find(|(k, _)| k == "profile")
+        .map(|(_, v)| v.clone());
+    let ids: Vec<String> = pairs
+        .iter()
+        .filter(|(k, _)| k == "id")
+        .map(|(_, v)| v.clone())
+        .collect();
+    let Some(name) = name else {
+        return error_response("缺少 profile");
+    };
+    if ids.is_empty() {
+        return error_response("缺少 id");
+    }
+    match skillkit_core::Profile::load(&state.paths, &name) {
+        Ok(mut p) => {
+            if let Err(e) = apply_unassign(&mut p, &ids) {
+                return error_response(format!("移出失败：{e}"));
+            }
+            if p.save(&state.paths).is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            render_skills(
+                state,
+                token,
+                None,
+                false,
+                q.selected_list(),
+                q.profile_filter(),
+            )
+        }
+        Err(_) => error_response(format!("profile {name} 不存在")),
+    }
 }
 
 /// 批量归入已有 profile。body: profile=<名>&id=<...>（id 重复 key）。返回完整 Skills 页（透传 selected/profiles）。
@@ -379,16 +438,16 @@ pub async fn assign(
         .map(|(_, v)| v.clone())
         .collect();
     let Some(name) = name else {
-        return Html("<p class=\"err\">缺少 profile</p>").into_response();
+        return error_response("缺少 profile");
     };
     if ids.is_empty() {
-        return Html("<p class=\"err\">缺少 id</p>").into_response();
+        return error_response("缺少 id");
     }
     let reg = Registry::load(&state.paths).unwrap_or_default();
     match skillkit_core::Profile::load(&state.paths, &name) {
         Ok(mut p) => {
             if let Err(e) = apply_assign(&mut p, &ids, &reg) {
-                return Html(format!(r#"<p class="err">归入失败：{e}</p>"#)).into_response();
+                return error_response(format!("归入失败：{e}"));
             }
             if p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -402,10 +461,7 @@ pub async fn assign(
                 q.profile_filter(),
             )
         }
-        Err(_) => Html(format!(
-            r#"<p class="err">profile {name} 不存在，改用新建或先创建</p>"#
-        ))
-        .into_response(),
+        Err(_) => error_response(format!("profile {name} 不存在，改用新建或先创建")),
     }
 }
 
@@ -424,7 +480,7 @@ pub async fn assign_new(
         .find(|(k, _)| k == "name")
         .map(|(_, v)| v.clone())
     else {
-        return Html("<p class=\"err\">缺少 name</p>").into_response();
+        return error_response("缺少 name");
     };
     let ids: Vec<String> = pairs
         .iter()
@@ -432,10 +488,7 @@ pub async fn assign_new(
         .map(|(_, v)| v.clone())
         .collect();
     if skillkit_core::Profile::load(&state.paths, &name).is_ok() {
-        return Html(format!(
-            r#"<p class="err">profile {name} 已存在，改用归入或换名</p>"#
-        ))
-        .into_response();
+        return error_response(format!("profile {name} 已存在，改用归入或换名"));
     }
     let reg = Registry::load(&state.paths).unwrap_or_default();
     let mut p = skillkit_core::Profile {
@@ -511,7 +564,7 @@ pub async fn rescope(
         }
         Err(e) => {
             tracing::error!(error = ?e, "GUI rescope 失败：{id}");
-            Html(format!(r#"<p class="err">rescope 失败：{e}</p>"#)).into_response()
+            error_response(format!("rescope 失败：{e}"))
         }
     }
 }

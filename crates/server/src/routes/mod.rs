@@ -1,4 +1,6 @@
 //! 受保护路由装配（/{token}/ 前缀）。各视图 handler 在子模块。
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use serde::Deserialize;
@@ -10,6 +12,18 @@ pub mod projects;
 pub mod skills;
 pub mod sources;
 pub mod sse;
+
+/// 写操作错误统一响应：422 + Json{"error"}（htmx 收到 4xx 不 swap，layout JS 弹 toast，不刷页）。
+pub fn error_response(msg: impl std::fmt::Display) -> Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(std::collections::HashMap::from([(
+            "error".to_string(),
+            msg.to_string(),
+        )])),
+    )
+        .into_response()
+}
 
 /// 页面 GET 的 query：?fragment=1 时返回纯 main 内容（SSE 刷新用），
 /// 否则返回完整页（含 nav 的 layout）。保证 SSE 刷新响应不含 nav，防导航重复。
@@ -75,6 +89,7 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/skills/upgrade-all", post(skills::upgrade_all))
         .route("/{token}/skills/assign", post(skills::assign))
         .route("/{token}/skills/assign-new", post(skills::assign_new))
+        .route("/{token}/skills/unassign", post(skills::unassign))
         .route("/{token}/skills/rescope", post(skills::rescope))
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
