@@ -23,10 +23,10 @@
   {# profile 过滤条：「全部」含 global；点具体 profile 只显属它的 local skill #}
   <div class="filter-chips" id="skill-filter">
     <a class="chip{% if profile_filter.is_empty() %} on{% endif %}"
-       hx-get="/{{ token }}/skills?fragment=1{% for s in &selected %}&amp;selected={{ s }}{% endfor %}"
+       hx-get="/{{ token }}/skills?fragment=1{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
        hx-target="main" hx-swap="innerHTML">全部</a>
     {% for name in &all_profile_names %}<a class="chip{% if profile_filter.contains(name) %} on{% endif %}"
-       hx-get="/{{ token }}/skills?fragment=1&amp;profiles={{ name }}{% for s in &selected %}&amp;selected={{ s }}{% endfor %}"
+       hx-get="/{{ token }}/skills?fragment=1&amp;profiles={{ name }}{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
        hx-target="main" hx-swap="innerHTML">{{ name }}</a>{% endfor %}
   </div>
 

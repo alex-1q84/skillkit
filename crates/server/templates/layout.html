@@ -122,11 +122,10 @@
         .call(document.querySelectorAll('#skills tr.selected[data-id]'))
         .map(function (tr) { return tr.dataset.id; });
     }
-    // 选中态写回地址栏（重复 key ?selected=a&selected=b），replaceState 不触发刷新
+    // 选中态写回地址栏（CSV ?selected=a,b），replaceState 不触发刷新
     function syncSelectedUrl() {
       var params = new URLSearchParams(location.search);
-      params.delete('selected');
-      selectedSkillIds().forEach(function (id) { params.append('selected', id); });
+      params.set('selected', selectedSkillIds().join(','));
       history.replaceState(null, '', location.pathname + '?' + params.toString());
     }
     function refreshSkillBatch() {

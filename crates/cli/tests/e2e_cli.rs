@@ -532,3 +532,66 @@ fn project_remove_yes_deletes_registration_but_keeps_project_dir() {
     assert!(proj_dir.exists(), "项目目录必须保留");
     assert!(proj_dir.join("README.md").exists(), "项目文件必须保留");
 }
+
+// ===========================================================================
+// rescope
+// ===========================================================================
+
+#[test]
+fn rescope_same_scope_is_noop_and_locks_json_schema() {
+    // Given：import 一个 unmanaged skill（canonical 在 ~/.agents/skills/ → 登记为 global）
+    let env = Env::new();
+    env.make_skill(".agents/skills", "legacy-r");
+    env.skillkit().args(["import-existing"]).assert().success();
+    // When：rescope global→global（同 scope，noop），--yes --json 跳过确认
+    let out = env
+        .skillkit()
+        .args(["rescope", "unmanaged/legacy-r", "global", "--yes", "--json"])
+        .assert()
+        .success();
+    // Then：--json schema 锁定（id/from/to/affected_*），affected 空（noop）
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["id"], "unmanaged/legacy-r");
+    assert_eq!(v["from"], "global");
+    assert_eq!(v["to"], "global");
+    assert!(v["affected_profiles"].as_array().unwrap().is_empty());
+    assert!(v["affected_projects"].as_array().unwrap().is_empty());
+}
+
+#[test]
+#[ignore = "需真跑 npx skills 装 local source；cargo test -- --ignored 手动跑"]
+fn rescope_local_to_global_lands_symlink_and_clears_profile() {
+    // Given：装 managed local skill + 归入 profile fe
+    let env = Env::new();
+    install_local_skill(&env, "dc", "pdf");
+    env.skillkit()
+        .args(["profile", "create", "fe"])
+        .assert()
+        .success();
+    env.skillkit()
+        .args(["profile", "add-skill", "fe", "dc/pdf"])
+        .assert()
+        .success();
+    // When：rescope local→global --json（隐含跳过确认）
+    let out = env
+        .skillkit()
+        .args(["rescope", "dc/pdf", "global", "--json"])
+        .assert()
+        .success();
+    // Then：from/to + affected_profiles 含 fe（引用被清）
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["from"], "local");
+    assert_eq!(v["to"], "global");
+    assert_eq!(v["affected_profiles"][0], "fe");
+    // registry scope=global
+    let reg: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.home_path().join(".skillkit/registry.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reg["skills"]["dc/pdf"]["scope"], "global");
+    // 全局 symlink 在位（ensure_global_claude 建）
+    assert!(
+        env.home_path().join(".agents/skills/pdf").is_symlink(),
+        "local→global 应建全局 symlink"
+    );
+}

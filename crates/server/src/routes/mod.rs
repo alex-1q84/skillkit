@@ -26,14 +26,14 @@ impl FragmentQuery {
 
 /// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles（过滤）。
 /// 不复用 FragmentQuery——后者只有 fragment 字段，serde 默认忽略未知字段，不扩就静默丢参。
-/// selected/profiles 用重复 key（?selected=a&selected=b），serde_urlencoded 直入 Vec。
+/// selected/profiles 用 CSV（?selected=a,b），serde_urlencoded 对 Vec 字段的单值会拒绝，CSV 单/多值都兼容。
 #[derive(Debug, Default, Deserialize)]
 pub struct SkillsQuery {
     pub fragment: Option<String>,
     #[serde(default)]
-    pub selected: Vec<String>,
+    pub selected: Option<String>,
     #[serde(default)]
-    pub profiles: Vec<String>,
+    pub profiles: Option<String>,
 }
 
 impl SkillsQuery {
@@ -41,11 +41,21 @@ impl SkillsQuery {
         self.fragment.as_deref() == Some("1")
     }
     pub fn selected_list(&self) -> Vec<String> {
-        self.selected.clone()
+        parse_csv(self.selected.as_deref())
     }
     pub fn profile_filter(&self) -> Vec<String> {
-        self.profiles.clone()
+        parse_csv(self.profiles.as_deref())
     }
+}
+
+fn parse_csv(o: Option<&str>) -> Vec<String> {
+    o.map(|s| {
+        s.split(',')
+            .filter(|x| !x.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 pub fn protected() -> Router<AppState> {

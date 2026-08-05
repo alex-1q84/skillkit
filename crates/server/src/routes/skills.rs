@@ -24,6 +24,7 @@ pub struct SkillsTpl<'a> {
     /// skill_id → 所属 profile name 列表（反向 map，一次遍历现算）。global 不在（不属 profile）。
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
+    pub selected_csv: String,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -37,6 +38,7 @@ pub struct SkillsMainTpl<'a> {
     pub profile_filter: Vec<String>,
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
+    pub selected_csv: String,
 }
 
 pub async fn page(
@@ -105,6 +107,7 @@ fn render_skills(
 ) -> Response {
     match build_skills_view(&state.paths, &profile_filter) {
         Ok((skills, profiles_of, all_profile_names)) => {
+            let selected_csv = selected.join(",");
             let rendered = if fragment {
                 SkillsMainTpl {
                     token: &token,
@@ -114,6 +117,7 @@ fn render_skills(
                     profile_filter,
                     profiles_of,
                     all_profile_names,
+                    selected_csv,
                 }
                 .render()
             } else {
@@ -125,6 +129,7 @@ fn render_skills(
                     profile_filter,
                     profiles_of,
                     all_profile_names,
+                    selected_csv,
                 }
                 .render()
             };
@@ -635,6 +640,7 @@ mod tests {
             profile_filter: vec![],
             profiles_of,
             all_profile_names: vec!["fe".into()],
+            selected_csv: "dc/fe".into(),
         }
         .render()
         .unwrap();

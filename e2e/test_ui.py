@@ -140,10 +140,24 @@ def test_skills_upgrade_button_only_managed(page, base):
     by_id = {r["id"]: r["html"] for r in rows}
     assert "/upgrade" in by_id["dc/real"], "managed 行应有 upgrade 按钮"
     assert "/upgrade" not in by_id["unmanaged/legacy"], "unmanaged 行不应有 upgrade 按钮"
-    # install 表单每行都有（M2 install 能力保留的回归）
-    assert "/install" in by_id["dc/real"], "managed 行应有 install 表单"
-    assert "/install" in by_id["unmanaged/legacy"], "unmanaged 行应有 install 表单"
+    # rescope 按钮每行都有（Task 9 scope 转移；install 表单已删，入口在 find 流程）
+    assert "rescope" in by_id["dc/real"], "managed 行应有 rescope 按钮"
+    assert "rescope" in by_id["unmanaged/legacy"], "unmanaged 行应有 rescope 按钮"
     assert_nav_single(page)
+
+
+def test_skills_toggle_local_row_highlights(page, base):
+    """Skills 视图：点 local 行 toggle 选中 + 批量栏显示（Task 9 高亮 toggle JS）。"""
+    import re
+    row = page.locator(ROWS_SEL).filter(has_text="dc/real")
+    # local 行点击 toggle（global 行 unmanaged/legacy 无 onclick，不可选）
+    row.locator("td:first-child").click()
+    expect(row).to_have_class(re.compile(r"\bselected\b"))
+    expect(page.locator("#skill-batch")).to_be_visible()
+    expect(page.locator("#skill-batch-count")).to_have_text("1")
+    # 再点取消
+    row.locator("td:first-child").click()
+    expect(page.locator("#skill-batch")).to_be_hidden()
 
 
 TESTS = [
@@ -153,6 +167,7 @@ TESTS = [
     ("test_source_add_delete_cycle", test_source_add_delete_cycle, "sources"),
     ("test_skills_unmanaged_badge", test_skills_unmanaged_badge, "skills"),
     ("test_skills_upgrade_button_only_managed", test_skills_upgrade_button_only_managed, "skills"),
+    ("test_skills_toggle_local_row_highlights", test_skills_toggle_local_row_highlights, "skills"),
 ]
 
 
