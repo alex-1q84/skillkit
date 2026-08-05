@@ -41,7 +41,37 @@ pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport
             })
         }
         (Scope::Global, Scope::Local) => {
-            // remove 不加守卫（meta.scope 仍 Global，安全删链）→ 改 scope=Local → save
+            // 找 unmanaged 的真实 canonical（全局位置的真实目录，非 symlink）。
+            // 不信任 registry canonical_path——它可能漂移（历史 import + 后续移动，如 docx）。
+            // managed global 的全局位置是 symlink（→ 池子 canonical），real_canon 找不到，走 remove。
+            let name = &meta.name;
+            let agents_link = paths.agents_skills_dir().join(name);
+            let claude_link = paths.claude_skills_dir().join(name);
+            let real_canon = [agents_link.as_path(), claude_link.as_path()]
+                .into_iter()
+                .find(|p| {
+                    std::fs::symlink_metadata(p)
+                        .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
+                        .unwrap_or(false)
+                });
+            if let Some(src) = real_canon {
+                // unmanaged：迁移真实 canonical 到池子（managed-local）
+                let target = paths.skillkit_skills_dir().join(name);
+                if target.exists() {
+                    // 池子已有同名 canonical（旧 managed 残留/历史迁移）；src（全局位置）是重复，删它，canonical 用池子。
+                    // 风险：若 src 与 target 内容不一致会丢 src 独有数据——rescope 语义是 canonical 进池子，
+                    // 池子已有即视为权威 canonical，全局位置副本冗余。
+                    std::fs::remove_dir_all(src)?;
+                } else {
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::rename(src, &target)?;
+                }
+                meta.canonical_path = target.to_string_lossy().into_owned();
+            }
+            // 撤全局 symlink：managed 撤 agents+claude symlink；unmanaged 迁移后原位置已不存在（跳过）。
+            // remove 不加守卫，meta.scope 仍 Global 时安全。
             crate::symlink::remove_global_claude(paths, &meta)?;
             meta.scope = Scope::Local;
             reg.upsert(meta.clone());
@@ -191,5 +221,126 @@ mod tests {
             set_scope(&p, "nope/x", Scope::Global),
             Err(SkillkitError::SkillNotInstalled { .. })
         ));
+    }
+
+    #[test]
+    fn unmanaged_global_to_local_migrates_canonical() {
+        // unmanaged：canonical 在 ~/.agents/skills/（真实目录，import 登记的 global skill 模型）
+        let p = paths();
+        let name = "gskill";
+        let agents_canon = p.agents_skills_dir().join(name);
+        std::fs::create_dir_all(&agents_canon).unwrap();
+        std::fs::write(agents_canon.join("SKILL.md"), "x").unwrap();
+        let meta = SkillMeta {
+            id: "unmanaged/gskill".into(),
+            name: name.into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: "t".into(),
+            canonical_path: agents_canon.to_string_lossy().into_owned(),
+        };
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(meta);
+        reg.save(&p).unwrap();
+
+        let report = set_scope(&p, "unmanaged/gskill", Scope::Local).unwrap();
+        assert!(report.affected_profiles.is_empty());
+        // canonical 迁移到池子，原全局位置清空
+        let pool_canon = p.skillkit_skills_dir().join(name);
+        assert!(pool_canon.exists(), "canonical 迁到池子");
+        assert!(pool_canon.join("SKILL.md").exists(), "内容随迁移");
+        assert!(!agents_canon.exists(), "原 ~/.agents/skills/<name> 已迁走");
+        // registry canonical_path 更新 + scope=local
+        let m2 = Registry::load(&p)
+            .unwrap()
+            .get("unmanaged/gskill")
+            .unwrap()
+            .clone();
+        assert_eq!(m2.scope, Scope::Local);
+        assert_eq!(m2.canonical_path, pool_canon.to_string_lossy());
+    }
+
+    #[test]
+    fn global_to_local_finds_real_canonical_even_if_registry_drifts() {
+        // docx 类场景：registry canonical_path 漂移到 ~/.agents/skills/<name>（不存在），
+        // 实际物理在 ~/.claude/skills/<name>（真实目录）。set_scope 扫物理位置找真实 canonical 迁移。
+        let p = paths();
+        let name = "drift";
+        let claude_canon = p.claude_skills_dir().join(name);
+        std::fs::create_dir_all(&claude_canon).unwrap();
+        std::fs::write(claude_canon.join("SKILL.md"), "x").unwrap();
+        let meta = SkillMeta {
+            id: "unmanaged/drift".into(),
+            name: name.into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: "t".into(),
+            canonical_path: p
+                .agents_skills_dir()
+                .join(name)
+                .to_string_lossy()
+                .into_owned(),
+        };
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(meta);
+        reg.save(&p).unwrap();
+
+        let report = set_scope(&p, "unmanaged/drift", Scope::Local).unwrap();
+        assert!(report.affected_profiles.is_empty());
+        let pool_canon = p.skillkit_skills_dir().join(name);
+        assert!(
+            pool_canon.exists(),
+            "物理迁到池子（即使 registry canonical 漂移）"
+        );
+        assert!(pool_canon.join("SKILL.md").exists());
+        assert!(!claude_canon.exists(), "原 claude 位置已迁走");
+        let m2 = Registry::load(&p)
+            .unwrap()
+            .get("unmanaged/drift")
+            .unwrap()
+            .clone();
+        assert_eq!(m2.scope, Scope::Local);
+        assert_eq!(m2.canonical_path, pool_canon.to_string_lossy());
+    }
+
+    #[test]
+    fn global_to_local_dedupes_when_pool_already_has_canonical() {
+        // 池子已有 <name>（旧 managed 残留）+ 全局位置也有 <name>（重复）→ 删全局重复，canonical 用池子
+        let p = paths();
+        let name = "dup";
+        let pool = p.skillkit_skills_dir().join(name);
+        std::fs::create_dir_all(&pool).unwrap();
+        std::fs::write(pool.join("SKILL.md"), "x").unwrap();
+        let claude = p.claude_skills_dir().join(name);
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::write(claude.join("SKILL.md"), "x").unwrap();
+        let meta = SkillMeta {
+            id: "unmanaged/dup".into(),
+            name: name.into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: "t".into(),
+            canonical_path: claude.to_string_lossy().into_owned(),
+        };
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(meta);
+        reg.save(&p).unwrap();
+
+        set_scope(&p, "unmanaged/dup", Scope::Local).unwrap();
+        assert!(pool.exists(), "池子 canonical 保留");
+        assert!(!claude.exists(), "全局重复已删");
+        let m2 = Registry::load(&p)
+            .unwrap()
+            .get("unmanaged/dup")
+            .unwrap()
+            .clone();
+        assert_eq!(m2.scope, Scope::Local);
+        assert_eq!(m2.canonical_path, pool.to_string_lossy());
     }
 }
