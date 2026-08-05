@@ -72,9 +72,15 @@ pub fn protected() -> Router<AppState> {
         )
         .route("/{token}/skills/import", post(skills::import))
         .route("/{token}/skills/upgrade-all", post(skills::upgrade_all))
+        .route("/{token}/skills/assign", post(skills::assign))
+        .route("/{token}/skills/assign-new", post(skills::assign_new))
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
         .route("/{token}/skills/{id}/upgrade", post(skills::upgrade))
+        .route(
+            "/{token}/skills/{id}/profile/{name}",
+            delete(skills::delete_profile),
+        )
         .route(
             "/{token}/profiles",
             get(profiles::page).post(profiles::create),
