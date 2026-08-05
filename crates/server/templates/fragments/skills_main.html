@@ -48,7 +48,7 @@
   <thead><tr><th>id</th><th>scope</th><th>所属 profile</th><th>ops</th></tr></thead>
   <tbody>
   {% for (s, enc) in skills %}
-  <tr {% if selected.contains(&s.id) %}class="selected" {% endif %}data-id="{{ s.id }}"{% if s.is_local() %} onclick="toggleSkill(this)"{% endif %}>
+  <tr {% if selected.contains(&s.id) && s.is_local() %}class="selected" {% endif %}data-id="{{ s.id }}"{% if s.is_local() %} onclick="toggleSkill(event,this)"{% endif %}>
     <td>{{ s.id }}{% if s.computed_hash.is_none() %} <span class="badge">unmanaged</span>{% endif %}</td>
     <td>{{ s.scope }}</td>
     <td>

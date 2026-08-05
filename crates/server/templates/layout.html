@@ -146,7 +146,9 @@
         });
       });
     }
-    function toggleSkill(tr) {
+    function toggleSkill(e, tr) {
+      // 忽略按钮点击（→global/→local/upgrade/× 不触发行 toggle）
+      if (e.target.tagName === 'BUTTON') return;
       tr.classList.toggle('selected');
       syncSelectedUrl();
       refreshSkillBatch();
