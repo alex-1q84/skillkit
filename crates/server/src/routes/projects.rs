@@ -324,7 +324,8 @@ pub async fn set_profiles(
             }
         }
     }
-    proj.set_profiles(&names, &profiles);
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap_or_default();
+    proj.set_profiles(&names, &profiles, &reg);
     if proj.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
