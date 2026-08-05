@@ -112,6 +112,44 @@
         setupComplete(input, input.dataset.complete);
       });
     });
+
+    // ===== Skills 视图：高亮 toggle + 批量归入（选中态写回 URL，SSE/过滤 chip 透传） =====
+    function selectedSkillIds() {
+      return Array.prototype.slice
+        .call(document.querySelectorAll('#skills tr.selected[data-id]'))
+        .map(function (tr) { return tr.dataset.id; });
+    }
+    // 选中态写回地址栏（重复 key ?selected=a&selected=b），replaceState 不触发刷新
+    function syncSelectedUrl() {
+      var params = new URLSearchParams(location.search);
+      params.delete('selected');
+      selectedSkillIds().forEach(function (id) { params.append('selected', id); });
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
+    function refreshSkillBatch() {
+      var ids = selectedSkillIds();
+      document.querySelectorAll('.batch-bar').forEach(function (el) {
+        el.style.display = ids.length ? '' : 'none';
+      });
+      var cnt = document.getElementById('skill-batch-count');
+      if (cnt) cnt.textContent = ids.length;
+      ['skill-batch', 'skill-batch-new'].forEach(function (fid) {
+        var form = document.getElementById(fid);
+        if (!form) return;
+        Array.prototype.slice.call(form.querySelectorAll('input[name=id]')).forEach(function (e) { e.remove(); });
+        ids.forEach(function (id) {
+          var i = document.createElement('input');
+          i.type = 'hidden'; i.name = 'id'; i.value = id;
+          form.appendChild(i);
+        });
+      });
+    }
+    function toggleSkill(tr) {
+      tr.classList.toggle('selected');
+      syncSelectedUrl();
+      refreshSkillBatch();
+    }
+    document.body.addEventListener('htmx:afterSettle', refreshSkillBatch);
   </script>
 </body>
 </html>

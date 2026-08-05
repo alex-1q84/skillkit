@@ -14,7 +14,6 @@ use crate::AppState;
 
 #[derive(Template)]
 #[template(path = "skills.html")]
-#[allow(dead_code)] // selected/profile_filter/profiles_of/all_profile_names 在 Task 9 模板改造时读取
 pub struct SkillsTpl<'a> {
     pub token: &'a str,
     /// (meta, id 的 path 编码)——id 形如 source/skill，/ 须编码为 %2F 才能放进单段路径参数。
@@ -30,7 +29,6 @@ pub struct SkillsTpl<'a> {
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
 #[derive(Template)]
 #[template(path = "fragments/skills_main.html")]
-#[allow(dead_code)] // 同 SkillsTpl，Task 9 模板读取
 pub struct SkillsMainTpl<'a> {
     pub token: &'a str,
     pub skills: Vec<(SkillMeta, String)>,
@@ -481,6 +479,44 @@ pub async fn delete_profile(
     }
 }
 
+/// GUI scope 转移：POST /skills/rescope?to=global|local&id=<enc>。直接执行 + summary 横幅（去 hx-confirm 方向）。
+pub async fn rescope(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<RescopeGuiQuery>,
+) -> Response {
+    let id = q.id.replace("%2F", "/");
+    let target = if q.to.as_deref() == Some("global") {
+        Scope::Global
+    } else {
+        Scope::Local
+    };
+    match skillkit_core::set_scope(&state.paths, &id, target) {
+        Ok(report) => {
+            let summary = match target {
+                Scope::Global => format!(
+                    "✓ 已转全局，从 {} 个 profile / {} 个项目移除引用；以下项目需重新 apply：{}",
+                    report.affected_profiles.len(),
+                    report.affected_projects.len(),
+                    report.affected_projects.join(", ")
+                ),
+                Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
+            };
+            render_skills(state, token, Some(&summary), false, vec![], vec![])
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "GUI rescope 失败：{id}");
+            Html(format!(r#"<p class="err">rescope 失败：{e}</p>"#)).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RescopeGuiQuery {
+    pub to: Option<String>,
+    pub id: String,
+}
+
 fn render_str(rendered: askama::Result<String>) -> Response {
     match rendered {
         Ok(html) => Html(html).into_response(),
@@ -568,5 +604,43 @@ mod tests {
         ));
         // 原子：fe 仍在（原本就在），g 没进
         assert_eq!(profile.skills, vec!["dc/fe".to_string()]);
+    }
+
+    fn meta(id: &str, scope: Scope) -> SkillMeta {
+        SkillMeta {
+            id: id.into(),
+            name: id.rsplit('/').next().unwrap().into(),
+            source: id.split('/').next().unwrap().into(),
+            scope,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "2026-08-04T00:00:00Z".into(),
+            canonical_path: format!(
+                "~/.skillkit/.agents/skills/{}",
+                id.rsplit('/').next().unwrap()
+            ),
+        }
+    }
+
+    #[test]
+    fn skills_main_renders_profile_chips_and_selected_row() {
+        let skills = vec![(meta("dc/fe", Scope::Local), "dc%2Ffe".into())];
+        let mut profiles_of = std::collections::HashMap::new();
+        profiles_of.insert("dc/fe".into(), vec!["fe".into()]);
+        let html = SkillsMainTpl {
+            token: "tok",
+            skills,
+            summary: None,
+            selected: vec!["dc/fe".into()],
+            profile_filter: vec![],
+            profiles_of,
+            all_profile_names: vec!["fe".into()],
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("dc/fe"), "id 渲染");
+        assert!(html.contains("selected"), "选中行有 selected 标记");
+        assert!(html.contains("fe"), "所属 profile chip");
+        assert!(html.contains("assign"), "归入端点");
     }
 }

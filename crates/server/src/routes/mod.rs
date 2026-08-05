@@ -26,13 +26,14 @@ impl FragmentQuery {
 
 /// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles（过滤）。
 /// 不复用 FragmentQuery——后者只有 fragment 字段，serde 默认忽略未知字段，不扩就静默丢参。
+/// selected/profiles 用重复 key（?selected=a&selected=b），serde_urlencoded 直入 Vec。
 #[derive(Debug, Default, Deserialize)]
 pub struct SkillsQuery {
     pub fragment: Option<String>,
     #[serde(default)]
-    pub selected: Option<String>,
+    pub selected: Vec<String>,
     #[serde(default)]
-    pub profiles: Option<String>,
+    pub profiles: Vec<String>,
 }
 
 impl SkillsQuery {
@@ -40,21 +41,11 @@ impl SkillsQuery {
         self.fragment.as_deref() == Some("1")
     }
     pub fn selected_list(&self) -> Vec<String> {
-        parse_csv(self.selected.as_deref())
+        self.selected.clone()
     }
     pub fn profile_filter(&self) -> Vec<String> {
-        parse_csv(self.profiles.as_deref())
+        self.profiles.clone()
     }
-}
-
-fn parse_csv(o: Option<&str>) -> Vec<String> {
-    o.map(|s| {
-        s.split(',')
-            .filter(|x| !x.is_empty())
-            .map(str::to_string)
-            .collect()
-    })
-    .unwrap_or_default()
 }
 
 pub fn protected() -> Router<AppState> {
@@ -74,6 +65,7 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/skills/upgrade-all", post(skills::upgrade_all))
         .route("/{token}/skills/assign", post(skills::assign))
         .route("/{token}/skills/assign-new", post(skills::assign_new))
+        .route("/{token}/skills/rescope", post(skills::rescope))
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
         .route("/{token}/skills/{id}/upgrade", post(skills::upgrade))

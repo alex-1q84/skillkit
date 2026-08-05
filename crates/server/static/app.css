@@ -393,3 +393,13 @@ ul.project-list .muted { color: var(--ink-3); font-family: var(--mono); font-siz
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .complete-item:hover, .complete-item.active { background: var(--accent-soft); color: var(--accent); }
+
+/* Skills 视图：profile 归属管理（过滤 chips / 批量栏 / 选中高亮） */
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; font-size: 12px; background: var(--surface); cursor: pointer; }
+a.chip { text-decoration: none; color: var(--ink-2); }
+.chip.on { background: var(--accent); color: var(--surface); border-color: transparent; }
+.chip .x { background: none; border: none; color: var(--danger); cursor: pointer; padding: 0 0 0 2px; font-size: 12px; line-height: 1; }
+.batch-bar { background: var(--surface-2); border: 1px dashed var(--line); padding: 6px 8px; border-radius: 4px; margin: 6px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#skills tr.selected td { background: var(--accent-soft); }
+#skills tr[data-id] { cursor: pointer; }

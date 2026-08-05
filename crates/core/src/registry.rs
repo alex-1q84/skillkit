@@ -33,6 +33,16 @@ pub struct SkillMeta {
     pub canonical_path: String,
 }
 
+impl SkillMeta {
+    /// 模板用：判断 scope（避免 Askama 表达式里写 Scope::Local 变体路径不可靠）。
+    pub fn is_local(&self) -> bool {
+        self.scope == Scope::Local
+    }
+    pub fn is_global(&self) -> bool {
+        self.scope == Scope::Global
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Registry {
     pub skills: BTreeMap<String, SkillMeta>,
