@@ -18,3 +18,4 @@ e2e/__pycache__/
 
 # superpowers brainstorm mockup（visual companion 产物，不入库）
 .superpowers/
+.claude/worktrees/
