@@ -100,7 +100,8 @@ pub async fn add_skill(
 ) -> Response {
     match Profile::load(&state.paths, &name) {
         Ok(mut p) => {
-            if p.add_skill(&f.id).is_err() || p.save(&state.paths).is_err() {
+            let reg = skillkit_core::Registry::load(&state.paths).unwrap_or_default();
+            if p.add_skill(&f.id, &reg).is_err() || p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
             let rendered = ProfileSkillsTpl {

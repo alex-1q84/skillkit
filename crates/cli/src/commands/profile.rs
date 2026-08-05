@@ -1,6 +1,6 @@
 //! profile 子命令：调 core 的 Profile。
 use clap::{Args, Subcommand};
-use skillkit_core::{list_profile_names, paths::Paths, Profile};
+use skillkit_core::{list_profile_names, paths::Paths, Profile, Registry};
 
 #[derive(Args)]
 pub struct ProfileCmd {
@@ -37,8 +37,9 @@ pub fn run(cmd: ProfileCmd) -> anyhow::Result<()> {
             println!("✓ 已创建 profile：{name}");
         }
         ProfileSub::AddSkill { profile, id } => {
+            let registry = Registry::load(&paths)?;
             let mut p = Profile::load(&paths, &profile)?;
-            p.add_skill(&id)?;
+            p.add_skill(&id, &registry)?;
             p.save(&paths)?;
             println!("✓ {profile} 已加 {id}");
         }
