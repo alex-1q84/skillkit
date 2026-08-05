@@ -10,6 +10,7 @@ pub mod paths;
 pub mod profile;
 pub mod project;
 pub mod registry;
+pub mod scope;
 pub mod source;
 pub mod symlink;
 pub mod upgrade;
@@ -24,11 +25,12 @@ pub use install::{install, uninstall};
 pub use lock::FileLock;
 pub use npx::Candidate;
 pub use paths::Paths;
-pub use profile::{list_names as list_profile_names, Profile};
+pub use profile::{list_names as list_profile_names, skill_profiles, Profile};
 pub use project::{list_ids as list_project_ids, scan_projects, Project};
 pub use registry::{Registry, Scope, SkillMeta};
+pub use scope::{set_scope, RescopeReport};
 pub use source::{derive_source_name, Source, SourcesStore};
-pub use symlink::ensure_global_claude;
+pub use symlink::{ensure_global_claude, remove_global_claude};
 pub use upgrade::{
     upgrade_all, upgrade_skill, UpgradeAllReport, UpgradeBlockedInfo, UpgradeReport,
 };
