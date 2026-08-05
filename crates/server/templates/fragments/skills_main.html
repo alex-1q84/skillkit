@@ -19,21 +19,52 @@
     <button>全部升级</button>
     <span id="upgrade-all-indicator" class="htmx-indicator">升级中…</span>
   </form>
-  <table class="data">
-  <thead><tr><th>id</th><th>scope</th><th>source</th><th>version</th><th>computed_hash</th><th>ops</th></tr></thead>
+
+  {# profile 过滤条：「全部」含 global；点具体 profile 只显属它的 local skill #}
+  <div class="filter-chips" id="skill-filter">
+    <a class="chip{% if profile_filter.is_empty() %} on{% endif %}"
+       hx-get="/{{ token }}/skills?fragment=1{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
+       hx-target="main" hx-swap="innerHTML">全部</a>
+    {% for name in &all_profile_names %}<a class="chip{% if profile_filter.contains(name) %} on{% endif %}"
+       hx-get="/{{ token }}/skills?fragment=1&amp;profiles={{ name }}{% if !selected_csv.is_empty() %}&amp;selected={{ selected_csv }}{% endif %}"
+       hx-target="main" hx-swap="innerHTML">{{ name }}</a>{% endfor %}
+  </div>
+
+  {# 批量栏（有选中才显示）；隐藏 id 由 layout.html 的 toggleSkill JS 填充 #}
+  <form id="skill-batch" class="batch-bar"{% if selected.is_empty() %} style="display:none"{% endif %}
+        hx-post="/{{ token }}/skills/assign" hx-target="body" hx-swap="outerHTML">
+    <span>已选 <b id="skill-batch-count">{{ selected.len() }}</b></span>
+    <select name="profile">{% for name in &all_profile_names %}<option>{{ name }}</option>{% endfor %}</select>
+    <button>归入</button>
+  </form>
+  <form id="skill-batch-new" class="batch-bar"{% if selected.is_empty() %} style="display:none"{% endif %}
+        hx-post="/{{ token }}/skills/assign-new" hx-target="body" hx-swap="outerHTML">
+    <input name="name" placeholder="新 profile 名">
+    <button>新建并归入</button>
+  </form>
+
+  <table class="data" id="skills">
+  <thead><tr><th>id</th><th>scope</th><th>所属 profile</th><th>ops</th></tr></thead>
   <tbody>
   {% for (s, enc) in skills %}
-  <tr>
+  <tr {% if selected.contains(&s.id) %}class="selected" {% endif %}data-id="{{ s.id }}"{% if s.is_local() %} onclick="toggleSkill(this)"{% endif %}>
     <td>{{ s.id }}{% if s.computed_hash.is_none() %} <span class="badge">unmanaged</span>{% endif %}</td>
     <td>{{ s.scope }}</td>
-    <td>{{ s.source }}</td>
-    <td>{{ s.version.as_deref().unwrap_or("-") }}</td>
-    <td>{{ s.computed_hash.as_deref().unwrap_or("-") }}</td>
     <td>
-      <form class="inline" hx-post="/{{ token }}/skills/{{ enc }}/install" hx-target="body" hx-swap="outerHTML">
-        <select name="scope"><option value="local">local</option><option value="global">global</option></select>
-        <button>install</button>
-      </form>
+      {% if let Some(ps) = profiles_of.get(s.id.as_str()) %}
+        {% for p in ps %}<span class="chip">{{ p }}<button class="x"
+          hx-delete="/{{ token }}/skills/{{ enc }}/profile/{{ p }}"
+          hx-target="body" hx-swap="outerHTML">×</button></span>{% endfor %}
+      {% else %}—{% endif %}
+    </td>
+    <td>
+      {% if s.is_local() %}
+      <button class="u" hx-post="/{{ token }}/skills/rescope?to=global&amp;id={{ enc }}"
+              hx-target="body" hx-swap="outerHTML">→global</button>
+      {% else %}
+      <button class="u" hx-post="/{{ token }}/skills/rescope?to=local&amp;id={{ enc }}"
+              hx-target="body" hx-swap="outerHTML">→local</button>
+      {% endif %}
       {% if s.computed_hash.is_some() %}
       <button class="u" hx-post="/{{ token }}/skills/{{ enc }}/upgrade" hx-target="body" hx-swap="outerHTML">upgrade</button>
       {% endif %}

@@ -24,6 +24,40 @@ impl FragmentQuery {
     }
 }
 
+/// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles（过滤）。
+/// 不复用 FragmentQuery——后者只有 fragment 字段，serde 默认忽略未知字段，不扩就静默丢参。
+/// selected/profiles 用 CSV（?selected=a,b），serde_urlencoded 对 Vec 字段的单值会拒绝，CSV 单/多值都兼容。
+#[derive(Debug, Default, Deserialize)]
+pub struct SkillsQuery {
+    pub fragment: Option<String>,
+    #[serde(default)]
+    pub selected: Option<String>,
+    #[serde(default)]
+    pub profiles: Option<String>,
+}
+
+impl SkillsQuery {
+    pub fn is_fragment(&self) -> bool {
+        self.fragment.as_deref() == Some("1")
+    }
+    pub fn selected_list(&self) -> Vec<String> {
+        parse_csv(self.selected.as_deref())
+    }
+    pub fn profile_filter(&self) -> Vec<String> {
+        parse_csv(self.profiles.as_deref())
+    }
+}
+
+fn parse_csv(o: Option<&str>) -> Vec<String> {
+    o.map(|s| {
+        s.split(',')
+            .filter(|x| !x.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 pub fn protected() -> Router<AppState> {
     Router::new()
         .route("/{token}", get(crate::home))
@@ -39,9 +73,16 @@ pub fn protected() -> Router<AppState> {
         )
         .route("/{token}/skills/import", post(skills::import))
         .route("/{token}/skills/upgrade-all", post(skills::upgrade_all))
+        .route("/{token}/skills/assign", post(skills::assign))
+        .route("/{token}/skills/assign-new", post(skills::assign_new))
+        .route("/{token}/skills/rescope", post(skills::rescope))
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
         .route("/{token}/skills/{id}/upgrade", post(skills::upgrade))
+        .route(
+            "/{token}/skills/{id}/profile/{name}",
+            delete(skills::delete_profile),
+        )
         .route(
             "/{token}/profiles",
             get(profiles::page).post(profiles::create),

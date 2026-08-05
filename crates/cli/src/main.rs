@@ -6,6 +6,7 @@ use commands::import::{run as run_import, ImportExistingCmd};
 use commands::install::InstallCmd;
 use commands::profile::ProfileCmd;
 use commands::project::ProjectCmd;
+use commands::rescope::RescopeCmd;
 use commands::serve::ServeCmd;
 use commands::skill::{FindCmd, ListCmd, RemoveCmd};
 use commands::source::SourceCmd;
@@ -30,6 +31,8 @@ enum Cmd {
     List(ListCmd),
     /// 卸载 skill（替换 uninstall）
     Remove(RemoveCmd),
+    /// 转移 skill scope（global↔local）
+    Rescope(RescopeCmd),
     /// 扫描导入现有 skill（存量目录登记进 registry）
     ImportExisting(ImportExistingCmd),
     /// profile 候选集管理
@@ -52,6 +55,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Find(cmd) => commands::skill::run_find(cmd)?,
         Cmd::List(cmd) => commands::skill::run_list(cmd)?,
         Cmd::Remove(cmd) => commands::skill::run_remove(cmd)?,
+        Cmd::Rescope(cmd) => commands::rescope::run_rescope(cmd)?,
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
         Cmd::Project(cmd) => commands::project::run(cmd)?,

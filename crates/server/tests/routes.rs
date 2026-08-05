@@ -1542,3 +1542,191 @@ async fn projects_add_rejects_duplicate_path() {
         .unwrap();
     assert_eq!(ids.len(), 1, "重复注册不应新增 toml");
 }
+
+// ===== Skills 视图 scope/profile 管理 HTTP 契约（Task 13） =====
+
+fn seed_skill(paths: &skillkit_core::Paths, id: &str, scope: skillkit_core::Scope) {
+    let name = id.rsplit('/').next().unwrap();
+    let canon = paths.skillkit_skills_dir().join(name);
+    std::fs::create_dir_all(&canon).unwrap();
+    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+    let mut reg = skillkit_core::Registry::load(paths).unwrap();
+    reg.upsert(skillkit_core::SkillMeta {
+        id: id.into(),
+        name: name.into(),
+        source: id.split('/').next().unwrap().into(),
+        scope,
+        version: None,
+        computed_hash: Some("abc".into()),
+        installed_at: "t".into(),
+        canonical_path: canon.to_string_lossy().into_owned(),
+    });
+    reg.save(paths).unwrap();
+}
+
+fn mk_state(dir: &tempfile::TempDir) -> skillkit_server::AppState {
+    skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    }
+}
+
+#[tokio::test]
+async fn skills_selected_param_highlights_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills?selected=demo%2Ffe&fragment=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(
+        body.contains(r#"class="selected""#),
+        "selected 行高亮：{body}"
+    );
+}
+
+#[tokio::test]
+async fn skills_profiles_filter_hides_global() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    seed_skill(&state.paths, "demo/g", skillkit_core::Scope::Global);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/fe".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills?profiles=fe&fragment=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("demo/fe"), "fe 属 profile 显示");
+    assert!(!body.contains("demo/g"), "global 不显示");
+}
+
+#[tokio::test]
+async fn skills_assign_persists_to_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec![],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/assign")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("profile=fe&id=demo%2Ffe"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        skillkit_core::Profile::load(&state.paths, "fe")
+            .unwrap()
+            .skills,
+        vec!["demo/fe".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn skills_assign_new_refuses_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/keep".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state.clone());
+    // assign-new 同名 → 拒绝（不覆盖清空已有 skills）
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/assign-new")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("name=fe&id=demo%2Ffe"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("已存在"), "同名应拒绝：{body}");
+    // 原 skills 不被清空
+    assert_eq!(
+        skillkit_core::Profile::load(&state.paths, "fe")
+            .unwrap()
+            .skills,
+        vec!["demo/keep".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn skills_rescope_global_clears_profile_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/fe".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/rescope?to=global&id=demo%2Ffe")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        skillkit_core::Registry::load(&state.paths)
+            .unwrap()
+            .get("demo/fe")
+            .unwrap()
+            .scope,
+        skillkit_core::Scope::Global
+    );
+    assert!(
+        skillkit_core::Profile::load(&state.paths, "fe")
+            .unwrap()
+            .skills
+            .is_empty(),
+        "local→global 清 profile 引用"
+    );
+}

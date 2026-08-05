@@ -40,13 +40,14 @@ fn m1_full_flow_apply_and_status() {
     install_local_bare(&paths, "dc/logseq");
     install_local_bare(&paths, "dc/dataviz");
 
+    let reg = Registry::load(&paths).unwrap();
     let mut profile = Profile {
         name: "frontend".into(),
         description: String::new(),
         skills: vec![],
     };
-    profile.add_skill("dc/logseq").unwrap();
-    profile.add_skill("dc/dataviz").unwrap();
+    profile.add_skill("dc/logseq", &reg).unwrap();
+    profile.add_skill("dc/dataviz", &reg).unwrap();
     profile.save(&paths).unwrap();
 
     let mut proj = Project {
@@ -62,7 +63,6 @@ fn m1_full_flow_apply_and_status() {
     proj.save(&paths).unwrap();
 
     // status（apply 前 missing=2）
-    let reg = Registry::load(&paths).unwrap();
     let diff = skillkit_core::apply::compute_diff(&proj, &reg).unwrap();
     let st = build_status(&paths, &proj, &diff).unwrap();
     assert_eq!(st.missing.len(), 2);

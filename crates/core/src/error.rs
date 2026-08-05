@@ -14,6 +14,11 @@ pub enum SkillkitError {
     #[error("skill 已存在：{id}")]
     SkillAlreadyInstalled { id: String },
 
+    #[error(
+        "skill 是 global，不属 profile/project：{id}（先 `skillkit rescope {id} local` 再归入）"
+    )]
+    SkillIsGlobal { id: String },
+
     #[error("外部工具调用失败：{message}")]
     Tool { message: String },
 
@@ -57,3 +62,20 @@ pub fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
 }
 
 pub type Result<T> = std::result::Result<T, SkillkitError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn skill_is_global_message_guides_rescope() {
+        let e = SkillkitError::SkillIsGlobal {
+            id: "skills.sh/foo".into(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("global"), "文案点明 global：{msg}");
+        assert!(
+            msg.contains("rescope skills.sh/foo local"),
+            "文案给出 rescope 引导：{msg}"
+        );
+    }
+}

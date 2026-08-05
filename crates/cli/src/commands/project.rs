@@ -56,6 +56,7 @@ enum ProjectSub {
     List,
 }
 
+#[allow(clippy::too_many_lines)] // CLI dispatch，分支多固有长
 pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
     let paths = Paths::production();
     match cmd.cmd {
@@ -96,8 +97,9 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             );
         }
         ProjectSub::AddSkill { project, id } => {
+            let registry = skillkit_core::Registry::load(&paths)?;
             let mut proj = Project::load(&paths, &project)?;
-            proj.add_skill(&id)?;
+            proj.add_skill(&id, &registry)?;
             proj.save(&paths)?;
             println!("✓ {project} 已加 {id}");
         }

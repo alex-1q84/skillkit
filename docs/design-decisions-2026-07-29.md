@@ -174,3 +174,25 @@
 - 不加 sync-agents、只改 default 治新项目：旧项目（多为 claude-code）永远漏，当前痛点不解。
 
 **后续提醒**：项目级 `.agents/skills/` 是 spec 原本没有的新概念（spec 的 .agents 全是全局池子），本次新增，仅只读发现；若未来要让它参与 apply 落地，需另立决策。
+
+## 决策 17：global skill 与 profile/project 归属互斥（core 硬约束）
+
+**背景**：原 §8.4 允许 profile 引用 global skill、§10.1 允许 global 进 installed_skills，两层语义都不纯（global 是全局基座却混进场景组合/项目声明）。
+
+**决策**：global skill 不属任何 profile、不进任何 project.installed_skills；core 在 `profile.add_skill`/`project.add_skill`/`project.set_profiles` 加 `&Registry` 参数做 scope 校验（global 拒绝/跳过），文案引导先 `rescope` 到 local。
+
+**理由**：心智模型纯粹（global=全局基座独立、local=场景/项目组合成员），职责一刀切；apply 简化成只管 local 落地。`add_skill`/`set_profiles` 加 registry 参数是必要代价（scope 只存 registry）。
+
+**否定的备选**：仅 GUI 引导不校验——CLI/外部调用能绕过，profile/project 留脏数据。
+
+## 决策 18：scope 转移副作用模型 + 风险对齐确认
+
+**背景**：需要 local↔global 互转，且转移伴随物理落地变更 + 归属清理。
+
+**决策**：
+- 转移 = 改 scope + 立即同步物理落地（local→global 建 `ensure_global_claude`；global→local 撤，新增 `remove_global_claude` 不加 scope 守卫避免改 scope 后 no-op 留悬空链）。
+- local→global 自动从所有 profile/project 移除引用（不可逆，但可重新归入恢复）；global→local 可逆（rescope global 恢复）。
+- 风险对齐：两方向 CLI 都默认交互确认；GUI 直接执行 + 横幅明示影响（去 hx-confirm 方向，commit b15d13e）。
+- 原子回滚范围 = scope + registry + symlink；profile/project 多文件移除失败给可恢复文案，不声称全量原子。
+
+**理由**：转移即生效（跟 install/remove 一致）；`remove_global_claude` 不加守卫是规避 set_scope 先改 scope 再撤链的顺序陷阱（spec review P2-A）。

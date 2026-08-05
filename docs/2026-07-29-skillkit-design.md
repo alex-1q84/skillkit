@@ -233,7 +233,7 @@ skills = [
 ]
 ```
 
-profile 只存 skill id 列表，不重复 source/scope/version 等信息（这些在 registry 里）。profile 是"这类场景可能用到的 skill 清单"，可提交到共享仓库让团队复用。profile 主要承载 local skill 的组合（per-project 生效的部分）；global skill 是全局基座，通常单独 `install` 管理，不依赖 profile 反复引用，但 profile 也允许引用 global skill（apply 时幂等确保其全局存在）。
+profile 只存 skill id 列表，不重复 source/scope/version 等信息（这些在 registry 里）。profile 是"这类场景可能用到的 skill 清单"，可提交到共享仓库让团队复用。profile 只承载 local skill 的组合（per-project 生效的部分）；**global skill 不属于任何 profile**（core 硬约束：`profile.add_skill` 校验拒绝 global skill，引导先 `skillkit rescope <id> local` 再归入）。
 
 ### 8.5 Project（项目实例）— `~/.skillkit/projects/<project-id>.toml`
 
@@ -270,7 +270,7 @@ installed_skills = [
 - `skillkit project add-skill <project> <id>` / `remove-skill <project> <id>`：精确增删单个 skill。
 - profile 新增 skill 不会自动装到项目——用户必须显式选择，符合"精确控制"语义。
 
-这样 profile 是"粗分类 + 批量操作入口"，project 的 `installed_skills` 是"精确事实"，两者职责分明。
+这样 profile 是“粗分类 + 批量操作入口”，project 的 `installed_skills` 是“精确事实”，两者职责分明。profile 与 `project.installed_skills` 均只含 local skill，global 不进二者。
 
 ## 10. apply 机制
 
@@ -286,7 +286,7 @@ installed_skills = [
 
 apply 按 skill 的 scope 分两条路径：
 
-- **scope=global**：install 时已全局落地，apply 只做幂等检查（确保 canonical + Claude symlink 在位），**不在项目目录落地**——进 `installed_skills` 是为了声明"该项目依赖这个全局基座"，不产生 per-project 副作用。
+- **scope=global**：install/rescope 时即全局落地，**apply 完全不碰 global**（global 不进任何 `project.installed_skills`）。apply 只处理 scope=local 的 skill 落地。
 - **scope=local**：按 §10.2 流程在项目 `<agent>/skills/` 落地（symlink/copy + `.git/info/exclude`）。
 
 ### 10.2 apply 流程
@@ -343,6 +343,7 @@ skillkit install add <source> <skill> [--scope global|local] [--json]   # global
 skillkit uninstall <id>
 skillkit upgrade <id> | --all [--yes] [--json]  # npx skills update + 重读 computed_hash；冲突列受影响项目，--yes 跳过
 skillkit list [--scope global|local] [--json]
+skillkit rescope <id> <global|local> [--yes] [--json]   # scope 转移 + 同步物理落地；两方向默认确认
 
 # profile（粗分类候选集）
 skillkit profile create <name>
@@ -381,7 +382,7 @@ AI agent 友好性：
 | 视图 | 内容 | 核心操作 |
 |------|------|------|
 | Sources | 安装源注册表 | 增删源、浏览源内可用 skill |
-| Skills | registry 总览（global/local 分类、版本、来源） | 搜索筛选、install/upgrade/uninstall |
+| Skills | registry 总览 + scope 转移 + profile 归属管理（chips/过滤/批量归入/移除） | rescope、批量归入 profile、按 profile 过滤、chip 移除、install/upgrade/remove |
 | Profiles | profile 列表 + 每个 profile 的 skill 组成 | 勾选拖拽组装 profile、创建新 profile |
 | Projects | 项目卡片：applied_profiles + installed_skills + shared(只读) + status | 应用 profile、精确增删 skill、一键 apply、查看 diff |
 

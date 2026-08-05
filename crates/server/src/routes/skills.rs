@@ -1,13 +1,15 @@
 //! Skills 视图：registry 总览 + install/upgrade/uninstall。
 use askama::Template;
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
 use skillkit_core::{registry::SkillMeta, Candidate, Registry, Scope, SourcesStore};
+use std::collections::HashMap;
 
-use crate::routes::FragmentQuery;
+use crate::routes::SkillsQuery;
 use crate::AppState;
 
 #[derive(Template)]
@@ -17,6 +19,12 @@ pub struct SkillsTpl<'a> {
     /// (meta, id 的 path 编码)——id 形如 source/skill，/ 须编码为 %2F 才能放进单段路径参数。
     pub skills: Vec<(SkillMeta, String)>,
     pub summary: Option<&'a str>,
+    pub selected: Vec<String>,
+    pub profile_filter: Vec<String>,
+    /// skill_id → 所属 profile name 列表（反向 map，一次遍历现算）。global 不在（不属 profile）。
+    pub profiles_of: HashMap<String, Vec<String>>,
+    pub all_profile_names: Vec<String>,
+    pub selected_csv: String,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -26,14 +34,67 @@ pub struct SkillsMainTpl<'a> {
     pub token: &'a str,
     pub skills: Vec<(SkillMeta, String)>,
     pub summary: Option<&'a str>,
+    pub selected: Vec<String>,
+    pub profile_filter: Vec<String>,
+    pub profiles_of: HashMap<String, Vec<String>>,
+    pub all_profile_names: Vec<String>,
+    pub selected_csv: String,
 }
 
 pub async fn page(
     State(state): State<AppState>,
     Path(token): Path<String>,
-    Query(q): Query<FragmentQuery>,
+    Query(q): Query<SkillsQuery>,
 ) -> Response {
-    render_skills(state, token, None, q.is_fragment())
+    render_skills(
+        state,
+        token,
+        None,
+        q.is_fragment(),
+        q.selected_list(),
+        q.profile_filter(),
+    )
+}
+
+/// 数据准备：建 skill_id→profile 反向 map（一次遍历），按 profile_filter 过滤 skill 列表。
+/// filter 空 = 全部（含 global）；非空 = OR 语义（属任一选中 profile 的 local skill，global 不显示）。
+#[allow(clippy::type_complexity)] // 元组承载三组返回值，调用方解构
+fn build_skills_view(
+    paths: &skillkit_core::Paths,
+    profile_filter: &[String],
+) -> skillkit_core::Result<(
+    Vec<(SkillMeta, String)>,
+    HashMap<String, Vec<String>>,
+    Vec<String>,
+)> {
+    let reg = Registry::load(paths)?;
+    let all_profile_names = skillkit_core::list_profile_names(paths).unwrap_or_default();
+    let mut profiles_of: HashMap<String, Vec<String>> = HashMap::new();
+    for name in &all_profile_names {
+        if let Ok(p) = skillkit_core::Profile::load(paths, name) {
+            for id in &p.skills {
+                profiles_of
+                    .entry(id.clone())
+                    .or_default()
+                    .push(name.clone());
+            }
+        }
+    }
+    let skills: Vec<(SkillMeta, String)> = reg
+        .skills
+        .values()
+        .filter(|m| {
+            if profile_filter.is_empty() {
+                true
+            } else {
+                profiles_of
+                    .get(&m.id)
+                    .is_some_and(|ps| ps.iter().any(|p| profile_filter.contains(p)))
+            }
+        })
+        .map(|m| (m.clone(), m.id.replace('/', "%2F")))
+        .collect();
+    Ok((skills, profiles_of, all_profile_names))
 }
 
 fn render_skills(
@@ -41,19 +102,22 @@ fn render_skills(
     token: String,
     summary: Option<&str>,
     fragment: bool,
+    selected: Vec<String>,
+    profile_filter: Vec<String>,
 ) -> Response {
-    match Registry::load(&state.paths) {
-        Ok(reg) => {
-            let skills: Vec<(SkillMeta, String)> = reg
-                .skills
-                .values()
-                .map(|m| (m.clone(), m.id.replace('/', "%2F")))
-                .collect();
+    match build_skills_view(&state.paths, &profile_filter) {
+        Ok((skills, profiles_of, all_profile_names)) => {
+            let selected_csv = selected.join(",");
             let rendered = if fragment {
                 SkillsMainTpl {
                     token: &token,
                     skills,
                     summary,
+                    selected,
+                    profile_filter,
+                    profiles_of,
+                    all_profile_names,
+                    selected_csv,
                 }
                 .render()
             } else {
@@ -61,13 +125,18 @@ fn render_skills(
                     token: &token,
                     skills,
                     summary,
+                    selected,
+                    profile_filter,
+                    profiles_of,
+                    all_profile_names,
+                    selected_csv,
                 }
                 .render()
             };
             render_str(rendered)
         }
         Err(e) => {
-            tracing::error!(error = ?e, "加载 registry 失败");
+            tracing::error!(error = ?e, "加载 skills 视图失败");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -156,7 +225,7 @@ pub async fn install(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match skillkit_core::install(&state.paths, source, skill, &package, scope) {
-        Ok(_) => render_skills(state, token, None, false),
+        Ok(_) => render_skills(state, token, None, false, vec![], vec![]),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -190,6 +259,8 @@ pub async fn install_candidate(
             token,
             Some(&format!("✓ 已安装 skills.sh/{}", f.skill)),
             false,
+            vec![],
+            vec![],
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
             Html("<p class=\"err\">该 skill 已安装，可在列表中 upgrade 或 remove</p>")
@@ -207,7 +278,7 @@ pub async fn uninstall(
     Path((token, id)): Path<(String, String)>,
 ) -> Response {
     match skillkit_core::uninstall(&state.paths, &id) {
-        Ok(()) => render_skills(state, token, None, false),
+        Ok(()) => render_skills(state, token, None, false, vec![], vec![]),
         Err(e) => {
             tracing::error!(error = ?e, "uninstall 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -221,7 +292,7 @@ pub async fn upgrade(
 ) -> Response {
     // GUI 场景已显式点击升级，yes=true 不二次确认
     match skillkit_core::upgrade_skill(&state.paths, &id, true) {
-        Ok(_) => render_skills(state, token, None, false),
+        Ok(_) => render_skills(state, token, None, false, vec![], vec![]),
         Err(e) => {
             tracing::error!(error = ?e, "upgrade 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -240,7 +311,7 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
                 r.reinstalled.len(),
                 r.skipped.len()
             );
-            render_skills(state, token, Some(&summary), false)
+            render_skills(state, token, Some(&summary), false, vec![], vec![])
         }
         Err(e) => {
             tracing::error!(error = ?e, "import 失败");
@@ -263,13 +334,192 @@ pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String
                     b.affected.join(", ")
                 );
             }
-            render_skills(state, token, Some(&summary), false)
+            render_skills(state, token, Some(&summary), false, vec![], vec![])
         }
         Err(e) => {
             tracing::error!(error = ?e, "upgrade-all 失败");
             Html("<p class=\"err\">批量升级失败</p>").into_response()
         }
     }
+}
+
+/// 批量归入核心：循环 add_skill，SkillAlreadyInstalled 跳过、其余（如 SkillIsGlobal）抛错不 save（原子）。
+fn apply_assign(
+    profile: &mut skillkit_core::Profile,
+    ids: &[String],
+    reg: &skillkit_core::Registry,
+) -> skillkit_core::Result<()> {
+    for id in ids {
+        match profile.add_skill(id, reg) {
+            // 成功 / 已装（SkillAlreadyInstalled）静默跳过；其余错误（如 SkillIsGlobal）向上抛
+            Ok(()) | Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// 批量归入已有 profile。body: profile=<名>&id=<...>（id 重复 key）。返回完整 Skills 页（透传 selected/profiles）。
+pub async fn assign(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<SkillsQuery>,
+    body: Bytes,
+) -> Response {
+    let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let name = pairs
+        .iter()
+        .find(|(k, _)| k == "profile")
+        .map(|(_, v)| v.clone());
+    let ids: Vec<String> = pairs
+        .iter()
+        .filter(|(k, _)| k == "id")
+        .map(|(_, v)| v.clone())
+        .collect();
+    let Some(name) = name else {
+        return Html("<p class=\"err\">缺少 profile</p>").into_response();
+    };
+    if ids.is_empty() {
+        return Html("<p class=\"err\">缺少 id</p>").into_response();
+    }
+    let reg = Registry::load(&state.paths).unwrap_or_default();
+    match skillkit_core::Profile::load(&state.paths, &name) {
+        Ok(mut p) => {
+            if let Err(e) = apply_assign(&mut p, &ids, &reg) {
+                return Html(format!(r#"<p class="err">归入失败：{e}</p>"#)).into_response();
+            }
+            if p.save(&state.paths).is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            render_skills(
+                state,
+                token,
+                None,
+                false,
+                q.selected_list(),
+                q.profile_filter(),
+            )
+        }
+        Err(_) => Html(format!(
+            r#"<p class="err">profile {name} 不存在，改用新建或先创建</p>"#
+        ))
+        .into_response(),
+    }
+}
+
+/// 新建 profile 并归入。body: name=<新名>&id=<...>。先校验不存在（防 create 覆盖清空已有 profile）。
+pub async fn assign_new(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<SkillsQuery>,
+    body: Bytes,
+) -> Response {
+    let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    let Some(name) = pairs
+        .iter()
+        .find(|(k, _)| k == "name")
+        .map(|(_, v)| v.clone())
+    else {
+        return Html("<p class=\"err\">缺少 name</p>").into_response();
+    };
+    let ids: Vec<String> = pairs
+        .iter()
+        .filter(|(k, _)| k == "id")
+        .map(|(_, v)| v.clone())
+        .collect();
+    if skillkit_core::Profile::load(&state.paths, &name).is_ok() {
+        return Html(format!(
+            r#"<p class="err">profile {name} 已存在，改用归入或换名</p>"#
+        ))
+        .into_response();
+    }
+    let reg = Registry::load(&state.paths).unwrap_or_default();
+    let mut p = skillkit_core::Profile {
+        name,
+        description: String::new(),
+        skills: vec![],
+    };
+    if let Err(e) = apply_assign(&mut p, &ids, &reg) {
+        return Html(format!(r#"<p class="err">归入失败：{e}</p>"#)).into_response();
+    }
+    if p.save(&state.paths).is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    render_skills(
+        state,
+        token,
+        None,
+        false,
+        q.selected_list(),
+        q.profile_filter(),
+    )
+}
+
+/// chip ×：从 profile 移除单个 skill 归属。返回完整 Skills 页。
+pub async fn delete_profile(
+    State(state): State<AppState>,
+    Path((token, id, name)): Path<(String, String, String)>,
+    Query(q): Query<SkillsQuery>,
+) -> Response {
+    let id = id.replace("%2F", "/");
+    match skillkit_core::Profile::load(&state.paths, &name) {
+        Ok(mut p) => {
+            if p.remove_skill(&id).is_err() || p.save(&state.paths).is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            render_skills(
+                state,
+                token,
+                None,
+                false,
+                q.selected_list(),
+                q.profile_filter(),
+            )
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// GUI scope 转移：POST /skills/rescope?to=global|local&id=<enc>。直接执行 + summary 横幅（去 hx-confirm 方向）。
+pub async fn rescope(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<RescopeGuiQuery>,
+) -> Response {
+    let id = q.id.replace("%2F", "/");
+    let target = if q.to.as_deref() == Some("global") {
+        Scope::Global
+    } else {
+        Scope::Local
+    };
+    match skillkit_core::set_scope(&state.paths, &id, target) {
+        Ok(report) => {
+            let summary = match target {
+                Scope::Global => format!(
+                    "✓ 已转全局，从 {} 个 profile / {} 个项目移除引用；以下项目需重新 apply：{}",
+                    report.affected_profiles.len(),
+                    report.affected_projects.len(),
+                    report.affected_projects.join(", ")
+                ),
+                Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
+            };
+            render_skills(state, token, Some(&summary), false, vec![], vec![])
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "GUI rescope 失败：{id}");
+            Html(format!(r#"<p class="err">rescope 失败：{e}</p>"#)).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RescopeGuiQuery {
+    pub to: Option<String>,
+    pub id: String,
 }
 
 fn render_str(rendered: askama::Result<String>) -> Response {
@@ -279,5 +529,124 @@ fn render_str(rendered: askama::Result<String>) -> Response {
             tracing::error!(error = ?e, "渲染 skills 模板失败");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skillkit_core::{Paths, Profile, SkillMeta};
+    use tempfile::tempdir;
+
+    fn paths() -> Paths {
+        Paths::new(tempdir().unwrap().path().to_path_buf())
+    }
+
+    fn seed(paths: &Paths, id: &str, scope: Scope) {
+        let mut reg = Registry::load(paths).unwrap_or_default();
+        reg.upsert(SkillMeta {
+            id: id.into(),
+            name: id.rsplit('/').next().unwrap().into(),
+            source: id.split('/').next().unwrap().into(),
+            scope,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "2026-08-04T00:00:00Z".into(),
+            canonical_path: format!(
+                "~/.skillkit/.agents/skills/{}",
+                id.rsplit('/').next().unwrap()
+            ),
+        });
+        reg.save(paths).unwrap();
+    }
+
+    #[test]
+    fn build_view_filters_by_profile_and_maps_reverse() {
+        let p = paths();
+        seed(&p, "dc/fe", Scope::Local);
+        seed(&p, "dc/be", Scope::Local);
+        seed(&p, "dc/g", Scope::Global);
+        Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["dc/fe".into()],
+        }
+        .save(&p)
+        .unwrap();
+
+        // 全部（filter 空）：含 global
+        let (all, m, _) = build_skills_view(&p, &[]).unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(
+            m.get("dc/fe").cloned().unwrap_or_default(),
+            vec!["fe".to_string()]
+        );
+        assert!(!m.contains_key("dc/g"), "global 不在反向 map");
+
+        // 过滤 fe：只 local 且属 fe 的（global 不显示）
+        let (filtered, _, _) = build_skills_view(&p, &["fe".into()]).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].0.id, "dc/fe");
+    }
+
+    #[test]
+    fn apply_assign_skips_dup_but_throws_scope() {
+        let p = paths();
+        seed(&p, "dc/fe", Scope::Local);
+        seed(&p, "dc/g", Scope::Global);
+        let reg = Registry::load(&p).unwrap();
+        let mut profile = Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["dc/fe".into()],
+        };
+
+        // 含已装的 fe（跳过）+ global g（抛错）→ 整批不 save
+        let outcome = apply_assign(&mut profile, &["dc/fe".into(), "dc/g".into()], &reg);
+        assert!(matches!(
+            outcome,
+            Err(skillkit_core::SkillkitError::SkillIsGlobal { .. })
+        ));
+        // 原子：fe 仍在（原本就在），g 没进
+        assert_eq!(profile.skills, vec!["dc/fe".to_string()]);
+    }
+
+    fn meta(id: &str, scope: Scope) -> SkillMeta {
+        SkillMeta {
+            id: id.into(),
+            name: id.rsplit('/').next().unwrap().into(),
+            source: id.split('/').next().unwrap().into(),
+            scope,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "2026-08-04T00:00:00Z".into(),
+            canonical_path: format!(
+                "~/.skillkit/.agents/skills/{}",
+                id.rsplit('/').next().unwrap()
+            ),
+        }
+    }
+
+    #[test]
+    fn skills_main_renders_profile_chips_and_selected_row() {
+        let skills = vec![(meta("dc/fe", Scope::Local), "dc%2Ffe".into())];
+        let mut profiles_of = std::collections::HashMap::new();
+        profiles_of.insert("dc/fe".into(), vec!["fe".into()]);
+        let html = SkillsMainTpl {
+            token: "tok",
+            skills,
+            summary: None,
+            selected: vec!["dc/fe".into()],
+            profile_filter: vec![],
+            profiles_of,
+            all_profile_names: vec!["fe".into()],
+            selected_csv: "dc/fe".into(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("dc/fe"), "id 渲染");
+        assert!(html.contains("selected"), "选中行有 selected 标记");
+        assert!(html.contains("fe"), "所属 profile chip");
+        assert!(html.contains("assign"), "归入端点");
     }
 }

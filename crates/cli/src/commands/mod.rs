@@ -3,6 +3,7 @@ pub mod import;
 pub mod install;
 pub mod profile;
 pub mod project;
+pub mod rescope;
 pub mod serve;
 pub mod skill;
 pub mod source;

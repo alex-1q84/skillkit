@@ -3,6 +3,7 @@
 //! locked_shas 是上次 apply 的基线快照（值为 computed_hash，非版本锁）。
 use crate::error::{atomic_write, Result, SkillkitError};
 use crate::paths::Paths;
+use crate::registry::{Registry, Scope};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -77,7 +78,11 @@ impl Project {
         }
     }
 
-    pub fn add_skill(&mut self, id: &str) -> Result<()> {
+    /// 加 skill：先查 registry 拒绝 global（core 硬约束），再查重。registry 无记录按 Local 兜底。
+    pub fn add_skill(&mut self, id: &str, registry: &Registry) -> Result<()> {
+        if registry.get(id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global {
+            return Err(SkillkitError::SkillIsGlobal { id: id.to_string() });
+        }
         if self.installed_skills.iter().any(|s| s == id) {
             return Err(SkillkitError::SkillAlreadyInstalled { id: id.to_string() });
         }
@@ -106,14 +111,21 @@ impl Project {
     }
 
     /// 设定绑定 profile 集合（替换语义）+ 重算 installed_skills 为所选 profiles 的 skills 并集（去重保序）。
-    /// names 中找不到对应 profile 的条目静默跳过（handler 应先校验存在性并给可读 err）。
-    pub fn set_profiles(&mut self, names: &[String], profiles: &[crate::profile::Profile]) {
+    /// names 中找不到对应 profile 的条目静默跳过；灌入时跳过 scope=global（防 legacy profile 含 global 进 installed_skills）。
+    pub fn set_profiles(
+        &mut self,
+        names: &[String],
+        profiles: &[crate::profile::Profile],
+        registry: &Registry,
+    ) {
         self.applied_profiles = names.to_vec();
         let mut skills: Vec<String> = Vec::new();
         for name in names {
             if let Some(p) = profiles.iter().find(|p| &p.name == name) {
                 for id in &p.skills {
-                    if !skills.contains(id) {
+                    let is_global =
+                        registry.get(id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global;
+                    if !is_global && !skills.contains(id) {
                         skills.push(id.clone());
                     }
                 }
@@ -210,7 +222,7 @@ mod tests {
         let paths = Paths::new(tmp.path().to_path_buf());
         let mut proj = Project::register(PathBuf::from("/tmp/demo"), vec!["claude-code".into()]);
         let id = proj.id.clone();
-        proj.add_skill("dc/logseq").unwrap();
+        proj.add_skill("dc/logseq", &Registry::default()).unwrap();
         proj.apply_profile("frontend", &["dc/dataviz".into(), "dc/logseq".into()]);
         assert_eq!(proj.installed_skills, vec!["dc/logseq", "dc/dataviz"]);
         proj.save(&paths).unwrap();
@@ -275,7 +287,11 @@ mod tests {
             description: String::new(),
             skills: vec!["dc/b".into(), "dc/c".into()], // b 与 fe 重叠
         };
-        proj.set_profiles(&["fe".into(), "base".into()], &[fe, base]);
+        proj.set_profiles(
+            &["fe".into(), "base".into()],
+            &[fe, base],
+            &Registry::default(),
+        );
         assert_eq!(
             proj.applied_profiles,
             vec!["fe".to_string(), "base".to_string()],
@@ -305,12 +321,78 @@ mod tests {
             skills: vec!["dc/z".into()],
         };
         // 改绑只剩 base：fe 的 skill 应被清除（替换语义，可取消绑定）
-        proj.set_profiles(&["base".into()], &[base]);
+        proj.set_profiles(&["base".into()], &[base], &Registry::default());
         assert_eq!(proj.applied_profiles, vec!["base".to_string()]);
         assert_eq!(
             proj.installed_skills,
             vec!["dc/z".to_string()],
             "取消 fe 绑定后其 skill 不再保留"
+        );
+    }
+
+    /// 内存 registry（不 save）：project 测试的 add_skill/set_profiles 用参数传入，不需 load。
+    fn reg_with(id: &str, scope: Scope) -> Registry {
+        let mut reg = Registry::default();
+        reg.upsert(crate::registry::SkillMeta {
+            id: id.into(),
+            name: id.rsplit('/').next().unwrap().into(),
+            source: id.split('/').next().unwrap().into(),
+            scope,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "2026-08-04T00:00:00Z".into(),
+            canonical_path: format!(
+                "~/.skillkit/.agents/skills/{}",
+                id.rsplit('/').next().unwrap()
+            ),
+        });
+        reg
+    }
+
+    #[test]
+    fn add_skill_global_rejected() {
+        let reg = reg_with("skills.sh/g1", Scope::Global);
+        let mut proj = Project {
+            id: "X".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec![],
+            installed_skills: vec![],
+            locked_shas: BTreeMap::new(),
+        };
+        assert!(matches!(
+            proj.add_skill("skills.sh/g1", &reg),
+            Err(SkillkitError::SkillIsGlobal { .. })
+        ));
+    }
+
+    #[test]
+    fn set_profiles_skips_global() {
+        let g = reg_with("dc/g", Scope::Global);
+        let l = reg_with("dc/l", Scope::Local);
+        let mut reg_all = Registry::default();
+        reg_all.upsert(g.get("dc/g").cloned().unwrap());
+        reg_all.upsert(l.get("dc/l").cloned().unwrap());
+        let fe = crate::profile::Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["dc/g".into(), "dc/l".into()],
+        };
+        let mut proj = Project {
+            id: "X".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec![],
+            installed_skills: vec![],
+            locked_shas: BTreeMap::new(),
+        };
+        proj.set_profiles(&["fe".into()], &[fe], &reg_all);
+        assert_eq!(
+            proj.installed_skills,
+            vec!["dc/l".to_string()],
+            "global 被跳过，只留 local"
         );
     }
 
