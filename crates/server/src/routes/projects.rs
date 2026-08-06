@@ -8,8 +8,8 @@ use axum::Form;
 use form_urlencoded::parse;
 use serde::Deserialize;
 use skillkit_core::{
-    build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, Project, Registry,
-    Scope, StatusView,
+    build_status, compute_diff, detect_agents, run_apply, scan_shared, ApplyDiff, ApplyReport,
+    Project, Registry, Scope, StatusView,
 };
 use std::path::{Path as StdPath, PathBuf};
 
@@ -130,9 +130,7 @@ pub async fn add(
             Some("该项目已注册，不可重复注册"),
         );
     }
-    let agents = skillkit_core::config::Config::load(&state.paths)
-        .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
-        .unwrap_or_default();
+    let agents = detect_agents(&abs);
     let proj = Project::register(abs, agents);
     if proj.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -240,9 +238,7 @@ pub async fn toggle(
         }
         false
     } else {
-        let agents = skillkit_core::config::Config::load(&state.paths)
-            .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
-            .unwrap_or_default();
+        let agents = detect_agents(&abs);
         let proj = Project::register(abs, agents);
         if let Err(e) = proj.save(&state.paths) {
             tracing::error!(error = ?e, "toggle 注册失败：{}", f.path);
@@ -279,8 +275,9 @@ pub async fn rebind(
     render_workspace(state, token, proj, false, None)
 }
 
-/// 同步默认 agents：把 proj.agents 设为 Config 当前全 agent。
-/// 用于旧项目（只绑 claude-code）一键补全新 agent，让 scan_shared 认 .cursor/.codex 目录。
+/// 重新探测 agents：按项目内配置目录（.claude/.codex/.cursor/.agents）与指令文件
+/// （CLAUDE.md/AGENTS.md）精确判定实际使用的 agent；全部未命中回退开源标准 .agents/。
+/// 用于旧项目（注册时默认绑了全 agent）一键校正，避免给未使用的 agent 建目录。
 pub async fn sync_agents(
     State(state): State<AppState>,
     Path((token, id)): Path<(String, String)>,
@@ -288,9 +285,7 @@ pub async fn sync_agents(
     let Ok(mut proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    proj.agents = skillkit_core::config::Config::load(&state.paths)
-        .map(|c| c.agents.iter().map(|a| a.name.clone()).collect())
-        .unwrap_or_default();
+    proj.refresh_agents();
     if proj.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -311,6 +306,9 @@ pub async fn set_profiles(
     let Ok(mut proj) = Project::load(&state.paths, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // 绑定前校正 agents：旧项目可能注册时默认绑了全 agent，改为探测结果避免给
+    // 未使用的 agent 建目录。
+    proj.refresh_agents();
     // load 所选 profiles；任一不存在给可读 err
     let mut profiles = Vec::new();
     for name in &names {

@@ -863,7 +863,7 @@ async fn projects_rebind_updates_path() {
 }
 
 #[tokio::test]
-async fn project_sync_agents_updates_to_config_default() {
+async fn project_sync_agents_detects_real_agents() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {
         paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
@@ -871,6 +871,9 @@ async fn project_sync_agents_updates_to_config_default() {
     };
     let proj_dir = dir.path().join("proj");
     std::fs::create_dir_all(&proj_dir).unwrap();
+    // 项目实际只用了 .claude + .codex（无 .cursor），探测应只返回这两个
+    std::fs::create_dir_all(proj_dir.join(".claude")).unwrap();
+    std::fs::create_dir_all(proj_dir.join(".codex")).unwrap();
     // 旧项目只绑了 claude-code（旧默认）
     skillkit_core::Project {
         id: "ABCDEF12".into(),
@@ -899,8 +902,50 @@ async fn project_sync_agents_updates_to_config_default() {
     let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
     assert_eq!(
         after.agents,
-        vec!["claude-code".to_string(), "cursor".into(), "codex".into()],
-        "sync-agents 应把 agents 同步成 Config 默认全 agent"
+        vec!["claude-code".to_string(), "codex".into()],
+        "sync-agents 应探测出项目实际使用的 agent（配置目录命中）"
+    );
+}
+
+#[tokio::test]
+async fn project_sync_agents_falls_back_to_open_standard() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let proj_dir = dir.path().join("proj");
+    std::fs::create_dir_all(&proj_dir).unwrap();
+    // 无任何配置目录/指令文件 → 回退开源标准 .agents/
+    skillkit_core::Project {
+        id: "ABCDEF13".into(),
+        name: "proj".into(),
+        path: proj_dir.to_string_lossy().into_owned(),
+        agents: vec!["claude-code".into(), "cursor".into(), "codex".into()],
+        applied_profiles: vec![],
+        installed_skills: vec![],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/projects/ABCDEF13/sync-agents")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF13").unwrap();
+    assert_eq!(
+        after.agents,
+        vec!["agents".to_string()],
+        "探测不到时回退开源标准 .agents/"
     );
 }
 
@@ -1186,6 +1231,8 @@ async fn project_set_profiles_binds_lands_and_reports() {
     // project（需 .git/info 供落地写 exclude）
     let proj_root = dir.path().join("proj");
     std::fs::create_dir_all(proj_root.join(".git/info")).unwrap();
+    // 项目实际用 Claude Code：set_profiles 会先探测 agents，命中 .claude → claude-code
+    std::fs::create_dir_all(proj_root.join(".claude")).unwrap();
     skillkit_core::Project {
         id: "ABCDEF12".into(),
         name: "proj".into(),

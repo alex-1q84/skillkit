@@ -22,10 +22,10 @@
   </form>
   <div id="browse-panel-rebind"></div>
   <hr>
-  <p class="hint">agents: {{ project.agents.join(", ") }} — 新增 .cursor/.codex 等目录后，一键同步 config 声明的默认 agent（claude-code/cursor/codex）。</p>
+  <p class="hint">agents: {{ project.agents.join(", ") }} — 新增 .claude/.codex/.cursor/.agents 等配置目录或 CLAUDE.md/AGENTS.md 指令文件后，点此重新探测项目实际使用的 agent（未命中回退开源标准 .agents/）。</p>
   <form class="inline" hx-post="/{{ token }}/projects/{{ project.id }}/sync-agents"
         hx-target="body" hx-swap="outerHTML">
-    <button class="u">同步默认 agents</button>
+    <button class="u">重新探测 agents</button>
   </form>
 </section>
 
