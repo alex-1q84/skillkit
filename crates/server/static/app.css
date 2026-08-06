@@ -13,6 +13,8 @@
   --accent: #b45309;
   --accent-2: #d97706;
   --accent-soft: #fef3c7;
+  --teal: #0f766e;
+  --teal-soft: #ccfbf1;
   --ok: #15803d;
   --warn: #b45309;
   --danger: #b91c1c;
@@ -395,14 +397,71 @@ ul.project-list .muted { color: var(--ink-3); font-family: var(--mono); font-siz
 .complete-item:hover, .complete-item.active { background: var(--accent-soft); color: var(--accent); }
 
 /* Skills 视图：profile 归属管理（过滤 chips / 批量栏 / 选中高亮） */
-.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.filter-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; font-size: 12px; background: var(--surface); cursor: pointer; }
-a.chip { text-decoration: none; color: var(--ink-2); }
-.chip.on { background: var(--accent); color: var(--surface); border-color: transparent; }
+/* 筛选 chips：大气的圆角矩形控件（对齐 demo .filter；a.chip 仅过滤条用，表格内 profile 归属仍是小胶囊） */
+a.chip {
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 6px 14px; border-radius: 6px;
+  text-decoration: none; color: var(--ink-2);
+  transition: all .15s;
+}
+a.chip:hover { border-color: var(--ink-3); color: var(--ink); }
+a.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .chip .x { background: none; border: none; color: var(--danger); cursor: pointer; padding: 0 0 0 2px; font-size: 12px; line-height: 1; }
 .batch-bar { background: var(--surface-2); border: 1px dashed var(--line); padding: 6px 8px; border-radius: 4px; margin: 6px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #skills tr.selected td { background: var(--accent-soft); }
 #skills tr[data-id] { cursor: pointer; }
+
+/* ---------- Skills 视图（demo 风格）：页头 + 表格升级 ---------- */
+/* page-head：h1 与 summary 对齐 */
+.page-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
+.page-head h1 { margin-bottom: 0; }
+.page-head .summary { font-family: var(--mono); font-size: 12.5px; color: var(--ok); margin: 0; }
+/* toolbar：搜索 + 动作按钮一行 */
+.toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+.find-bar { flex: 1; min-width: 240px; position: relative; }
+.find-bar input { width: 100%; }
+.head-actions { display: flex; gap: 8px; align-items: center; }
+
+/* tag：scope / source / unmanaged 彩色标签（对齐 demo） */
+.tag {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 4px; display: inline-block;
+  vertical-align: 1px; white-space: nowrap;
+}
+.tag.global { background: var(--teal-soft); color: var(--teal); }
+.tag.local { background: var(--accent-soft); color: var(--accent); }
+.tag.src { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.tag.unmanaged { background: #fee2e2; color: #b91c1c; }
+
+/* pill-btn：ops 列细按钮 */
+.pill-btn {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .04em; cursor: pointer;
+  padding: 4px 10px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-2); transition: all .15s;
+  margin: 1px 0;
+}
+.pill-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+.pill-btn.u { color: var(--ok); border-color: var(--ok); }
+.pill-btn.u:hover { background: var(--ok); color: var(--surface); }
+.pill-btn.x { color: var(--danger); border-color: var(--danger); }
+.pill-btn.x:hover { background: var(--danger); color: var(--surface); }
+
+/* 表格：对齐 demo 尺寸 / 等宽 id 分色 / hash 弱化 */
+table.skills-table { font-size: 12.5px; }
+table.skills-table th { font-size: 11px; padding: 11px 14px; }
+table.skills-table td { padding: 10px 14px; }
+td.mono, .cell-id { font-family: var(--mono); font-size: 13px; }
+.cell-id .src { color: var(--ink-3); }
+.cell-id .nm { color: var(--ink); }
+td.mono.hash {
+  color: var(--ink-2); font-size: 12px;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+table.skills-table td.ops { white-space: nowrap; }
 
 /* 错误 toast（写操作失败弹提示框，不刷页）*/
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--danger); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 100; max-width: 80vw; font-size: 14px; }
