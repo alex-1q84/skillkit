@@ -1,6 +1,6 @@
 //! project 子命令：调 core 的 Project / apply。
 use clap::{Args, Subcommand};
-use skillkit_core::{config::Config, list_project_ids, paths::Paths, Project};
+use skillkit_core::{detect_agents, list_project_ids, paths::Paths, Project};
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -62,9 +62,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
     match cmd.cmd {
         ProjectSub::Add { path, agents } => {
             let abs = path.canonicalize().unwrap_or_else(|_| path.clone());
-            let cfg = Config::load(&paths)?;
-            let agents =
-                agents.unwrap_or_else(|| cfg.agents.iter().map(|a| a.name.clone()).collect());
+            let agents = agents.unwrap_or_else(|| detect_agents(&abs));
             let proj = Project::register(abs, agents);
             let id = proj.id.clone();
             proj.save(&paths)?;
@@ -88,6 +86,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
         }
         ProjectSub::ApplyProfile { project, profile } => {
             let mut proj = Project::load(&paths, &project)?;
+            proj.refresh_agents();
             let p = skillkit_core::Profile::load(&paths, &profile)?;
             proj.apply_profile(&profile, &p.skills);
             proj.save(&paths)?;
