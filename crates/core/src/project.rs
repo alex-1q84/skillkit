@@ -49,6 +49,12 @@ impl Project {
         }
     }
 
+    /// 重新探测项目实际使用的 agent 集合（替换语义），覆盖旧默认全量声明。
+    /// 探测规则见 `detect::detect_agents`：配置目录 → 指令文件 → 开源标准 `.agents/`。
+    pub fn refresh_agents(&mut self) {
+        self.agents = crate::detect::detect_agents(Path::new(&self.path));
+    }
+
     pub fn load(paths: &Paths, id: &str) -> Result<Self> {
         let path = paths.projects_dir().join(format!("{id}.toml"));
         if !path.exists() {
