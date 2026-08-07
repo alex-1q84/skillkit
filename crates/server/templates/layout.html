@@ -31,10 +31,18 @@
     es.addEventListener('changed', function () {
       // scan 浮层开时跳过整页刷新（注册写 toml 触发 SSE，刷 main 会清浮层，破坏连续注册）
       if (document.querySelector('.scan-flyout')) return;
-      // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1
-      var params = new URLSearchParams(location.search);
-      params.set('fragment', '1');
-      htmx.ajax('GET', location.pathname + '?' + params.toString(), { target: 'main', swap: 'innerHTML' });
+      // 稍延迟：写操作先写状态文件触发 SSE，后渲染完整页返回。直接刷新会与 POST 响应竞态，
+      // 把刚渲染的 summary 反馈冲掉。延迟到完整页落地后再检查跳过。
+      setTimeout(function () {
+        // 写操作刚返回的 summary 反馈在展示时跳过刷新（片段刷新会冲掉它，用户还没看到反馈）
+        if (document.querySelector('.page-head .summary')) return;
+        // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1
+        var params = new URLSearchParams(location.search);
+        params.set('fragment', '1');
+        htmx.ajax('GET', location.pathname + '?' + params.toString(), {
+          target: 'main', swap: 'innerHTML'
+        });
+      }, 300);
     });
 
     // ===== 目录浏览浮层关闭：✕ / 点遮罩 / ESC（纯 UI 收起，不涉业务） =====
@@ -169,6 +177,19 @@
       clearTimeout(window.__toastTimer);
       window.__toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4500);
     }
+    // ===== 写操作成功 summary 反馈：短暂显示后淡出，避免常驻挡住 SSE 同步 =====
+    // 完整页（写操作返回）渲染 summary 后自动隐藏；SSE 刷新在 summary 展示期跳过（见 es 监听），
+    // 隐藏后恢复实时同步。对齐 toast 的反馈生命周期。
+    document.body.addEventListener('htmx:afterSettle', function () {
+      var summary = document.querySelector('.page-head .summary');
+      if (!summary || summary.classList.contains('summary-auto-hide')) return;
+      summary.classList.add('summary-auto-hide');
+      setTimeout(function () {
+        summary.style.transition = 'opacity .5s';
+        summary.style.opacity = '0';
+        setTimeout(function () { summary.remove(); }, 600);
+      }, 4000);
+    });
     document.body.addEventListener('htmx:afterRequest', function (e) {
       var xhr = e.detail && e.detail.xhr;
       if (xhr && xhr.status >= 400) {
