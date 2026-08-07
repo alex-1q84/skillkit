@@ -24,6 +24,23 @@ enum InstallSub {
         #[arg(long)]
         json: bool,
     },
+
+    /// 安装本地 skill：skillkit install local <目录|zip> [--name N] [--scope global|local] [--force] [--json]
+    Local {
+        /// skill 目录或 .zip 路径（支持 ~/）
+        path: String,
+        /// 覆盖 skill 名（默认读 SKILL.md frontmatter name）
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long, value_parser = parse_scope, default_value = "local")]
+        scope: Scope,
+        /// 覆盖已存在的 local/<name>
+        #[arg(long)]
+        force: bool,
+        /// JSON 输出 SkillMeta
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn parse_scope(s: &str) -> Result<Scope, String> {
@@ -94,6 +111,27 @@ pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
                 }
             }
         }
+        InstallSub::Local {
+            path,
+            name,
+            scope,
+            force,
+            json,
+        } => {
+            let meta = skillkit_core::install_local(&paths, &path, name.as_deref(), scope, force)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&meta)?);
+            } else {
+                let short = meta
+                    .computed_hash
+                    .as_deref()
+                    .map_or_else(|| "?".into(), |h| h.chars().take(12).collect::<String>());
+                println!(
+                    "✓ 已安装 {} → {}（sha256: {short}）",
+                    meta.id, meta.canonical_path
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -126,6 +164,7 @@ mod tests {
                 assert_eq!(scope, Scope::Local);
                 assert!(json);
             }
+            InstallSub::Local { .. } => panic!("应为 Add"),
         }
     }
 
@@ -143,6 +182,7 @@ mod tests {
                 assert_eq!(scope, Scope::Local);
                 assert!(!json);
             }
+            InstallSub::Local { .. } => panic!("应为 Add"),
         }
     }
 
@@ -150,5 +190,58 @@ mod tests {
     fn install_add_rejects_unknown_scope() {
         let err = TestCli::try_parse_from(["skillkit", "add", "dc", "pdf", "--scope", "x"]);
         assert!(err.is_err());
+    }
+
+    #[derive(serde::Serialize)]
+    struct MetaShape {
+        id: String,
+        source: String,
+        scope: String,
+        computed_hash: Option<String>,
+        canonical_path: String,
+    }
+
+    #[test]
+    fn install_local_parses_flags() {
+        let TestCli { cmd } = TestCli::parse_from([
+            "skillkit", "local", "./foo", "--name", "bar", "--scope", "global", "--force", "--json",
+        ]);
+        match cmd {
+            InstallSub::Local {
+                path,
+                name,
+                scope,
+                force,
+                json,
+            } => {
+                assert_eq!(path, "./foo");
+                assert_eq!(name.as_deref(), Some("bar"));
+                assert_eq!(scope, Scope::Global);
+                assert!(force);
+                assert!(json);
+            }
+            InstallSub::Add { .. } => panic!("应为 Local"),
+        }
+    }
+
+    #[test]
+    fn install_local_json_schema_locks_fields() {
+        let m = MetaShape {
+            id: "local/foo".into(),
+            source: "local".into(),
+            scope: "local".into(),
+            computed_hash: Some("abc".into()),
+            canonical_path: "/x/foo".into(),
+        };
+        let j = serde_json::to_string(&m).unwrap();
+        for f in [
+            "\"id\"",
+            "\"source\"",
+            "\"scope\"",
+            "\"computed_hash\"",
+            "\"canonical_path\"",
+        ] {
+            assert!(j.contains(f), "json schema 应含 {f}：{j}");
+        }
     }
 }
