@@ -96,6 +96,10 @@ pub fn protected() -> Router<AppState> {
             post(skills::install_candidate),
         )
         .route("/{token}/skills/import", post(skills::import))
+        .route(
+            "/{token}/skills/install-local",
+            get(skills::install_local_form).post(skills::install_local),
+        )
         .route("/{token}/skills/upgrade-all", post(skills::upgrade_all))
         .route("/{token}/skills/assign", post(skills::assign))
         .route("/{token}/skills/assign-new", post(skills::assign_new))

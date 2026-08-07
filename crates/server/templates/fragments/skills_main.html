@@ -13,6 +13,11 @@
     <div id="find-results"></div>
   </div>
   <div class="head-actions">
+    <span class="install-local-panel" id="install-local-panel"></span>
+    <button class="pill-btn"
+            hx-get="/{{ token }}/skills/install-local"
+            hx-target="#install-local-panel"
+            hx-swap="innerHTML">安装本地</button>
     <form class="inline" hx-post="/{{ token }}/skills/import"
           hx-target="body" hx-swap="outerHTML" hx-indicator="#import-indicator">
       <button>导入存量 skill</button>

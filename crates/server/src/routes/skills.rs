@@ -611,6 +611,56 @@ pub struct RescopeGuiQuery {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+pub struct InstallLocalForm {
+    pub path: String,
+    pub name: Option<String>,
+    pub scope: Option<String>,
+    pub force: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "fragments/install_local_form.html")]
+pub struct InstallLocalFormTpl<'a> {
+    pub token: &'a str,
+}
+
+/// 「安装本地」按钮 hx-get 拉取表单片段，挂到挂载点。
+pub async fn install_local_form(
+    State(_state): State<AppState>,
+    Path(token): Path<String>,
+) -> Response {
+    render_str(InstallLocalFormTpl { token: &token }.render())
+}
+
+/// POST 安装本地 skill（目录/zip）。成功返回完整 Skills 页，失败 error_response（toast）。
+pub async fn install_local(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Form(f): Form<InstallLocalForm>,
+) -> Response {
+    let scope = if matches!(f.scope.as_deref(), Some("global")) {
+        Scope::Global
+    } else {
+        Scope::Local
+    };
+    let force = matches!(f.force.as_deref(), Some("on" | "true" | "1"));
+    match skillkit_core::install_local(&state.paths, &f.path, f.name.as_deref(), scope, force) {
+        Ok(_) => render_skills(
+            state,
+            token,
+            Some(&format!("✓ 已安装本地 skill：{}", f.path)),
+            false,
+            vec![],
+            vec![],
+        ),
+        Err(e) => {
+            tracing::error!(error = ?e, "install-local 失败：{}", f.path);
+            error_response(format!("安装失败：{e}"))
+        }
+    }
+}
+
 fn render_str(rendered: askama::Result<String>) -> Response {
     match rendered {
         Ok(html) => Html(html).into_response(),

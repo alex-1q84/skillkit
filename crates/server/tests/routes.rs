@@ -1777,3 +1777,90 @@ async fn skills_rescope_global_clears_profile_ref() {
         "local→global 清 profile 引用"
     );
 }
+
+#[tokio::test]
+async fn skills_install_local_lands_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 造一个 skill 目录在 fakehome 之外（放 dir 的兄弟）
+    let skill_dir = dir.path().join("myskill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: myskill\n---\n# myskill\n",
+    )
+    .unwrap();
+    let app = skillkit_server::app(state.clone());
+    let body = format!("path={}&scope=local", skill_dir.display());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    let m = reg.get("local/myskill").expect("应登记 local/myskill");
+    assert_eq!(m.scope, skillkit_core::Scope::Local);
+    assert!(m.computed_hash.is_some());
+}
+
+#[tokio::test]
+async fn skills_install_local_conflict_returns_error_json() {
+    use skillkit_core::{Registry, SkillMeta};
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 先占 skills.sh/foo
+    let canon = state.paths.skillkit_skills_dir().join("foo");
+    std::fs::create_dir_all(&canon).unwrap();
+    std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+    let mut reg = Registry::load(&state.paths).unwrap();
+    reg.upsert(SkillMeta {
+        id: "skills.sh/foo".into(),
+        name: "foo".into(),
+        source: "skills.sh".into(),
+        scope: skillkit_core::Scope::Local,
+        version: None,
+        computed_hash: Some("a".into()),
+        installed_at: "x".into(),
+        canonical_path: canon.display().to_string(),
+    });
+    reg.save(&state.paths).unwrap();
+
+    let skill_dir = dir.path().join("foo");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(skill_dir.join("SKILL.md"), "---\nname: foo\n---\n").unwrap();
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(format!(
+                    "path={}&scope=local",
+                    skill_dir.display()
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY); // error_response 422
+}
