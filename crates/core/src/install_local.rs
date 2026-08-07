@@ -93,11 +93,10 @@ pub(crate) fn resolve_skill_dir(src: &Path) -> Result<PathBuf> {
 }
 
 use sha2::{Digest, Sha256};
-use std::io::Read;
 
 /// 递归收集目录下所有非 symlink 文件（相对路径）。symlink 不参与（对齐 import.rs 约定）。
 #[allow(dead_code)]
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();
@@ -105,7 +104,7 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> 
             continue; // 跳过 symlink，防池外内容入 hash
         }
         if p.is_dir() {
-            collect_files(root, &p, out)?;
+            collect_files(&p, out)?;
         } else {
             out.push(p);
         }
@@ -117,7 +116,7 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> 
 #[allow(dead_code)]
 pub(crate) fn hash_skill_dir(dir: &Path) -> Result<String> {
     let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(dir, dir, &mut files)?;
+    collect_files(dir, &mut files)?;
     files.sort();
     let mut hasher = Sha256::new();
     for f in &files {
@@ -219,8 +218,6 @@ mod tests {
             Err(SkillkitError::InvalidLocalSkill { .. })
         ));
     }
-
-    use sha2::{Digest, Sha256};
 
     fn write_tree(root: &Path, files: &[(&str, &str)]) {
         for (name, content) in files {
