@@ -5,6 +5,7 @@ pub mod detect;
 pub mod error;
 pub mod import;
 pub mod install;
+pub mod install_local;
 pub mod lock;
 pub mod npx;
 pub mod paths;
