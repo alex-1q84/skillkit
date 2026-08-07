@@ -93,6 +93,7 @@ pub(crate) fn resolve_skill_dir(src: &Path) -> Result<PathBuf> {
 }
 
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 
 /// 递归收集目录下所有非 symlink 文件（相对路径）。symlink 不参与（对齐 import.rs 约定）。
 #[allow(dead_code)]
@@ -146,6 +147,80 @@ pub(crate) fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
             copy_skill_dir(&p, &target)?;
         } else {
             std::fs::copy(&p, &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// 解压 zip 到 dest，逐条目安全校验：enclosed_name（拒 `..`/绝对路径）+ 拒 symlink 条目
+/// + 总体积/条目上限（防 zip bomb）。对齐 spec §3.6。
+#[allow(dead_code)]
+pub(crate) fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
+    let file = std::fs::File::open(zip_path).map_err(|_| SkillkitError::InvalidLocalSkill {
+        path: zip_path.display().to_string(),
+        reason: "zip 不可读".into(),
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| SkillkitError::InvalidLocalSkill {
+        path: zip_path.display().to_string(),
+        reason: format!("解压失败：{e}（文件损坏或非 zip）"),
+    })?;
+    std::fs::create_dir_all(dest)?;
+    let mut total: u64 = 0;
+    for i in 0..archive.len() {
+        if i + 1 > MAX_ZIP_ENTRIES {
+            return Err(SkillkitError::InvalidLocalSkill {
+                path: zip_path.display().to_string(),
+                reason: "文件数超上限（疑似 zip bomb）".into(),
+            });
+        }
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| SkillkitError::InvalidLocalSkill {
+                path: zip_path.display().to_string(),
+                reason: e.to_string(),
+            })?;
+        let Some(enclosed) = entry.enclosed_name() else {
+            return Err(SkillkitError::InvalidLocalSkill {
+                path: zip_path.display().to_string(),
+                reason: format!("含不安全条目（路径穿越）：{}", entry.name()),
+            });
+        };
+        let outpath = dest.join(enclosed);
+        if !outpath.starts_with(dest) {
+            return Err(SkillkitError::InvalidLocalSkill {
+                path: zip_path.display().to_string(),
+                reason: format!("条目越界：{}", entry.name()),
+            });
+        }
+        #[cfg(unix)]
+        if entry.is_symlink() {
+            return Err(SkillkitError::InvalidLocalSkill {
+                path: zip_path.display().to_string(),
+                reason: format!("含 symlink 条目：{}", entry.name()),
+            });
+        }
+        if entry.is_dir() {
+            std::fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            let mut outfile = std::fs::File::create(&outpath)?;
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = entry.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                total += n as u64;
+                if total > MAX_ZIP_BYTES {
+                    return Err(SkillkitError::InvalidLocalSkill {
+                        path: zip_path.display().to_string(),
+                        reason: "解压体积超上限（疑似 zip bomb）".into(),
+                    });
+                }
+                outfile.write_all(&buf[..n])?;
+            }
         }
     }
     Ok(())
@@ -269,5 +344,71 @@ mod tests {
         copy_skill_dir(src.path(), dst.path()).unwrap();
         assert!(dst.path().join("SKILL.md").exists());
         assert!(!dst.path().join("evil").exists(), "symlink 不复制");
+    }
+
+    use std::io::{Seek, Write};
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = ZipWriter::new(buf);
+        for (name, data) in entries {
+            zw.start_file(name, SimpleFileOptions::default()).unwrap();
+            zw.write_all(data).unwrap();
+        }
+        let cur = zw.finish().unwrap();
+        cur.into_inner()
+    }
+
+    #[test]
+    fn extract_zip_normal_layouts() {
+        for (entries, expect_file) in [
+            (
+                vec![("foo/SKILL.md", b"---\nname: foo\n---\n" as &[u8])],
+                "foo/SKILL.md",
+            ),
+            (vec![("SKILL.md", b"x")], "SKILL.md"),
+        ] {
+            let z = build_zip(&entries);
+            let tmp = tempdir().unwrap();
+            let zp = tmp.path().join("a.zip");
+            std::fs::write(&zp, &z).unwrap();
+            let out = tempdir().unwrap();
+            extract_zip(&zp, out.path()).unwrap();
+            assert!(
+                out.path().join(expect_file).exists(),
+                "应解出 {expect_file}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_zip_rejects_traversal() {
+        let z = build_zip(&[("../evil.txt", b"x")]);
+        let tmp = tempdir().unwrap();
+        let zp = tmp.path().join("a.zip");
+        std::fs::write(&zp, &z).unwrap();
+        let out = tempdir().unwrap();
+        assert!(extract_zip(&zp, out.path()).is_err(), "路径穿越条目必须拒");
+        assert!(!tmp.path().join("evil.txt").exists());
+    }
+
+    #[test]
+    fn extract_zip_rejects_bomb() {
+        // 超条目上限（MAX_ZIP_ENTRIES=10000）：造 10001 个条目
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = ZipWriter::new(buf);
+        for i in 0..=MAX_ZIP_ENTRIES {
+            zw.start_file(&format!("f{i}"), SimpleFileOptions::default())
+                .unwrap();
+            zw.write_all(b"x").unwrap();
+        }
+        let z = zw.finish().unwrap().into_inner();
+        let tmp = tempdir().unwrap();
+        let zp = tmp.path().join("a.zip");
+        std::fs::write(&zp, &z).unwrap();
+        let out = tempdir().unwrap();
+        assert!(extract_zip(&zp, out.path()).is_err(), "超条目上限拒");
     }
 }
