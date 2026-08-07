@@ -2,7 +2,6 @@
 //! 不可信输入（含 GitHub zip）：name 防逃逸、zip 防穿越、symlink 跳过、体积上限、三段原子落地。
 use crate::error::{Result, SkillkitError};
 use std::path::{Path, PathBuf};
-
 // Task 5 的 install_local 主函数消费前，下列符号暂无人引用；allow(dead_code) 届时一并移除。
 #[allow(dead_code)]
 const MAX_ZIP_BYTES: u64 = 100 * 1024 * 1024;
@@ -93,6 +92,66 @@ pub(crate) fn resolve_skill_dir(src: &Path) -> Result<PathBuf> {
     }
 }
 
+use sha2::{Digest, Sha256};
+use std::io::Read;
+
+/// 递归收集目录下所有非 symlink 文件（相对路径）。symlink 不参与（对齐 import.rs 约定）。
+#[allow(dead_code)]
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let p = entry.path();
+        if std::fs::symlink_metadata(&p)?.file_type().is_symlink() {
+            continue; // 跳过 symlink，防池外内容入 hash
+        }
+        if p.is_dir() {
+            collect_files(root, &p, out)?;
+        } else {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
+/// 确定性 sha256（长度前缀防碰撞）：按相对路径排序，每文件写 len(path)‖path‖len(content)‖content。
+#[allow(dead_code)]
+pub(crate) fn hash_skill_dir(dir: &Path) -> Result<String> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_files(dir, dir, &mut files)?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for f in &files {
+        let rel = f.strip_prefix(dir).unwrap_or(f);
+        let rel_bytes = rel.to_string_lossy();
+        let content = std::fs::read(f)?;
+        hasher.update((rel_bytes.len() as u64).to_le_bytes());
+        hasher.update(rel_bytes.as_bytes());
+        hasher.update((content.len() as u64).to_le_bytes());
+        hasher.update(&content);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// 递归复制目录，跳过 symlink（防把 ~/.ssh 等池外文件拷入 canonical 池）。
+#[allow(dead_code)]
+pub(crate) fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let p = entry.path();
+        if std::fs::symlink_metadata(&p)?.file_type().is_symlink() {
+            continue;
+        }
+        let target = dst.join(entry.file_name());
+        if p.is_dir() {
+            copy_skill_dir(&p, &target)?;
+        } else {
+            std::fs::copy(&p, &target)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +218,59 @@ mod tests {
             resolve_skill_dir(d4.path()),
             Err(SkillkitError::InvalidLocalSkill { .. })
         ));
+    }
+
+    use sha2::{Digest, Sha256};
+
+    fn write_tree(root: &Path, files: &[(&str, &str)]) {
+        for (name, content) in files {
+            let p = root.join(name);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, content).unwrap();
+        }
+    }
+
+    #[test]
+    fn hash_is_deterministic_and_content_sensitive() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        write_tree(a.path(), &[("SKILL.md", "x"), ("lib/y.md", "z")]);
+        write_tree(b.path(), &[("SKILL.md", "x"), ("lib/y.md", "z")]);
+        assert_eq!(
+            hash_skill_dir(a.path()).unwrap(),
+            hash_skill_dir(b.path()).unwrap()
+        );
+        write_tree(b.path(), &[("SKILL.md", "changed")]);
+        assert_ne!(
+            hash_skill_dir(a.path()).unwrap(),
+            hash_skill_dir(b.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn hash_length_prefix_prevents_collision() {
+        // 树 A {a:"bc"} 与 B {ab:"c"} 无定界会撞同一字节流；长度前缀必须让二者不同。
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        write_tree(a.path(), &[("a", "bc")]);
+        write_tree(b.path(), &[("ab", "c")]);
+        assert_ne!(
+            hash_skill_dir(a.path()).unwrap(),
+            hash_skill_dir(b.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn copy_skill_dir_skips_symlinks() {
+        let src = tempdir().unwrap();
+        let dst = tempdir().unwrap();
+        std::fs::write(src.path().join("SKILL.md"), "x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/etc/hosts", src.path().join("evil")).unwrap();
+        copy_skill_dir(src.path(), dst.path()).unwrap();
+        assert!(dst.path().join("SKILL.md").exists());
+        assert!(!dst.path().join("evil").exists(), "symlink 不复制");
     }
 }
