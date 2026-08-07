@@ -51,6 +51,21 @@ pub enum SkillkitError {
 
     #[error("升级 {id} 将影响以下项目的版本基线：{affected:?}，需确认或 --yes")]
     UpgradeBlocked { id: String, affected: Vec<String> },
+
+    #[error("本地 skill 无效：{path}（{reason}）")]
+    InvalidLocalSkill { path: String, reason: String },
+
+    #[error("skill 归档结构不明确：{reason}（请直接传 skill 目录路径）")]
+    AmbiguousSkillArchive { reason: String },
+
+    #[error(
+        "目录 {name} 已被占用：{owner}（先 skillkit skill remove <owner> 再装，或手动删除该目录）",
+        owner = owner_id.as_deref().unwrap_or("无 registry 记录的孤儿目录")
+    )]
+    SkillPoolOccupied {
+        name: String,
+        owner_id: Option<String>,
+    },
 }
 
 /// 原子写：先写同目录临时文件，再 rename 覆盖，避免半写状态。
@@ -77,5 +92,24 @@ mod tests {
             msg.contains("rescope skills.sh/foo local"),
             "文案给出 rescope 引导：{msg}"
         );
+    }
+
+    #[test]
+    fn local_skill_errors_guide_action() {
+        let a = SkillkitError::InvalidLocalSkill {
+            path: "/x".into(),
+            reason: "未找到 SKILL.md".into(),
+        };
+        assert!(a.to_string().contains("SKILL.md"));
+        let b = SkillkitError::SkillPoolOccupied {
+            name: "foo".into(),
+            owner_id: Some("skills.sh/foo".into()),
+        };
+        assert!(b.to_string().contains("skills.sh/foo"));
+        let c = SkillkitError::SkillPoolOccupied {
+            name: "foo".into(),
+            owner_id: None,
+        };
+        assert!(c.to_string().contains("孤儿") || c.to_string().contains("foo"));
     }
 }
