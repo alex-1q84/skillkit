@@ -25,6 +25,7 @@ pub use detect::detect_agents;
 pub use error::{Result, SkillkitError};
 pub use import::{import_existing, ImportReport};
 pub use install::{install, uninstall};
+pub use install_local::install_local;
 pub use lock::FileLock;
 pub use npx::Candidate;
 pub use paths::Paths;

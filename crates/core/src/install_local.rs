@@ -1,15 +1,15 @@
 //! 安装本地 skill（目录/zip）到 canonical 池，managed + scope=local。
 //! 不可信输入（含 GitHub zip）：name 防逃逸、zip 防穿越、symlink 跳过、体积上限、三段原子落地。
 use crate::error::{Result, SkillkitError};
+use crate::lock::FileLock;
+use crate::paths::Paths;
+use crate::registry::{Registry, Scope, SkillMeta};
 use std::path::{Path, PathBuf};
-// Task 5 的 install_local 主函数消费前，下列符号暂无人引用；allow(dead_code) 届时一并移除。
-#[allow(dead_code)]
+
 const MAX_ZIP_BYTES: u64 = 100 * 1024 * 1024;
-#[allow(dead_code)]
 const MAX_ZIP_ENTRIES: usize = 10_000;
 
 /// 校验 skill 名（防 canonical 池路径逃逸）。拒空 / `.` / `..` / 纯点串 / 含分隔符 / 非法字符。
-#[allow(dead_code)]
 pub(crate) fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() || name == "." || name == ".." || name.chars().all(|c| c == '.') {
         return Err(SkillkitError::InvalidLocalSkill {
@@ -36,7 +36,6 @@ pub(crate) fn validate_name(name: &str) -> Result<()> {
 }
 
 /// 读 SKILL.md frontmatter 的 name 字段（极简行匹配，零依赖）。无 frontmatter/name 返回 None。
-#[allow(dead_code)]
 pub(crate) fn read_skill_name(skill_md: &Path) -> Result<Option<String>> {
     let content =
         std::fs::read_to_string(skill_md).map_err(|_| SkillkitError::InvalidLocalSkill {
@@ -63,7 +62,6 @@ pub(crate) fn read_skill_name(skill_md: &Path) -> Result<Option<String>> {
 }
 
 /// 定位 skill 目录：根有 SKILL.md → 根；唯一子目录有 SKILL.md → 该子目录；否则报错。
-#[allow(dead_code)]
 pub(crate) fn resolve_skill_dir(src: &Path) -> Result<PathBuf> {
     if src.join("SKILL.md").is_file() {
         return Ok(src.to_path_buf());
@@ -96,7 +94,6 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
 /// 递归收集目录下所有非 symlink 文件（相对路径）。symlink 不参与（对齐 import.rs 约定）。
-#[allow(dead_code)]
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -114,7 +111,6 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 }
 
 /// 确定性 sha256（长度前缀防碰撞）：按相对路径排序，每文件写 len(path)‖path‖len(content)‖content。
-#[allow(dead_code)]
 pub(crate) fn hash_skill_dir(dir: &Path) -> Result<String> {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_files(dir, &mut files)?;
@@ -133,7 +129,6 @@ pub(crate) fn hash_skill_dir(dir: &Path) -> Result<String> {
 }
 
 /// 递归复制目录，跳过 symlink（防把 ~/.ssh 等池外文件拷入 canonical 池）。
-#[allow(dead_code)]
 pub(crate) fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
@@ -154,7 +149,6 @@ pub(crate) fn copy_skill_dir(src: &Path, dst: &Path) -> Result<()> {
 
 /// 解压 zip 到 dest，逐条目安全校验：enclosed_name（拒 `..`/绝对路径）+ 拒 symlink 条目
 /// + 总体积/条目上限（防 zip bomb）。对齐 spec §3.6。
-#[allow(dead_code)]
 pub(crate) fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
     let file = std::fs::File::open(zip_path).map_err(|_| SkillkitError::InvalidLocalSkill {
         path: zip_path.display().to_string(),
@@ -224,6 +218,161 @@ pub(crate) fn extract_zip(zip_path: &Path, dest: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// 展开 `~` / `~/x` 到 home（dirs::home_dir）。其余原样返回。
+fn expand_tilde(p: &str) -> String {
+    if p == "~" {
+        return dirs::home_dir().map_or_else(|| p.into(), |h| h.display().to_string());
+    }
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).display().to_string();
+        }
+    }
+    p.into()
+}
+
+/// 安装本地 skill（目录/zip）到 canonical 池，managed + scope。全程持 "registry" 锁。
+#[allow(clippy::too_many_lines)] // 原子就位 + 回滚 + 冲突判定固有长，拆分会破坏三段原子性
+pub fn install_local(
+    paths: &Paths,
+    src_path: &str,
+    name: Option<&str>,
+    scope: Scope,
+    force: bool,
+) -> Result<SkillMeta> {
+    let _lock = FileLock::acquire(paths, "registry")?;
+
+    let expanded = expand_tilde(src_path);
+    let src = Path::new(&expanded);
+    if !src.exists() {
+        return Err(SkillkitError::InvalidLocalSkill {
+            path: src_path.into(),
+            reason: "路径不存在（需是含 SKILL.md 的目录或 .zip）".into(),
+        });
+    }
+
+    // zip → 解压到 tempdir；目录 → 直接用。_zip_tmp 保活到复制完成。
+    let (_zip_tmp, root) =
+        if src.is_file() && src.extension().and_then(|e| e.to_str()) == Some("zip") {
+            let tmp = tempfile::TempDir::new()?;
+            extract_zip(src, tmp.path())?;
+            let root = tmp.path().to_path_buf();
+            (Some(tmp), root)
+        } else if src.is_dir() {
+            (None, src.to_path_buf())
+        } else {
+            return Err(SkillkitError::InvalidLocalSkill {
+                path: src_path.into(),
+                reason: "需是含 SKILL.md 的目录或 .zip".into(),
+            });
+        };
+
+    let skill_dir = resolve_skill_dir(&root)?;
+
+    let resolved_name = match name {
+        Some(n) => n.to_string(),
+        None => read_skill_name(&skill_dir.join("SKILL.md"))?.ok_or_else(|| {
+            SkillkitError::InvalidLocalSkill {
+                path: src_path.into(),
+                reason: "SKILL.md 缺 name 字段且未传 --name".into(),
+            }
+        })?,
+    };
+    validate_name(&resolved_name)?;
+
+    let pool = paths.skillkit_skills_dir();
+    let target = pool.join(&resolved_name);
+    // containment 断言兜底（即便校验有遗漏也不让 target 落池外）
+    if !target.starts_with(&pool) || resolved_name.contains("..") {
+        return Err(SkillkitError::InvalidLocalSkill {
+            path: src_path.into(),
+            reason: "target 越界".into(),
+        });
+    }
+
+    let local_id = Registry::skill_id("local", &resolved_name);
+    let reg = Registry::load(paths)?;
+    let existing_local = reg.get(&local_id).ok().cloned();
+    let other_owner = reg
+        .skills
+        .values()
+        .find(|m| m.id != local_id && PathBuf::from(&m.canonical_path) == target)
+        .cloned();
+
+    // 冲突判定（键 = registry id；防跨 source 误删）
+    if let Some(owner) = &other_owner {
+        return Err(SkillkitError::SkillPoolOccupied {
+            name: resolved_name.clone(),
+            owner_id: Some(owner.id.clone()),
+        });
+    }
+    if existing_local.is_some() && !force {
+        return Err(SkillkitError::SkillAlreadyInstalled { id: local_id });
+    }
+    if existing_local.is_none() && target.exists() {
+        return Err(SkillkitError::SkillPoolOccupied {
+            name: resolved_name.clone(),
+            owner_id: None,
+        }); // 孤儿目录
+    }
+
+    // 复制到暂存 + hash（rename 前算，缩小就位后失败面）
+    let pid = std::process::id();
+    let staging = pool.join(format!(".{resolved_name}.staging-{pid}"));
+    let old = pool.join(format!(".{resolved_name}.old-{pid}"));
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    copy_skill_dir(&skill_dir, &staging)?;
+    let hash = hash_skill_dir(&staging)?;
+
+    // 原子就位：force 三段（target→.old → staging→target），非 force 单段 rename。
+    let force_mode = existing_local.is_some();
+    if force_mode {
+        std::fs::rename(&target, &old).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&staging);
+            SkillkitError::Io(e)
+        })?;
+        if let Err(e) = std::fs::rename(&staging, &target) {
+            let _ = std::fs::rename(&old, &target); // 还原旧内容
+            return Err(SkillkitError::Io(e));
+        }
+    } else if let Err(e) = std::fs::rename(&staging, &target) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(SkillkitError::Io(e));
+    }
+
+    // registry upsert + save_raw（持同一把锁，不重取）
+    let meta = SkillMeta {
+        id: local_id,
+        name: resolved_name.clone(),
+        source: "local".into(),
+        scope,
+        version: None,
+        computed_hash: Some(hash),
+        installed_at: crate::install::now_iso(),
+        canonical_path: target.display().to_string(),
+    };
+    let mut reg = reg;
+    reg.upsert(meta.clone());
+    if let Err(e) = reg.save_raw(paths) {
+        // 回滚：非 force 删 target；force 还原 old
+        let _ = std::fs::remove_dir_all(&target);
+        if force_mode {
+            let _ = std::fs::rename(&old, &target);
+        }
+        return Err(e);
+    }
+    if force_mode {
+        let _ = std::fs::remove_dir_all(&old); // 清旧（best-effort）
+    }
+
+    if scope == Scope::Global {
+        crate::symlink::ensure_global_claude(paths, &meta)?;
+    }
+    Ok(meta)
 }
 
 #[cfg(test)]
@@ -410,5 +559,178 @@ mod tests {
         std::fs::write(&zp, &z).unwrap();
         let out = tempdir().unwrap();
         assert!(extract_zip(&zp, out.path()).is_err(), "超条目上限拒");
+    }
+
+    use crate::paths::Paths;
+    use crate::registry::{Registry, Scope, SkillMeta};
+
+    fn paths() -> Paths {
+        Paths::new(tempdir().unwrap().path().to_path_buf())
+    }
+
+    fn make_skill_dir(parent: &Path, name: &str) -> PathBuf {
+        let d = parent.join(name);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: x\n---\n# {name}\n"),
+        )
+        .unwrap();
+        d
+    }
+
+    #[test]
+    fn install_local_dir_lands_managed_local() {
+        let p = paths();
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        let meta = install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap();
+        assert_eq!(meta.id, "local/foo");
+        assert_eq!(meta.source, "local");
+        assert_eq!(meta.scope, Scope::Local);
+        assert!(meta.computed_hash.is_some(), "managed（有 hash）");
+        assert!(p
+            .skillkit_skills_dir()
+            .join("foo")
+            .join("SKILL.md")
+            .exists());
+        // 无 global symlink
+        assert!(!p.claude_skills_dir().exists());
+        assert_eq!(
+            Registry::load(&p).unwrap().get("local/foo").unwrap().name,
+            "foo"
+        );
+    }
+
+    #[test]
+    fn install_local_name_override_and_frontmatter_escape() {
+        let p = paths();
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        // --name 覆盖
+        let m = install_local(
+            &p,
+            &d.display().to_string(),
+            Some("renamed"),
+            Scope::Local,
+            false,
+        )
+        .unwrap();
+        assert_eq!(m.id, "local/renamed");
+        // frontmatter 恶意 name（..）也拒
+        let src2 = tempdir().unwrap();
+        let bad = src2.path().join("bad");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("SKILL.md"), "---\nname: ..\n---\n").unwrap();
+        assert!(install_local(&p, &bad.display().to_string(), None, Scope::Local, false).is_err());
+    }
+
+    #[test]
+    fn install_local_conflict_and_force() {
+        let p = paths();
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap();
+        // 重复装（无 force）→ SkillAlreadyInstalled
+        assert!(matches!(
+            install_local(&p, &d.display().to_string(), None, Scope::Local, false),
+            Err(SkillkitError::SkillAlreadyInstalled { .. })
+        ));
+        // force 覆盖
+        std::fs::write(d.join("extra.md"), "changed").unwrap();
+        let m = install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap();
+        assert!(p
+            .skillkit_skills_dir()
+            .join("foo")
+            .join("extra.md")
+            .exists());
+        // 无 .old/.staging 残留
+        let leftover: Vec<_> = std::fs::read_dir(p.skillkit_skills_dir())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".foo"))
+            .collect();
+        assert!(leftover.is_empty(), "force 后无暂存/old 残留：{leftover:?}");
+        let _ = m;
+    }
+
+    #[test]
+    fn install_local_refuses_cross_source_occupant() {
+        let p = paths();
+        // 模拟 skills.sh/foo 已占池 skills/foo
+        let canon = p.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(SkillMeta {
+            id: "skills.sh/foo".into(),
+            name: "foo".into(),
+            source: "skills.sh".into(),
+            scope: Scope::Local,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "x".into(),
+            canonical_path: canon.display().to_string(),
+        });
+        reg.save(&p).unwrap();
+
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        let err =
+            install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap_err();
+        assert!(matches!(err, SkillkitError::SkillPoolOccupied { .. }));
+        // force 也不跨 source 删
+        let err2 =
+            install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap_err();
+        assert!(matches!(err2, SkillkitError::SkillPoolOccupied { .. }));
+        assert!(
+            canon.join("SKILL.md").exists(),
+            "skills.sh/foo 的 canonical 未被删"
+        );
+    }
+
+    #[test]
+    fn install_local_orphan_target_no_owner() {
+        let p = paths();
+        // target 存在但无 registry 记录（孤儿）
+        let canon = p.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        let err =
+            install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap_err();
+        match err {
+            SkillkitError::SkillPoolOccupied { owner_id, .. } => {
+                assert!(owner_id.is_none(), "孤儿目录 owner_id=None");
+            }
+            other => panic!("应为 SkillPoolOccupied(None)：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_local_preserves_other_registry_entries() {
+        // lost-update 防护：install_local 不覆盖 registry 其他 skill 条目
+        let p = paths();
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(SkillMeta {
+            id: "skills.sh/bar".into(),
+            name: "bar".into(),
+            source: "skills.sh".into(),
+            scope: Scope::Local,
+            version: None,
+            computed_hash: Some("x".into()),
+            installed_at: "x".into(),
+            canonical_path: p.skillkit_skills_dir().join("bar").display().to_string(),
+        });
+        reg.save(&p).unwrap();
+
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap();
+
+        let after = Registry::load(&p).unwrap();
+        assert!(after.get("skills.sh/bar").is_ok(), "其他 skill 条目保留");
+        assert!(after.get("local/foo").is_ok());
     }
 }

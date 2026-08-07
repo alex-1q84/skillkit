@@ -73,6 +73,17 @@ impl Registry {
         Ok(())
     }
 
+    /// 写 registry，不获取锁（调用方须已持 "registry" 锁）。供持锁全流程的调用方用，
+    /// 避免 install_local 已持锁时 Registry::save 再取同 key 致同进程 flock 自死锁。
+    pub(crate) fn save_raw(&self, paths: &Paths) -> Result<()> {
+        let path = paths.registry_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::error::atomic_write(&path, &serde_json::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
     pub fn upsert(&mut self, meta: SkillMeta) {
         self.skills.insert(meta.id.clone(), meta);
     }
