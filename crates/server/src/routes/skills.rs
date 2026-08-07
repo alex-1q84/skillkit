@@ -645,7 +645,9 @@ pub async fn install_local(
         Scope::Local
     };
     let force = matches!(f.force.as_deref(), Some("on" | "true" | "1"));
-    match skillkit_core::install_local(&state.paths, &f.path, f.name.as_deref(), scope, force) {
+    // 空表单字段会序列化成 `name=`（Some("")），与「未填」等价，归一为 None。
+    let name = f.name.as_deref().filter(|s| !s.trim().is_empty());
+    match skillkit_core::install_local(&state.paths, &f.path, name, scope, force) {
         Ok(_) => render_skills(
             state,
             token,

@@ -1864,3 +1864,40 @@ async fn skills_install_local_conflict_returns_error_json() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY); // error_response 422
 }
+
+#[tokio::test]
+async fn skills_install_local_empty_name_field_reads_frontmatter() {
+    // 空表单字段序列化成 `name=`（Some("")），handler 应归一为 None 走 frontmatter。
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let skill_dir = dir.path().join("myname");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(skill_dir.join("SKILL.md"), "---\nname: myname\n---\n").unwrap();
+    let app = skillkit_server::app(state.clone());
+    let body = format!("path={}&name=&scope=local", skill_dir.display());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "空 name 字段应走 frontmatter 而非报错"
+    );
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    let m = reg.get("local/myname").expect("应登记 local/myname");
+    assert_eq!(m.name, "myname");
+}
