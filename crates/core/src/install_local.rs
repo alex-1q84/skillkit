@@ -346,7 +346,7 @@ mod tests {
         assert!(!dst.path().join("evil").exists(), "symlink 不复制");
     }
 
-    use std::io::{Seek, Write};
+    use std::io::Write;
     use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
 
@@ -400,7 +400,7 @@ mod tests {
         let buf = std::io::Cursor::new(Vec::new());
         let mut zw = ZipWriter::new(buf);
         for i in 0..=MAX_ZIP_ENTRIES {
-            zw.start_file(&format!("f{i}"), SimpleFileOptions::default())
+            zw.start_file(format!("f{i}"), SimpleFileOptions::default())
                 .unwrap();
             zw.write_all(b"x").unwrap();
         }
