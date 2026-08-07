@@ -196,3 +196,22 @@
 - 原子回滚范围 = scope + registry + symlink；profile/project 多文件移除失败给可恢复文案，不声称全量原子。
 
 **理由**：转移即生效（跟 install/remove 一致）；`remove_global_claude` 不加守卫是规避 set_scope 先改 scope 再撤链的顺序陷阱（spec review P2-A）。
+
+## 决策 19：项目 agents 精确探测（注册/绑定/同步时探测，未命中回退 .agents/）
+
+**背景**：决策 16 之后注册时默认把 `proj.agents` 填成 Config 全 agent（claude-code/cursor/codex），apply/绑定 profile 会给每个 agent 建 `<project>/.<agent>/skills/` 目录——实际只用 Claude Code 的项目也被建出 `.cursor/skills`、`.codex/skills`，污染项目目录、让 git 状态与 agent 加载目录失真。
+
+**决策**：
+- `proj.agents` 不再默认全量，注册/绑定 profile/`sync-agents` 时按项目根目录精确探测：配置目录（`.claude`/`.codex`/`.cursor`/`.agents`）命中任一即按目录判定（多个全收）；无配置目录时按指令文件（`CLAUDE.md`→claude-code、`AGENTS.md`→开源标准）；全部未命中回退开源标准 `.agents/`（`agents` agent，copy 落地）。
+- 探测逻辑收敛在 `crates/core/src/detect.rs` 的 `detect_agents`，CLI/server 共用；`Project::refresh_agents()` 供绑定/同步时覆盖旧声明。
+- `sync-agents` 语义从「补全到 Config 全 agent」改为「重新探测」（GUI 按钮改名「重新探测 agents」），修订决策 16 第 3 条。
+- 项目级 `.agents/skills/` 从「只读 shared 发现」升级为双重角色：shared 真实目录仍只读发现；探测未命中具体 agent 时作为开源标准 local 落地目录（参与 apply）。此即决策 16「后续提醒」预留的另立决策。
+
+**理由**：agent 目录是项目的可见状态，建了用户就得维护（git exclude 多一份、目录多一层噪音）；精确探测从项目自身痕迹（配置目录/指令文件）推断，无需用户额外配置；`.agents/` 是各 agent 通用的开源标准目录，探测失败回退到它语义最稳（Codex/Gemini/OpenCode 都读）。
+
+**否定的备选**：
+- 注册时让用户手选 agents（GUI 表单曾有此输入，已去掉）：给用户加负担，且新项目往往还没建任何配置目录，无从选起。
+- 探测表配置驱动（config.toml 给每个 agent 声明探测目录/文件）：灵活但过度设计，当前三大主流 + 开源标准已覆盖主流场景，其余 agent 用户可用 `--agents` 显式覆盖。
+- 绑定 profile 时不刷新、只靠注册时探测：旧项目（已注册为全量）痛点不解，用户观察到的「绑个 profile 建一堆目录」仍在。
+
+**后续提醒**：`detect_agents` 探测表当前固定（claude/codex/cursor/agents），若未来出现新的主流 agent 私有目录/指令文件，在 `detect.rs` 表里加一行即可。
