@@ -466,3 +466,56 @@ table.skills-table td.ops { white-space: nowrap; }
 /* 错误 toast（写操作失败弹提示框，不刷页）*/
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--danger); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 100; max-width: 80vw; font-size: 14px; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- 安装本地 modal ---------- */
+.install-modal { width: 600px; max-width: 100%; max-height: min(80vh, 640px); }
+.install-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+
+.drop-zone {
+  border: 2px dashed var(--line); border-radius: 8px; padding: 28px 16px;
+  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  transition: all .15s; background: var(--surface);
+}
+.drop-zone.drag { border-color: var(--accent); background: var(--accent-soft); }
+.drop-zone.has-file { border-style: solid; border-color: var(--ink-3); }
+.drop-zone .drop-hint { font-family: var(--mono); font-size: 13px; color: var(--ink-2); margin: 0; }
+.drop-zone .file-card {
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface-2); padding: 6px 10px; border-radius: 6px;
+}
+.drop-zone .file-card button { border: none; background: none; color: var(--danger); cursor: pointer; padding: 0 4px; }
+.drop-actions { display: inline-flex; gap: 8px; }
+.drop-actions button {
+  font-family: var(--mono); font-size: 11.5px; cursor: pointer;
+  padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-2); transition: all .15s;
+}
+.drop-actions button:hover { color: var(--ink); border-color: var(--ink-3); }
+
+.install-fields { display: flex; flex-direction: column; gap: 12px; }
+.install-fields .field { display: flex; flex-direction: column; gap: 4px; }
+.install-fields .field > span {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.install-fields .field input, .install-fields .field select {
+  font-family: var(--mono); font-size: 13px; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
+}
+.install-fields .field-check { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+.advanced { border-top: 1px dashed var(--line); padding-top: 10px; }
+.advanced summary {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  letter-spacing: .04em; text-transform: uppercase; cursor: pointer; padding: 2px 0;
+}
+.advanced[open] { display: flex; flex-direction: column; gap: 10px; }
+
+.install-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.install-actions .primary {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  padding: 9px 20px; border-radius: 7px; border: 1px solid var(--ink);
+  background: var(--ink); color: var(--bg); transition: all .15s;
+}
+.install-actions .primary:hover { background: var(--accent); border-color: var(--accent); }
+.install-actions .primary:disabled { opacity: .6; cursor: not-allowed; }
