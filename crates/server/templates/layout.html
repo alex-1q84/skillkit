@@ -16,6 +16,7 @@
     <a href="/{{ token }}/profiles">Profiles</a>
   </nav>
   <main>{% block content %}{% endblock %}</main>
+  <div id="modal-mount"></div>
   <script>
     // 局部 swap 后幂等重初始化 Sortable（data-sortable 标记防重复）
     document.body.addEventListener('htmx:afterSettle', () => {
