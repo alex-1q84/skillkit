@@ -279,24 +279,33 @@
       var nameVal = form.querySelector('input[name="name"]').value.trim();
       var scopeVal = form.querySelector('select[name="scope"]').value;
       var forceVal = form.querySelector('input[name="force"]').checked;
-      var url, fd = new FormData();
-      if (nameVal) fd.append('name', nameVal);
-      fd.append('scope', scopeVal);
-      if (forceVal) fd.append('force', 'on');
       var hasZip = archiveInput.files && archiveInput.files[0];
       var hasDir = fileInput.files && fileInput.files.length;
-      if (hasZip) {
+      var path = pathInput.value.trim();
+      var url, body;
+      if (hasZip || hasDir) {
         url = '/' + token + '/skills/install-local/upload';
-        fd.append('archive', archiveInput.files[0], archiveInput.files[0].name);
-      } else if (hasDir) {
-        url = '/' + token + '/skills/install-local/upload';
-        for (var i = 0; i < fileInput.files.length; i++) {
-          var f = fileInput.files[i];
-          fd.append('file', f, f.webkitRelativePath || f.name);
+        var fd = new FormData();
+        if (nameVal) fd.append('name', nameVal);
+        fd.append('scope', scopeVal);
+        if (forceVal) fd.append('force', 'on');
+        if (hasZip) {
+          fd.append('archive', archiveInput.files[0], archiveInput.files[0].name);
+        } else {
+          for (var i = 0; i < fileInput.files.length; i++) {
+            var f = fileInput.files[i];
+            fd.append('file', f, f.webkitRelativePath || f.name);
+          }
         }
-      } else if (pathInput.value.trim()) {
+        body = fd;
+      } else if (path) {
         url = '/' + token + '/skills/install-local';
-        fd.append('path', pathInput.value.trim());
+        var params = new URLSearchParams();
+        if (nameVal) params.append('name', nameVal);
+        params.append('scope', scopeVal);
+        if (forceVal) params.append('force', 'on');
+        params.append('path', path);
+        body = params;
       } else {
         showToast('请拖放/选择文件，或输入路径');
         return false;
@@ -305,7 +314,7 @@
       btn.disabled = true;
       var orig = btn.textContent;
       btn.textContent = '安装中…';
-      fetch(url, { method: 'POST', body: fd, headers: { 'HX-Request': 'true' } })
+      fetch(url, { method: 'POST', body: body, headers: { 'HX-Request': 'true' } })
         .then(function (r) {
           if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || '安装失败'); });
           return r.text();
