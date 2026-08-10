@@ -667,14 +667,15 @@ pub async fn install_local(
 /// upload 端点 body 上限（zip/目录上传）。
 pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 
-/// POST 上传 zip 安装本地 skill（multipart）。成功完整 Skills 页，失败 toast。
-/// 目录上传（`file` 字段，多 part）在 Task 2 接入；本版本仅 zip（`archive` 字段）。
+/// POST 上传 zip/目录安装本地 skill（multipart）。成功完整 Skills 页，失败 toast。
+/// 按字段名分流：`archive`（单个 .zip）或 `file`（目录，多 part，filename 带 relpath）。
 pub async fn install_local_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,
     mut multipart: Multipart,
 ) -> Response {
     let mut archive: Option<Vec<u8>> = None;
+    let mut dir_files: Vec<(String, Vec<u8>)> = Vec::new();
     let mut name: Option<String> = None;
     let mut scope = Scope::Local;
     let mut force = false;
@@ -685,12 +686,20 @@ pub async fn install_local_upload(
             Err(e) => return error_response(format!("读取上传字段失败：{e}")),
         };
         let fname = field.name().unwrap_or("").to_string();
+        let file_name = field.file_name().map(str::to_string);
         let bytes = match field.bytes().await {
             Ok(b) => b,
             Err(e) => return error_response(format!("读取字段内容失败：{e}")),
         };
         match fname.as_str() {
             "archive" => archive = Some(bytes.to_vec()),
+            "file" => {
+                let relpath = file_name.unwrap_or_default();
+                if relpath.is_empty() {
+                    return error_response("目录上传缺少文件相对路径".to_string());
+                }
+                dir_files.push((relpath, bytes.to_vec()));
+            }
             "name" => {
                 let t = String::from_utf8_lossy(&bytes).trim().to_string();
                 if !t.is_empty() {
@@ -708,6 +717,21 @@ pub async fn install_local_upload(
             _ => {}
         }
     }
+    // 目录上传：多 file part → 重建目录树 → core
+    if !dir_files.is_empty() {
+        if archive.is_some() {
+            return error_response("不能同时上传 archive（zip）和 file（目录）".to_string());
+        }
+        let tmp = match TempDir::new() {
+            Ok(t) => t,
+            Err(e) => return error_response(format!("创建临时目录失败：{e}")),
+        };
+        if let Err(e) = rebuild_dir(tmp.path(), dir_files) {
+            return error_response(e);
+        }
+        return install_from_path(&state, token, tmp.path(), name.as_deref(), scope, force);
+    }
+    // zip 上传：单个 archive part → 临时 .zip → core
     let Some(archive) = archive else {
         return error_response("未收到 archive（.zip）字段".to_string());
     };
@@ -719,15 +743,21 @@ pub async fn install_local_upload(
     if let Err(e) = std::fs::write(&zip_path, &archive) {
         return error_response(format!("写入临时文件失败：{e}"));
     }
-    match skillkit_core::install_local(
-        &state.paths,
-        zip_path.to_str().unwrap(),
-        name.as_deref(),
-        scope,
-        force,
-    ) {
+    install_from_path(&state, token, &zip_path, name.as_deref(), scope, force)
+}
+
+/// 调 core install_local 并渲染结果（zip/目录分支共用，避免重复 render_skills 逻辑）。
+fn install_from_path(
+    state: &AppState,
+    token: String,
+    path: &std::path::Path,
+    name: Option<&str>,
+    scope: Scope,
+    force: bool,
+) -> Response {
+    match skillkit_core::install_local(&state.paths, path.to_str().unwrap(), name, scope, force) {
         Ok(m) => render_skills(
-            state,
+            state.clone(),
             token,
             Some(&format!("✓ 已安装本地 skill：{}", m.id)),
             false,
@@ -739,6 +769,30 @@ pub async fn install_local_upload(
             error_response(format!("安装失败：{e}"))
         }
     }
+}
+
+/// 把上传的 (relpath, bytes) 列表在 tmpdir 下重建为目录树。
+/// 安全：relpath 只接受 Normal 分量，拒 `..`/`.`/绝对路径；join 后再断言 starts_with 兜底（防 ZipSlip 同类逃逸）。
+fn rebuild_dir(tmpdir: &std::path::Path, files: Vec<(String, Vec<u8>)>) -> Result<(), String> {
+    for (relpath, content) in files {
+        let p = std::path::Path::new(&relpath);
+        if p.components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(format!(
+                "路径含非法分量（.. / 绝对路径），已拒绝：{relpath}"
+            ));
+        }
+        let target = tmpdir.join(p);
+        if !target.starts_with(tmpdir) {
+            return Err(format!("路径越界，已拒绝：{relpath}"));
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
+        }
+        std::fs::write(&target, &content).map_err(|e| format!("写入文件失败：{e}"))?;
+    }
+    Ok(())
 }
 
 fn render_str(rendered: askama::Result<String>) -> Response {

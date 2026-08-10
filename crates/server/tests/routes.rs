@@ -2014,3 +2014,106 @@ async fn install_local_upload_rejects_oversize() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+#[tokio::test]
+async fn multipart_filename_preserves_slash() {
+    // 契约：axum Multipart 的 field.file_name() 必须原样保留含 `/` 的 filename
+    //（目录上传 relpath 靠它；若 multer 剥离 / 则整个目录方案需退化）
+    use axum::response::IntoResponse;
+    use axum::{extract::Multipart, routing::post, Router};
+    async fn handler(mut m: Multipart) -> impl IntoResponse {
+        let f = m.next_field().await.unwrap().unwrap();
+        format!("{}|{}", f.name().unwrap_or(""), f.file_name().unwrap_or(""))
+    }
+    let app: Router = Router::new().route("/m", post(handler));
+    let body = b"--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"my-skill/SKILL.md\"\r\n\r\nhi\r\n--b--\r\n";
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/m")
+                .header("content-type", "multipart/form-data; boundary=b")
+                .body(Body::from(&body[..]))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(common::body_string(resp).await, "file|my-skill/SKILL.md");
+}
+
+#[tokio::test]
+async fn install_local_upload_dir_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    // 两个 file part（filename 带 relpath）+ scope 普通字段
+    let body = b"--b\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"dir-demo/SKILL.md\"\r\n\r\n\
+---\r\nname: dir-demo\r\n---\r\n# dir-demo\r\n\
+--b\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"dir-demo/scripts/run.sh\"\r\n\r\n\
+#!/bin/sh\r\n\
+--b\r\n\
+Content-Disposition: form-data; name=\"scope\"\r\n\r\n\
+local\r\n\
+--b--\r\n";
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local/upload")
+                .header("content-type", "multipart/form-data; boundary=b")
+                .body(Body::from(&body[..]))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = common::body_string(resp).await;
+    assert!(
+        text.contains("✓ 已安装本地 skill：local/dir-demo"),
+        "实际：{}",
+        &text[..text.len().min(400)]
+    );
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    assert!(reg.get("local/dir-demo").is_ok());
+}
+
+#[tokio::test]
+async fn install_local_upload_dir_rejects_traversal() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let body = b"--b\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"../evil.sh\"\r\n\r\n\
+pwn\r\n\
+--b--\r\n";
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local/upload")
+                .header("content-type", "multipart/form-data; boundary=b")
+                .body(Body::from(&body[..]))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "路径逃逸应被拒（422）"
+    );
+    let text = common::body_string(resp).await;
+    assert!(
+        text.contains("路径"),
+        "应因路径逃逸被拒，实际：{}",
+        &text[..text.len().min(200)]
+    );
+}
