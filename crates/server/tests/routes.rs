@@ -1901,3 +1901,116 @@ async fn skills_install_local_empty_name_field_reads_frontmatter() {
     let m = reg.get("local/myname").expect("应登记 local/myname");
     assert_eq!(m.name, "myname");
 }
+
+// ===== install-local upload（multipart）测试 =====
+
+/// 构造一个合法 skill zip 字节（含 SKILL.md frontmatter 带 name）。
+fn make_skill_zip(skill_name: &str) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+    let buf = Cursor::new(Vec::new());
+    let mut zw = ZipWriter::new(buf);
+    let opts = SimpleFileOptions::default();
+    zw.start_file("SKILL.md", opts).unwrap();
+    writeln!(zw, "---\nname: {skill_name}\n---\n# {skill_name}").unwrap();
+    zw.finish().unwrap().into_inner()
+}
+
+/// 构造 multipart/form-data body（一个 archive 文件字段 + 可选 name/scope/force 普通字段）。
+fn multipart_zip_body(
+    boundary: &str,
+    archive: &[u8],
+    name: Option<&str>,
+    scope: Option<&str>,
+    force: bool,
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    if let Some(n) = name {
+        body.extend(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\n{n}\r\n")
+                .as_bytes(),
+        );
+    }
+    if let Some(s) = scope {
+        body.extend(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"scope\"\r\n\r\n{s}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    if force {
+        body.extend(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"force\"\r\n\r\non\r\n")
+                .as_bytes(),
+        );
+    }
+    body.extend(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"pkg.zip\"\r\nContent-Type: application/zip\r\n\r\n"
+    )
+    .as_bytes());
+    body.extend_from_slice(archive);
+    body.extend_from_slice(b"\r\n");
+    body.extend(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+#[tokio::test]
+async fn install_local_upload_zip_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let zip = make_skill_zip("demoup");
+    let body = multipart_zip_body("testbound", &zip, None, Some("local"), false);
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-local/upload")
+                .header("content-type", "multipart/form-data; boundary=testbound")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = common::body_string(resp).await;
+    assert!(
+        text.contains("✓ 已安装本地 skill：local/demoup"),
+        "summary 应含 local/<name>，实际：{}",
+        &text[..text.len().min(400)]
+    );
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    assert!(reg.get("local/demoup").is_ok(), "应登记 local/demoup");
+}
+
+#[tokio::test]
+async fn install_local_upload_rejects_oversize() {
+    // 用仅挂 1MiB limit 的 router 验证超限 → 413，不依赖 MAX_UPLOAD_BYTES 真值
+    use axum::body::Bytes;
+    use axum::response::IntoResponse;
+    use axum::{extract::DefaultBodyLimit, routing::post, Router};
+    async fn echo(body: Bytes) -> impl IntoResponse {
+        format!("{} bytes", body.len())
+    }
+    let app: Router = Router::new()
+        .route("/upload", post(echo))
+        .layer(DefaultBodyLimit::max(1024 * 1024));
+    let big = vec![0u8; 1024 * 1024 + 1];
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload")
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(big))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

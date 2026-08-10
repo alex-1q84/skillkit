@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 skillkit-core = { path = "../core" }
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
@@ -18,11 +18,12 @@ dirs = "5"
 notify = "8"
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
+tempfile = "3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-tempfile = "3"
+zip = "2"
 
 [lints]
 workspace = true

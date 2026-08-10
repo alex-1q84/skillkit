@@ -1,13 +1,14 @@
 //! Skills 视图：registry 总览 + install/upgrade/uninstall。
 use askama::Template;
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
 use skillkit_core::{registry::SkillMeta, Candidate, Registry, Scope, SourcesStore};
 use std::collections::HashMap;
+use tempfile::TempDir;
 
 use crate::routes::{error_response, SkillsQuery};
 use crate::AppState;
@@ -648,16 +649,93 @@ pub async fn install_local(
     // 空表单字段会序列化成 `name=`（Some("")），与「未填」等价，归一为 None。
     let name = f.name.as_deref().filter(|s| !s.trim().is_empty());
     match skillkit_core::install_local(&state.paths, &f.path, name, scope, force) {
-        Ok(_) => render_skills(
+        Ok(m) => render_skills(
             state,
             token,
-            Some(&format!("✓ 已安装本地 skill：{}", f.path)),
+            Some(&format!("✓ 已安装本地 skill：{}", m.id)),
             false,
             vec![],
             vec![],
         ),
         Err(e) => {
             tracing::error!(error = ?e, "install-local 失败：{}", f.path);
+            error_response(format!("安装失败：{e}"))
+        }
+    }
+}
+
+/// upload 端点 body 上限（zip/目录上传）。
+pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
+
+/// POST 上传 zip 安装本地 skill（multipart）。成功完整 Skills 页，失败 toast。
+/// 目录上传（`file` 字段，多 part）在 Task 2 接入；本版本仅 zip（`archive` 字段）。
+pub async fn install_local_upload(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    mut multipart: Multipart,
+) -> Response {
+    let mut archive: Option<Vec<u8>> = None;
+    let mut name: Option<String> = None;
+    let mut scope = Scope::Local;
+    let mut force = false;
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => break,
+            Err(e) => return error_response(format!("读取上传字段失败：{e}")),
+        };
+        let fname = field.name().unwrap_or("").to_string();
+        let bytes = match field.bytes().await {
+            Ok(b) => b,
+            Err(e) => return error_response(format!("读取字段内容失败：{e}")),
+        };
+        match fname.as_str() {
+            "archive" => archive = Some(bytes.to_vec()),
+            "name" => {
+                let t = String::from_utf8_lossy(&bytes).trim().to_string();
+                if !t.is_empty() {
+                    name = Some(t);
+                }
+            }
+            "scope" => {
+                if String::from_utf8_lossy(&bytes).trim() == "global" {
+                    scope = Scope::Global;
+                }
+            }
+            "force" => {
+                force = matches!(String::from_utf8_lossy(&bytes).trim(), "on" | "true" | "1");
+            }
+            _ => {}
+        }
+    }
+    let Some(archive) = archive else {
+        return error_response("未收到 archive（.zip）字段".to_string());
+    };
+    let tmp = match TempDir::new() {
+        Ok(t) => t,
+        Err(e) => return error_response(format!("创建临时目录失败：{e}")),
+    };
+    let zip_path = tmp.path().join("upload.zip");
+    if let Err(e) = std::fs::write(&zip_path, &archive) {
+        return error_response(format!("写入临时文件失败：{e}"));
+    }
+    match skillkit_core::install_local(
+        &state.paths,
+        zip_path.to_str().unwrap(),
+        name.as_deref(),
+        scope,
+        force,
+    ) {
+        Ok(m) => render_skills(
+            state,
+            token,
+            Some(&format!("✓ 已安装本地 skill：{}", m.id)),
+            false,
+            vec![],
+            vec![],
+        ),
+        Err(e) => {
+            tracing::error!(error = ?e, "install-local upload 失败");
             error_response(format!("安装失败：{e}"))
         }
     }
