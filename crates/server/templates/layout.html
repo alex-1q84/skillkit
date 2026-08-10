@@ -199,6 +199,132 @@
         showToast(msg);
       }
     });
+
+    // ===== install-local modal 交互（拖放/选择/互斥/提交路由） =====
+    function installLocalSetup(modal) {
+      var form = modal.querySelector('#install-form');
+      if (!form || form.dataset.ready) return;
+      form.dataset.ready = '1';
+      var dz = form.querySelector('#install-drop-zone');
+      var archiveInput = form.querySelector('input[name="archive"]');
+      var fileInput = form.querySelector('input[name="file"]');
+      var pathInput = form.querySelector('input[name="path"]');
+      function clearCard() { var c = dz.querySelector('.file-card'); if (c) c.remove(); }
+      function showCard(name, size) {
+        clearCard();
+        var c = document.createElement('div');
+        c.className = 'file-card';
+        c.innerHTML = name + (size ? ' · ' + size : '') + ' <button type="button">×</button>';
+        c.querySelector('button').addEventListener('click', function () { resetSource(); });
+        dz.querySelector('.drop-actions').before(c);
+      }
+      function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB'; }
+      function resetSource() {
+        archiveInput.value = ''; fileInput.value = ''; pathInput.value = '';
+        dz.classList.remove('has-file'); clearCard();
+      }
+      function setArchive() {
+        fileInput.value = ''; pathInput.value = '';
+        dz.classList.add('has-file');
+        if (archiveInput.files[0]) showCard(archiveInput.files[0].name, fmtSize(archiveInput.files[0].size));
+      }
+      function setDir() {
+        archiveInput.value = ''; pathInput.value = '';
+        dz.classList.add('has-file');
+        if (fileInput.files.length) {
+          var rel = fileInput.files[0].webkitRelativePath || fileInput.files[0].name;
+          var top = rel.split('/')[0];
+          showCard(top + '/（' + fileInput.files.length + ' 个文件）', '');
+        }
+      }
+      dz.querySelectorAll('[data-pick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          (btn.dataset.pick === 'archive' ? archiveInput : fileInput).click();
+        });
+      });
+      archiveInput.addEventListener('change', function () { if (archiveInput.files[0]) setArchive(); });
+      fileInput.addEventListener('change', function () { if (fileInput.files.length) setDir(); });
+      pathInput.addEventListener('input', function () {
+        if (pathInput.value.trim()) { archiveInput.value = ''; fileInput.value = ''; dz.classList.remove('has-file'); clearCard(); }
+      });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dz.classList.add('drag'); });
+      });
+      ['dragleave', 'dragend'].forEach(function (ev) {
+        dz.addEventListener(ev, function () { dz.classList.remove('drag'); });
+      });
+      dz.addEventListener('drop', function (e) {
+        e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag');
+        var files = e.dataTransfer.files;
+        if (!files || !files.length) return;
+        var dt = new DataTransfer();
+        for (var i = 0; i < files.length; i++) dt.items.add(files[i]);
+        var first = files[0];
+        var rel = first.webkitRelativePath || '';
+        if (rel.indexOf('/') >= 0 || files.length > 1) {
+          fileInput.files = dt.files; setDir();
+        } else {
+          archiveInput.files = dt.files; setArchive();
+        }
+      });
+    }
+
+    function installLocalSubmit(e) {
+      e.preventDefault();
+      var form = e.target;
+      var token = form.dataset.token || '';
+      var archiveInput = form.querySelector('input[name="archive"]');
+      var fileInput = form.querySelector('input[name="file"]');
+      var pathInput = form.querySelector('input[name="path"]');
+      var nameVal = form.querySelector('input[name="name"]').value.trim();
+      var scopeVal = form.querySelector('select[name="scope"]').value;
+      var forceVal = form.querySelector('input[name="force"]').checked;
+      var url, fd = new FormData();
+      if (nameVal) fd.append('name', nameVal);
+      fd.append('scope', scopeVal);
+      if (forceVal) fd.append('force', 'on');
+      var hasZip = archiveInput.files && archiveInput.files[0];
+      var hasDir = fileInput.files && fileInput.files.length;
+      if (hasZip) {
+        url = '/' + token + '/skills/install-local/upload';
+        fd.append('archive', archiveInput.files[0], archiveInput.files[0].name);
+      } else if (hasDir) {
+        url = '/' + token + '/skills/install-local/upload';
+        for (var i = 0; i < fileInput.files.length; i++) {
+          var f = fileInput.files[i];
+          fd.append('file', f, f.webkitRelativePath || f.name);
+        }
+      } else if (pathInput.value.trim()) {
+        url = '/' + token + '/skills/install-local';
+        fd.append('path', pathInput.value.trim());
+      } else {
+        showToast('请拖放/选择文件，或输入路径');
+        return false;
+      }
+      var btn = form.querySelector('.install-actions .primary');
+      btn.disabled = true;
+      var orig = btn.textContent;
+      btn.textContent = '安装中…';
+      fetch(url, { method: 'POST', body: fd, headers: { 'HX-Request': 'true' } })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || '安装失败'); });
+          return r.text();
+        })
+        .then(function (html) {
+          document.open(); document.write(html); document.close();
+        })
+        .catch(function (err) {
+          btn.disabled = false; btn.textContent = orig;
+          showToast(err.message || '安装失败，请重试');
+        });
+      return false;
+    }
+
+    // modal 注入 #modal-mount 后初始化交互
+    document.body.addEventListener('htmx:afterSwap', function () {
+      var m = document.querySelector('.browse-modal.install-modal');
+      if (m) installLocalSetup(m);
+    });
   </script>
 </body>
 </html>
