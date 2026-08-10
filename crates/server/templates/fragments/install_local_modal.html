@@ -1,0 +1,38 @@
+<div class="browse-overlay">
+  <div class="browse-modal install-modal" role="dialog" aria-label="安装本地 skill">
+    <header class="browse-header">
+      <span class="browse-cwd">⇣ 安装本地 skill</span>
+      <button type="button" class="browse-close" aria-label="关闭">✕</button>
+    </header>
+    <form class="install-body" id="install-form" data-token="{{ token }}" onsubmit="return installLocalSubmit(event)">
+      <div class="drop-zone" id="install-drop-zone">
+        <p class="drop-hint">⇣ 拖放 .zip 文件或目录到此处</p>
+        <div class="drop-actions">
+          <button type="button" data-pick="archive">选择 .zip</button>
+          <button type="button" data-pick="file">选择目录</button>
+        </div>
+        <input type="file" name="archive" accept=".zip,application/zip" hidden>
+        <input type="file" name="file" webkitdirectory directory multiple hidden>
+      </div>
+      <div class="install-fields">
+        <label class="field">
+          <span>或直接输入路径</span>
+          <input type="text" name="path" placeholder="~/skills/my-skill 或 ./pkg.zip">
+        </label>
+        <details class="advanced">
+          <summary>高级选项</summary>
+          <label class="field"><span>name</span><input type="text" name="name" placeholder="默认读 SKILL.md"></label>
+          <label class="field">
+            <span>scope</span>
+            <select name="scope"><option value="local" selected>local</option><option value="global">global</option></select>
+          </label>
+          <label class="field-check"><input type="checkbox" name="force" value="on"> 覆盖已存在</label>
+        </details>
+      </div>
+      <div class="install-actions">
+        <button type="button" onclick="this.closest('.browse-overlay').remove()">取消</button>
+        <button type="submit" class="primary">▶ 安装</button>
+      </div>
+    </form>
+  </div>
+</div>

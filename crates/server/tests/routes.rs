@@ -2117,3 +2117,32 @@ pwn\r\n\
         &text[..text.len().min(200)]
     );
 }
+
+#[tokio::test]
+async fn install_local_get_returns_modal_fragment() {
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/test-token/skills/install-local")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = common::body_string(resp).await;
+    assert!(text.contains("browse-overlay"), "缺遮罩层");
+    assert!(text.contains("install-modal"), "缺 modal 容器");
+    assert!(text.contains(r#"id="install-drop-zone""#), "缺拖放区");
+    assert!(text.contains(r#"id="install-form""#), "缺 form");
+    assert!(
+        text.contains(r#"name="archive""#)
+            && text.contains(r#"name="file""#)
+            && text.contains(r#"name="path""#),
+        "缺三种输入字段"
+    );
+    assert!(text.contains("取消"), "缺取消按钮");
+    assert!(!text.contains("install-local-form"), "不应残留旧表单 class");
+}

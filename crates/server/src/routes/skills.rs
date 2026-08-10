@@ -621,7 +621,7 @@ pub struct InstallLocalForm {
 }
 
 #[derive(Template)]
-#[template(path = "fragments/install_local_form.html")]
+#[template(path = "fragments/install_local_modal.html")]
 pub struct InstallLocalFormTpl<'a> {
     pub token: &'a str,
 }
