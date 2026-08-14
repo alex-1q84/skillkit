@@ -19,9 +19,10 @@ pub fn run(cmd: ImportExistingCmd) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "imported {}，unmanaged {}，reinstalled {}，skipped {}",
+            "imported {}（入池迁址 {}，含存量补迁 {}），reinstalled {}，skipped {}",
             report.imported.len(),
-            report.unmanaged.len(),
+            report.relocated.len(),
+            report.relinked.len(),
             report.reinstalled.len(),
             report.skipped.len()
         );
@@ -52,5 +53,28 @@ mod tests {
         let cmd = ImportExistingCmd::parse_from(["skillkit"]);
         assert!(!cmd.dry_run);
         assert!(!cmd.json);
+    }
+
+    #[test]
+    fn import_json_schema_locks_fields() {
+        let json = serde_json::json!({
+            "imported": ["foo"],
+            "unmanaged": ["foo"],
+            "reinstalled": [],
+            "skipped": [],
+            "relocated": ["foo"],
+            "relinked": ["bar"],
+        });
+        let s = json.to_string();
+        for f in [
+            "\"imported\"",
+            "\"unmanaged\"",
+            "\"reinstalled\"",
+            "\"skipped\"",
+            "\"relocated\"",
+            "\"relinked\"",
+        ] {
+            assert!(s.contains(f), "import --json schema 应含 {f}：{s}");
+        }
     }
 }

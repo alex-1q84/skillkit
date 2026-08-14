@@ -18,6 +18,10 @@ pub struct ImportReport {
     pub reinstalled: Vec<String>,
     /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装撞占位）。
     pub skipped: Vec<String>,
+    /// 新发现并迁入池子的 skill（主循环 unmanaged 分支 adopt）。
+    pub relocated: Vec<String>,
+    /// 存量补迁入池的 skill（relink_unmanaged）。
+    pub relinked: Vec<String>,
 }
 
 pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {

@@ -138,7 +138,7 @@ fn import_existing_dry_run_writes_nothing() {
         .success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_string();
     assert!(
-        stdout.contains("unmanaged 1"),
+        stdout.contains("imported 1"),
         "dry-run 应报告会导入 1 个：{stdout}"
     );
 

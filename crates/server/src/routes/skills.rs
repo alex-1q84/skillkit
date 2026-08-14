@@ -341,9 +341,10 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
     match skillkit_core::import_existing(&state.paths, false) {
         Ok(r) => {
             let summary = format!(
-                "imported {}，unmanaged {}，reinstalled {}，skipped {}",
+                "imported {}（入池迁址 {}，含存量补迁 {}），reinstalled {}，skipped {}",
                 r.imported.len(),
-                r.unmanaged.len(),
+                r.relocated.len(),
+                r.relinked.len(),
                 r.reinstalled.len(),
                 r.skipped.len()
             );
