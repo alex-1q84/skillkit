@@ -26,6 +26,7 @@ pub struct ImportReport {
 
 pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
     let mut report = ImportReport::default();
+    relink_unmanaged(paths, &mut report, dry_run)?;
     let reg = Registry::load(paths)?;
     let mut registered: std::collections::HashSet<String> =
         reg.skills.values().map(|m| m.name.clone()).collect();
@@ -184,6 +185,56 @@ fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
     Ok(target)
 }
 
+/// 遍历 registry 的 unmanaged global skill：
+/// - canonical 不在池且是真实目录 → adopt 入池 + 更新 canonical_path + 立即 save（对齐 §3.2 顺序）
+/// - canonical 不在池但 dangling/symlink → warn 跳过，**不**补桥接（防自指环，spec §3.3）
+/// - canonical 已在池（含刚归槽）→ 补建缺失桥接（ensure_global_claude 幂等）
+///
+/// dry_run 只统计 report.relinked，不迁移/不桥接。
+fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> Result<()> {
+    let pool = paths.skillkit_skills_dir();
+    let reg = Registry::load(paths)?;
+    let unmanaged: Vec<SkillMeta> = reg
+        .skills
+        .values()
+        .filter(|m| m.source == "unmanaged" && m.scope == Scope::Global)
+        .cloned()
+        .collect();
+    for mut meta in unmanaged {
+        let canon = Path::new(&meta.canonical_path);
+        if !canon.starts_with(&pool) {
+            // canonical 不在池：尝试归槽
+            let is_real_dir = std::fs::symlink_metadata(canon)
+                .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
+                .unwrap_or(false);
+            if !is_real_dir {
+                tracing::warn!(
+                    "relink 跳过 unmanaged {}：canonical {} 非真实目录（dangling/symlink）",
+                    meta.name,
+                    meta.canonical_path
+                );
+                continue; // 不补桥接
+            }
+            if dry_run {
+                report.relinked.push(meta.name.clone());
+                continue;
+            }
+            let target = adopt_into_pool(paths, &meta.name, canon)?;
+            meta.canonical_path = target.to_string_lossy().into_owned();
+            // 立即落盘（每 skill adopt 后 save，失败面可推导）
+            let mut reg = Registry::load(paths)?;
+            reg.upsert(meta.clone());
+            reg.save(paths)?;
+            report.relinked.push(meta.name.clone());
+        }
+        // canonical 已在池（刚归槽或本就在）：补建缺失桥接（幂等，在位跳过）
+        if !dry_run {
+            crate::symlink::ensure_global_claude(paths, &meta)?;
+        }
+    }
+    Ok(())
+}
+
 /// 重装入池：derive source name → 注册 source → install Global。撞占位/下载失败 → Err。
 fn try_reinstall(paths: &Paths, name: &str, package: &str) -> Result<()> {
     let source_name = derive_source_name(package).ok_or_else(|| SkillkitError::Tool {
@@ -262,6 +313,140 @@ mod tests {
         let target = adopt_into_pool(&paths, "foo", &src).unwrap();
         assert_eq!(target, pool);
         assert!(pool.join("SKILL.md").exists(), "池子保留不报错");
+    }
+
+    fn seed_unmanaged_global(paths: &Paths, name: &str, canonical: &Path) {
+        let mut reg = Registry::load(paths).unwrap();
+        reg.upsert(SkillMeta {
+            id: Registry::skill_id("unmanaged", name),
+            name: name.into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: "t".into(),
+            canonical_path: canonical.to_string_lossy().into_owned(),
+        });
+        reg.save(paths).unwrap();
+    }
+
+    #[test]
+    fn relink_migrates_existing_unmanaged_to_pool() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // 存量 unmanaged，canonical 在 ~/.agents/skills/foo（真实目录，无桥接）
+        let canon = paths.agents_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        seed_unmanaged_global(&paths, "foo", &canon);
+
+        let mut report = ImportReport::default();
+        relink_unmanaged(&paths, &mut report, false).unwrap();
+        assert_eq!(report.relinked, vec!["foo".to_string()]);
+        let pool = paths.skillkit_skills_dir().join("foo");
+        assert!(pool.join("SKILL.md").exists(), "迁入池");
+        assert!(
+            !std::fs::symlink_metadata(&canon).unwrap().is_dir(),
+            "原位置真实目录已迁空（后建桥接 symlink）"
+        );
+        // 桥接建（agents 位置=原 canon，迁空后建 symlink）
+        assert!(
+            paths.agents_skills_dir().join("foo").is_symlink(),
+            "agents 桥接"
+        );
+        assert!(
+            paths.claude_skills_dir().join("foo").is_symlink(),
+            "claude 桥接"
+        );
+        let reg_after = Registry::load(&paths).unwrap();
+        let m = reg_after.get("unmanaged/foo").unwrap();
+        assert_eq!(
+            m.canonical_path,
+            pool.to_string_lossy(),
+            "registry canonical 更新"
+        );
+    }
+
+    #[test]
+    fn relink_rebuilds_missing_bridge_for_pooled_canonical() {
+        // 中间态：canonical 已在池但桥接缺
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let pool = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&pool).unwrap();
+        std::fs::write(pool.join("SKILL.md"), "x").unwrap();
+        seed_unmanaged_global(&paths, "foo", &pool);
+
+        let mut report = ImportReport::default();
+        relink_unmanaged(&paths, &mut report, false).unwrap();
+        assert!(report.relinked.is_empty(), "已在池不重复 relinked");
+        assert!(
+            paths.agents_skills_dir().join("foo").is_symlink(),
+            "补建 agents 桥接"
+        );
+        assert!(
+            paths.claude_skills_dir().join("foo").is_symlink(),
+            "补建 claude 桥接"
+        );
+    }
+
+    #[test]
+    fn relink_skips_dangling_without_bridge() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // canonical 指不存在的 agents 路径（dangling）
+        let dangling = paths.agents_skills_dir().join("foo");
+        seed_unmanaged_global(&paths, "foo", &dangling);
+
+        let mut report = ImportReport::default();
+        relink_unmanaged(&paths, &mut report, false).unwrap();
+        assert!(report.relinked.is_empty());
+        // 不建自指/悬空桥接（P2-1 关键）
+        assert!(
+            !paths.agents_skills_dir().join("foo").exists(),
+            "无 agents symlink"
+        );
+        assert!(
+            !paths.claude_skills_dir().join("foo").exists(),
+            "无 claude symlink"
+        );
+    }
+
+    #[test]
+    fn relink_skips_symlink_canonical_without_bridge() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(paths.agents_skills_dir()).unwrap();
+        let link = paths.agents_skills_dir().join("foo");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        seed_unmanaged_global(&paths, "foo", &link);
+
+        let mut report = ImportReport::default();
+        relink_unmanaged(&paths, &mut report, false).unwrap();
+        assert!(report.relinked.is_empty());
+        assert!(link.is_symlink(), "原 symlink 保留未动");
+        assert!(!paths.claude_skills_dir().join("foo").exists(), "不建桥接");
+    }
+
+    #[test]
+    fn relink_dry_run_counts_only() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let canon = paths.agents_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        seed_unmanaged_global(&paths, "foo", &canon);
+
+        let mut report = ImportReport::default();
+        relink_unmanaged(&paths, &mut report, true).unwrap();
+        assert_eq!(report.relinked, vec!["foo".to_string()]);
+        assert!(canon.exists(), "dry_run 不迁文件");
+        assert!(
+            !paths.agents_skills_dir().join("foo").is_symlink(),
+            "dry_run 不建桥接"
+        );
     }
 
     #[test]
