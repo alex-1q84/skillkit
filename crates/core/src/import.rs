@@ -5,7 +5,7 @@ use crate::error::{Result, SkillkitError};
 use crate::paths::Paths;
 use crate::registry::{Registry, Scope, SkillMeta};
 use crate::source::{derive_source_name, Source, SourcesStore};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// import 结果汇总。
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -165,6 +165,25 @@ fn read_git_remote(dir: &Path) -> Option<String> {
     }
 }
 
+/// 把真实目录 src 迁入池子 ~/.skillkit/.agents/skills/<name>。
+/// 池子已有同名 → 删 src 冗余副本（池子权威，对齐 scope.rs:60-64）；
+/// 池子空、src 在 → rename（同 FS 原子）；src 空 target 在 → 幂等返回 target（中间态收敛）。
+/// src 必须是真实目录——调用方负责过滤 symlink（对齐 import.rs:129「只迁真实目录」）。
+fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
+    let target = paths.skillkit_skills_dir().join(name);
+    if target.exists() {
+        if src.exists() {
+            std::fs::remove_dir_all(src)?;
+        }
+    } else if src.exists() {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(src, &target)?;
+    }
+    Ok(target)
+}
+
 /// 重装入池：derive source name → 注册 source → install Global。撞占位/下载失败 → Err。
 fn try_reinstall(paths: &Paths, name: &str, package: &str) -> Result<()> {
     let source_name = derive_source_name(package).ok_or_else(|| SkillkitError::Tool {
@@ -195,6 +214,54 @@ mod tests {
             format!("---\nname: {name}\n---\n# {name}\n"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn adopt_into_pool_migrates_real_dir() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let src = tmp.path().join("src/foo");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "x").unwrap();
+        let target = adopt_into_pool(&paths, "foo", &src).unwrap();
+        assert_eq!(target, paths.skillkit_skills_dir().join("foo"));
+        assert!(target.join("SKILL.md").exists(), "内容随迁移");
+        assert!(!src.exists(), "原位置已迁走");
+    }
+
+    #[test]
+    fn adopt_into_pool_dedup_when_pool_has_canonical() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // 池子已有 foo（旧残留）
+        let pool = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&pool).unwrap();
+        std::fs::write(pool.join("SKILL.md"), "pool").unwrap();
+        // 原位置也有 foo（冗余副本）
+        let src = tmp.path().join("src/foo");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "src").unwrap();
+        let target = adopt_into_pool(&paths, "foo", &src).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "pool",
+            "池子权威，src 副本删除"
+        );
+        assert!(!src.exists(), "冗余副本已删");
+    }
+
+    #[test]
+    fn adopt_into_pool_idempotent_when_src_gone_target_present() {
+        // 中间态：上次 adopt 入池、registry 未落盘，重跑 src 空 target 在
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let pool = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&pool).unwrap();
+        std::fs::write(pool.join("SKILL.md"), "x").unwrap();
+        let src = tmp.path().join("src/foo"); // 不存在
+        let target = adopt_into_pool(&paths, "foo", &src).unwrap();
+        assert_eq!(target, pool);
+        assert!(pool.join("SKILL.md").exists(), "池子保留不报错");
     }
 
     #[test]
