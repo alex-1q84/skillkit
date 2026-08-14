@@ -596,6 +596,11 @@ mod tests {
                 "{n} 迁入池子"
             );
         }
+        // codex 历史目录迁空（bar 来自 codex，原目录整个 rename 走）
+        assert!(
+            !paths.codex_skills_dir().join("bar").exists(),
+            "codex/bar 原位置迁空"
+        );
 
         // symlink 跳过（claude 里只有 baz 登记，foo-link 没有）
         assert!(reg.get("unmanaged/foo-link").is_err());
@@ -612,6 +617,19 @@ mod tests {
 
         let report = import_existing(&paths, true).unwrap();
         assert!(report.unmanaged.contains(&"foo".to_string()));
+        assert!(
+            paths
+                .agents_skills_dir()
+                .join("foo")
+                .join("SKILL.md")
+                .exists(),
+            "dry-run 不迁文件（原位置仍是真实目录）"
+        );
+        assert!(
+            !paths.agents_skills_dir().join("foo").is_symlink()
+                && !paths.claude_skills_dir().join("foo").exists(),
+            "dry-run 不建桥接"
+        );
         assert!(
             Registry::load(&paths).unwrap().skills.is_empty(),
             "dry-run 不写 registry"

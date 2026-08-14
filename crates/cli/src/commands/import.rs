@@ -57,15 +57,15 @@ mod tests {
 
     #[test]
     fn import_json_schema_locks_fields() {
-        let json = serde_json::json!({
-            "imported": ["foo"],
-            "unmanaged": ["foo"],
-            "reinstalled": [],
-            "skipped": [],
-            "relocated": ["foo"],
-            "relinked": ["bar"],
-        });
-        let s = json.to_string();
+        let report = skillkit_core::ImportReport {
+            imported: vec!["foo".into()],
+            unmanaged: vec!["foo".into()],
+            reinstalled: vec![],
+            skipped: vec![],
+            relocated: vec!["foo".into()],
+            relinked: vec!["bar".into()],
+        };
+        let s = serde_json::to_string(&report).unwrap();
         for f in [
             "\"imported\"",
             "\"unmanaged\"",
