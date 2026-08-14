@@ -91,10 +91,12 @@ skillkit upgrade --all [--yes]                   # 批量升级，--yes 跳过�
 ### import-existing — 导入存量 skill
 
 ```bash
-skillkit import-existing                         # 扫描存量目录，可溯重装入池 + 无源登记
+skillkit import-existing                         # 扫描存量目录，可溯重装入池 + 无源迁入池（原位 symlink 桥接）
 skillkit import-existing --dry-run               # 只输出不写
 skillkit import-existing --json                  # JSON 输出
 ```
+
+无源（unmanaged）skill 物理迁入 canonical 池，原位置（`~/.agents/skills/`、`~/.claude/skills/`）用 symlink 桥接取代；已登记的存量 unmanaged 也会被补迁入池（幂等）。
 
 ### remove — 卸载 skill
 
@@ -104,7 +106,7 @@ skillkit remove <id> --yes                       # 跳过确认
 skillkit remove <id> --json                      # 输出 {id,removed_canonical}（隐含 --yes）
 ```
 
-unmanaged skill（无源存量）只删登记不删目录。
+unmanaged skill（无源存量）只删登记不删 canonical 目录（迁池后 canonical 在 ~/.skillkit/.agents/skills/）。
 
 ### serve — Web GUI
 
