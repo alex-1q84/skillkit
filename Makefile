@@ -31,7 +31,7 @@ run:
 	cargo run -p skillkit-cli -- $(ARGS)
 
 # --- e2e（真实浏览器驱动 GUI，不进 check；需 chromium + pipx python playwright）---
-PY        := /Users/mywo/.local/pipx/venvs/playwright/bin/python
+PY        ?= $(HOME)/.local/pipx/venvs/playwright/bin/python
 E2E_PORT  := 7417      # 避开主人日常 7317
 E2E_TOKEN := e2e-test
 E2E_BASE  := http://127.0.0.1:7417/e2e-test/

@@ -64,7 +64,7 @@ crates/server/
 - **HTTP 层测试**（`crates/server/tests/routes.rs`）：断言状态码 + 响应内容。
 - **片段契约测试**：断言 `?fragment=1` 响应**不含 `<nav>` / layout 脚本**、正常页含 nav。这是防导航重复类 bug 的自动防线（curl 级即可验证，不需真实浏览器）。
 - **e2e 测试**（`make e2e`）：python playwright 驱动真实 chromium，覆盖 HTTP 层测不到的浏览器内行为（htmx 换页、SSE 时序、导航重复回归）。用例在 `e2e/test_ui.py`，serve 由 Makefile 用固定 `--token e2e-test` + 临时 `$HOME` 拉起（隔离，不碰真实 `~/.skillkit`）。
-  - 依赖：pipx python playwright（`/Users/mywo/.local/pipx/venvs/playwright/bin/python`）+ chromium（首次 `playwright install chromium`）；无 pytest，纯脚本 + assert + 退出码。
+  - 依赖：pipx python playwright（`$(HOME)/.local/pipx/venvs/playwright/bin/python`，Makefile 变量 `PY` 可覆盖）+ chromium（首次 `playwright install chromium`）；无 pytest，纯脚本 + assert + 退出码。
   - `serve --token <固定值>` 仅用于 e2e/localhost（默认仍是随机 token）。
   - **e2e 不进 `make check`**（慢 + 依赖浏览器 + 需空闲端口），改动 GUI 后跑 `make e2e` 回归。
   - **写操作后等 htmx 换页**：用 `expect(locator).to_have_count()` 轮询，不用 `networkidle`（SSE 长连接会拖死它）；页面打开用 `wait_until="load"`。
