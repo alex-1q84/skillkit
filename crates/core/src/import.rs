@@ -91,28 +91,72 @@ pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
                     continue;
                 }
             }
-        } else if !dry_run {
-            let mut reg = Registry::load(paths)?;
-            reg.upsert(SkillMeta {
-                id: Registry::skill_id("unmanaged", &name),
-                name: name.clone(),
-                source: "unmanaged".into(),
-                scope: Scope::Global,
-                version: None,
-                computed_hash: None,
-                installed_at: crate::install::now_iso(),
-                canonical_path: canonical.clone(),
-            });
-            reg.save(paths)?;
-            registered.insert(name.clone());
-            report.unmanaged.push(name.clone());
         } else {
-            registered.insert(name.clone());
-            report.unmanaged.push(name.clone());
+            // unmanaged 分支（无 package）
+            let canon_path = Path::new(&canonical);
+            adopt_unmanaged(
+                paths,
+                &name,
+                canon_path,
+                dry_run,
+                &mut registered,
+                &mut report,
+            )?;
+            continue; // adopt_unmanaged 自管 imported.push，防落末尾双计
         }
         report.imported.push(name);
     }
     Ok(report)
+}
+
+/// 主循环 unmanaged 分支：symlink src 跳过；真实目录 adopt 入池 → registry save → 桥接。
+/// imported/unmanaged/relocated/skipped 计数由本函数负责。
+fn adopt_unmanaged(
+    paths: &Paths,
+    name: &str,
+    canon_path: &Path,
+    dry_run: bool,
+    registered: &mut std::collections::HashSet<String>,
+    report: &mut ImportReport,
+) -> Result<()> {
+    // 步骤 0：symlink src → skipped（dry_run 分叉前生效，防 rename symlink 产悬空 canonical）
+    if std::fs::symlink_metadata(canon_path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        report
+            .skipped
+            .push(format!("{name}（symlink，只迁真实目录）"));
+        return Ok(());
+    }
+    if dry_run {
+        registered.insert(name.to_string());
+        report.unmanaged.push(name.to_string());
+        report.relocated.push(name.to_string());
+        report.imported.push(name.to_string());
+        return Ok(());
+    }
+    // adopt → registry save → 桥接（对齐 install.rs:45-52 顺序）
+    let target = adopt_into_pool(paths, name, canon_path)?;
+    let meta = SkillMeta {
+        id: Registry::skill_id("unmanaged", name),
+        name: name.into(),
+        source: "unmanaged".into(),
+        scope: Scope::Global,
+        version: None,
+        computed_hash: None,
+        installed_at: crate::install::now_iso(),
+        canonical_path: target.to_string_lossy().into_owned(),
+    };
+    let mut reg = Registry::load(paths)?;
+    reg.upsert(meta.clone());
+    reg.save(paths)?;
+    crate::symlink::ensure_global_claude(paths, &meta)?;
+    registered.insert(name.to_string());
+    report.unmanaged.push(name.to_string());
+    report.relocated.push(name.to_string());
+    report.imported.push(name.to_string());
+    Ok(())
 }
 
 /// 扫描一个目录：收集 (name, canonical_path, package?)。SKILL.md 存在才算 skill。
@@ -450,6 +494,47 @@ mod tests {
     }
 
     #[test]
+    fn import_skips_symlink_src_in_agents() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // ~/.agents/skills/foo 是 symlink 指向外部真实目录
+        let real = tmp.path().join("real-foo");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("SKILL.md"), "x").unwrap();
+        std::fs::create_dir_all(paths.agents_skills_dir()).unwrap();
+        std::os::unix::fs::symlink(&real, paths.agents_skills_dir().join("foo")).unwrap();
+
+        let report = import_existing(&paths, false).unwrap();
+        assert!(
+            report.skipped.iter().any(|s| s.contains("foo")),
+            "symlink src 进 skipped"
+        );
+        assert!(
+            !paths.skillkit_skills_dir().join("foo").exists(),
+            "池子不出现 symlink-canonical"
+        );
+        assert!(
+            Registry::load(&paths)
+                .unwrap()
+                .get("unmanaged/foo")
+                .is_err(),
+            "registry 不登记 symlink src"
+        );
+    }
+
+    #[test]
+    fn import_cross_dir_same_name_agents_claude_aborts() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // agents/foo + claude/foo 均真实目录
+        make_skill(&paths.agents_skills_dir(), "foo");
+        make_skill(&paths.claude_skills_dir(), "foo");
+        // agents/foo adopt 入池后建 claude 桥接撞 claude/foo 真实目录 → CanonicalCreate
+        let result = import_existing(&paths, false);
+        assert!(result.is_err(), "agents+claude 同名真实目录应中断");
+    }
+
+    #[test]
     fn import_registers_unmanaged_and_skips_invalid() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
@@ -478,6 +563,7 @@ mod tests {
         assert!(report.imported.contains(&"bar".to_string()));
         assert!(report.imported.contains(&"baz".to_string()));
         assert_eq!(report.unmanaged.len(), 3);
+        assert_eq!(report.relocated.len(), 3, "三个迁池");
 
         let reg = Registry::load(&paths).unwrap();
         let foo = reg.get("unmanaged/foo").unwrap();
@@ -487,8 +573,29 @@ mod tests {
         let baz = reg.get("unmanaged/baz").unwrap();
         assert_eq!(
             baz.canonical_path,
-            paths.claude_skills_dir().join("baz").to_string_lossy()
+            paths.skillkit_skills_dir().join("baz").to_string_lossy(),
+            "baz 迁入池子（不再指原 claude 位置）"
         );
+        // 桥接在位
+        assert!(
+            paths.agents_skills_dir().join("baz").is_symlink(),
+            "agents 桥接 symlink"
+        );
+        assert!(
+            paths.claude_skills_dir().join("baz").is_symlink(),
+            "claude 桥接 symlink"
+        );
+        // foo/bar 同理迁池（断言 canonical 在池）
+        for n in ["foo", "bar"] {
+            assert!(
+                paths
+                    .skillkit_skills_dir()
+                    .join(n)
+                    .join("SKILL.md")
+                    .exists(),
+                "{n} 迁入池子"
+            );
+        }
 
         // symlink 跳过（claude 里只有 baz 登记，foo-link 没有）
         assert!(reg.get("unmanaged/foo-link").is_err());
