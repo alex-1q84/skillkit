@@ -418,11 +418,11 @@ a.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); 
 .page-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
 .page-head h1 { margin-bottom: 0; }
 .page-head .summary { font-family: var(--mono); font-size: 12.5px; color: var(--ok); margin: 0; }
-/* toolbar：搜索 + 动作按钮一行 */
-.toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-.find-bar { flex: 1; min-width: 240px; position: relative; }
+/* toolbar：搜索框在上，动作按钮居下左对齐 */
+.toolbar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; align-items: stretch; }
+.find-bar { min-width: 240px; position: relative; }
 .find-bar input { width: 100%; }
-.head-actions { display: flex; gap: 8px; align-items: center; }
+.head-actions { display: flex; gap: 12px; align-items: center; justify-content: flex-start; }
 
 /* tag：scope / source / unmanaged 彩色标签（对齐 demo） */
 .tag {
