@@ -141,10 +141,10 @@ imported N（入池迁址 M，含存量补迁 K），reinstalled ...，skipped .
 | adopt 时池子已有同名 canonical | 删原位置冗余副本（若存在），池子权威（对齐 `scope.rs:60-64`，不报错） |
 | relink 遇 canonical 不存在（dangling） | warn 跳过，不中断（用户手动删过，registry 记录仍在，可后续手工清） |
 | relink 遇 canonical 是 symlink | 跳过（只迁真实目录） |
-| 桥接遇 `~/.agents/skills/<name>` 或 `~/.claude/skills/<name>` 是真实目录占位 | `ensure_global_claude` → `ensure_link` 报 `CanonicalCreate`（`symlink.rs:36-38`），不静默删；import 中断，报错引导用户先手动处理占位目录 |
+| 桥接遇 `~/.agents/skills/<name>` 或 `~/.claude/skills/<name>` 是真实目录占位 | `ensure_global_claude` → `ensure_link` 报 `CanonicalCreate`（`symlink.rs:36-38`），不静默删；**该 skill 降级 skipped 点名**（含原因与「清理占位目录后重跑 import」引导），其余 skill 继续，不再整批中断。registry 已一致（canonical 指池），清占位后重跑 relink 补建桥接自动收敛。（2026-08-14 修订：原「import 中断」设计实测一个占位目录废掉整次导入且 GUI 只显示「导入失败」无原因，代价过高） |
 | rename / FS 失败（权限 / 跨文件系统 EXDEV） | `SkillkitError::Io`（`error.rs:25-26` `#[from]`，adopt 裸 `?` 自动映射），canonical 未动、registry 不落盘；保留原始 io 信息（如 EXDEV「Cross-device link」） |
 | 主循环扫到 `~/.agents/skills/<name>` 是 symlink（agents 分支 `skip_symlink=false`） | skipped，不 adopt（`rename` symlink 只移链接、池中 canonical 变悬空 symlink 破坏模型），对齐 `import.rs:129`「只迁真实目录」 |
-| 跨目录同名副本（同名 skill 散落多个目录） | import dedup 只登记首个（`import.rs:64-70`），relink 只迁 registry 记录的 canonical 那份。codex/cursor 副本留原地成优雅 orphan（桥接不碰这两个目录）；但 agents+claude 同时有同名真实目录副本时，首个 adopt 入池后建 claude 桥接会撞 claude 真实目录占位 → `CanonicalCreate` 中断（归入上面桥接占位行同等待遇），需用户先手动删 claude 副本，重跑会持续撞同一占位直到清理 |
+| 跨目录同名副本（同名 skill 散落多个目录） | import dedup 只登记首个（`import.rs:64-70`），relink 只迁 registry 记录的 canonical 那份。codex/cursor 副本留原地成优雅 orphan（桥接不碰这两个目录）；但 agents+claude 同时有同名真实目录副本时，首个 adopt 入池后建 claude 桥接会撞 claude 真实目录占位 → 降级 skipped 点名（归入上面桥接占位行同等待遇），用户手动删 claude 副本后重跑收敛 |
 
 uninstall 连带影响（行为不变，仅位置变）：unmanaged 的 `computed_hash=None`，`uninstall`（`install.rs:61`）本就不删 canonical。改后 canonical 在池子，uninstall 仍只摘 registry 记录 → 池子留孤儿目录 + 桥接 symlink 变 dangling。下次 `import-existing` 的 relink 不会重新登记孤儿（canonical 已在池，跳过归池），需用户手动 `rm` 池子目录 + 残留 symlink，或在 GUI remove。本 spec 不改 uninstall 范围（YAGNI），仅声明该连带影响。
 
@@ -175,9 +175,10 @@ core 单元（`import.rs` tests，现有 4 个需更新）：
 - relink 存量补迁：registry 预置 canonical 在 `~/.agents/skills/<x>` 的 unmanaged（global）→ import 后迁池 + 桥接 + canonical 更新 + `report.relinked` 含 x。
 - relink 补桥接（中间态收敛）：registry 预置 canonical 已在池、但 `~/.agents/skills/<x>` 桥接缺失 → import 后 relink 不重 adopt、补建桥接 symlink。
 - relink 边界：canonical dangling（warn 跳过，且**不**补建桥接——断言 `~/.agents/skills/<x>`、`~/.claude/skills/<x>` 均无新建 symlink，验无自指/悬空环，对应 P2-1）、canonical 是 symlink（跳过，同样断言无新建 symlink）、canonical 已在池且桥接在位（全跳过）。
-- 桥接占位报错：预置 `~/.claude/skills/<name>` 真实目录占位 → import 中断报 `CanonicalCreate`，池子 / registry 不变。
+- 桥接占位降级（2026-08-14 修订）：预置 `~/.claude/skills/<name>` 真实目录占位 → import 不报错、该 skill 进 skipped 点名（含原因），池子 / registry / 占位目录均不变。
+- relink 撞占位降级：registry 预置 canonical 已在池 + claude 真实目录占位 → import 不中断，skipped 点名，已正确的 agents 桥接保留。
 - symlink-src 跳过（验 P1）：预置 `~/.agents/skills/<name>` 为指向外部真实目录的 symlink → import 后该条进 skipped，池子不出现同名 symlink-canonical、原 symlink 保留。
-- 跨目录同名中断（验 P2-3）：预置 agents/foo + claude/foo（均真实目录）→ import 报 `CanonicalCreate`（agents/foo adopt 入池后建 claude 桥接撞占位）；codex/cursor 同名副本则走优雅 orphan（不报错、池子不出现）。
+- 跨目录同名降级（验 P2-3，2026-08-14 修订）：预置 agents/foo + claude/foo（均真实目录）→ import 不报错，agents/foo 入池落盘、claude/foo 占位保留、skipped 点名桥接失败；codex/cursor 同名副本则走优雅 orphan（不报错、池子不出现）。
 
 集成（`crates/core/tests/`，若缺则加）：tempdir 全流程——预置 4 目录存量 skill → import → 断言全部 canonical 在池 + agents/claude 双层 symlink + codex/cursor 历史目录已迁空。
 
@@ -193,7 +194,7 @@ GUI e2e（可选，`make e2e`）：「导入存量」按钮执行后 summary 含
 - 历史存量靠 relink 自动补迁（非用户手动）：import 幂等跳过已登记，光改主循环触及不到存量；relink 按 registry 遍历补迁，一次 import 全归池。否定：要求用户先删 registry 记录再重 import（破坏性、易丢元数据）。
 - 迁移用 rename（同文件系统原子），不做 copy + delete：src 与 target 同在 `$HOME`，rename 原子且零拷贝。否定：copy 到暂存再 rename（install_local spec §3.2 三段模式）——那是跨源复制不可信输入的场景，import 迁的是已在用户目录的可信文件，无需暂存。
 - 池子已有同名时删原位置副本（池子权威），对齐 scope.rs：不引入 force 开关。否定：报错让用户选——原位置副本本就是冗余（import 登记的目的就是归池），报错增加无谓摩擦。
-- 不引入 force 跳过桥接占位：`ensure_link` 真实目录占位报错是数据损失防护承重墙（`symlink.rs:36-38`、scope spec §3.1），不为便利放松。占位罕见（用户手工放了同名真实目录），报错引导手动处理足够。
+- 桥接撞占位不放松 `ensure_link` 承重墙，但降级为 skipped 点名而非整批中断（2026-08-14 修订）：`ensure_link` 真实目录占位报错是数据损失防护承重墙（`symlink.rs:36-38`、scope spec §3.1），不为便利放松；但原「import 中断报错」设计实测有真实代价（Claude CLI 自装 skill 即可触发占位，一个占位废掉整次导入、GUI 无原因）。降级后 registry 已一致（canonical 指池），清占位后重跑自动收敛，中断本就不提供额外安全性。仍否定：force 开关绕过承重墙静默删占位目录。
 - relink 对池内 canonical 幂等补桥接（不只处理归槽，也补缺失桥接）：覆盖「adopt 成功 + 桥接中途失败」的中间态，让重跑 import 彻底收敛；dangling/symlink 归槽跳过的不补桥接（防自指环，§3.3）。否定：relink 只管归池、不管桥接——会留「canonical 在池但桥接缺」的未收敛态，agent 发现不了。
 
 ## 10. 对主 spec 的呼应

@@ -16,7 +16,7 @@ pub struct ImportReport {
     pub unmanaged: Vec<String>,
     /// 可溯源并重装入池的 skill 名称。
     pub reinstalled: Vec<String>,
-    /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装撞占位）。
+    /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装失败 / 桥接撞占位）。
     pub skipped: Vec<String>,
     /// 新发现并迁入池子的 skill（主循环 unmanaged 分支 adopt）。
     pub relocated: Vec<String>,
@@ -151,11 +151,18 @@ fn adopt_unmanaged(
     let mut reg = Registry::load(paths)?;
     reg.upsert(meta.clone());
     reg.save(paths)?;
-    crate::symlink::ensure_global_claude(paths, &meta)?;
     registered.insert(name.to_string());
     report.unmanaged.push(name.to_string());
     report.relocated.push(name.to_string());
     report.imported.push(name.to_string());
+    // 桥接失败降级 skipped 点名，不中止其余 skill：registry 已一致（canonical 指池），
+    // 手动清理占位目录后重跑 import，relink 幂等补建桥接即收敛（spec §3.3）
+    if let Err(e) = crate::symlink::ensure_global_claude(paths, &meta) {
+        tracing::warn!(error = ?e, "import 桥接失败 {name}：{e}");
+        report.skipped.push(format!(
+            "{name}（桥接失败：{e}，清理占位目录后重跑 import）"
+        ));
+    }
     Ok(())
 }
 
@@ -271,9 +278,17 @@ fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> 
             reg.save(paths)?;
             report.relinked.push(meta.name.clone());
         }
-        // canonical 已在池（刚归槽或本就在）：补建缺失桥接（幂等，在位跳过）
+        // canonical 已在池（刚归槽或本就在）：补建缺失桥接（幂等，在位跳过）。
+        // 桥接撞真实目录占位降级 skipped 点名，不中止其余 skill——承重墙在 ensure_link
+        //（占位不静默删），此处只放弃传播：registry 已一致，清占位后重跑即收敛
         if !dry_run {
-            crate::symlink::ensure_global_claude(paths, &meta)?;
+            if let Err(e) = crate::symlink::ensure_global_claude(paths, &meta) {
+                tracing::warn!(error = ?e, "relink 桥接失败 {}：{e}", meta.name);
+                report.skipped.push(format!(
+                    "{}（桥接失败：{e}，清理占位目录后重跑 import）",
+                    meta.name
+                ));
+            }
         }
     }
     Ok(())
@@ -523,15 +538,71 @@ mod tests {
     }
 
     #[test]
-    fn import_cross_dir_same_name_agents_claude_aborts() {
+    fn import_cross_dir_same_name_agents_claude_degrades() {
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
         // agents/foo + claude/foo 均真实目录
         make_skill(&paths.agents_skills_dir(), "foo");
         make_skill(&paths.claude_skills_dir(), "foo");
-        // agents/foo adopt 入池后建 claude 桥接撞 claude/foo 真实目录 → CanonicalCreate
-        let result = import_existing(&paths, false);
-        assert!(result.is_err(), "agents+claude 同名真实目录应中断");
+        // agents/foo adopt 入池后建 claude 桥接撞 claude/foo 真实目录 → 降级 skipped 点名，不中止
+        let report = import_existing(&paths, false).unwrap();
+        assert!(
+            report.skipped.iter().any(|s| s.contains("foo（桥接失败")),
+            "撞占位进 skipped 点名：{:?}",
+            report.skipped
+        );
+        let reg = Registry::load(&paths).unwrap();
+        let foo = reg.get("unmanaged/foo").unwrap();
+        assert_eq!(
+            foo.canonical_path,
+            paths.skillkit_skills_dir().join("foo").to_string_lossy(),
+            "agents/foo 已入池并落盘 registry"
+        );
+        assert!(
+            paths
+                .claude_skills_dir()
+                .join("foo")
+                .join("SKILL.md")
+                .exists(),
+            "claude/foo 占位真实目录不静默删"
+        );
+    }
+
+    #[test]
+    fn relink_bridge_placeholder_degrades_not_aborts() {
+        // 真实事故场景：registry 已登记 unmanaged（canonical 在池），
+        // ~/.claude/skills/<name> 被 Claude CLI 自装的真实目录占位 → 不再整批中断
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        make_skill(&paths.skillkit_skills_dir(), "dws");
+        seed_unmanaged_global(&paths, "dws", &paths.skillkit_skills_dir().join("dws"));
+        // agents 桥接在位，claude 位置被真实目录占位
+        std::fs::create_dir_all(paths.agents_skills_dir()).unwrap();
+        std::os::unix::fs::symlink(
+            paths.skillkit_skills_dir().join("dws"),
+            paths.agents_skills_dir().join("dws"),
+        )
+        .unwrap();
+        make_skill(&paths.claude_skills_dir(), "dws");
+
+        let report = import_existing(&paths, false).unwrap();
+        assert!(
+            report.skipped.iter().any(|s| s.contains("dws（桥接失败")),
+            "占位冲突降级 skipped 点名：{:?}",
+            report.skipped
+        );
+        assert!(
+            paths
+                .claude_skills_dir()
+                .join("dws")
+                .join("SKILL.md")
+                .exists(),
+            "占位目录不静默删"
+        );
+        assert!(
+            paths.agents_skills_dir().join("dws").is_symlink(),
+            "已正确的 agents 桥接保留"
+        );
     }
 
     #[test]

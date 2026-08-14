@@ -340,7 +340,7 @@ pub async fn upgrade(
 pub async fn import(State(state): State<AppState>, Path(token): Path<String>) -> Response {
     match skillkit_core::import_existing(&state.paths, false) {
         Ok(r) => {
-            let summary = format!(
+            let mut summary = format!(
                 "imported {}（入池迁址 {}，含存量补迁 {}），reinstalled {}，skipped {}",
                 r.imported.len(),
                 r.relocated.len(),
@@ -348,11 +348,16 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
                 r.reinstalled.len(),
                 r.skipped.len()
             );
+            // 撞占位等跳过原因点名（与 CLI 逐条打印对齐），让用户知道下一步处理哪个目录
+            if !r.skipped.is_empty() {
+                summary.push_str("；skipped：");
+                summary.push_str(&r.skipped.join("、"));
+            }
             render_skills(state, token, Some(&summary), false, vec![], vec![])
         }
         Err(e) => {
             tracing::error!(error = ?e, "import 失败");
-            error_response("导入失败")
+            error_response(format!("导入失败：{e}"))
         }
     }
 }
