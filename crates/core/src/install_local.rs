@@ -298,7 +298,7 @@ pub fn install_local(
     let other_owner = reg
         .skills
         .values()
-        .find(|m| m.id != local_id && PathBuf::from(&m.canonical_path) == target)
+        .find(|m| m.id != local_id && m.canonical_path == target)
         .cloned();
 
     // 冲突判定（键 = registry id；防跨 source 误删）

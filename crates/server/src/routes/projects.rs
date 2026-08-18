@@ -427,9 +427,8 @@ fn render_workspace(
         .unwrap_or_default()
         .into_iter()
         .map(|name| {
-            let skill_count = skillkit_core::Profile::load(&state.paths, &name)
-                .map(|p| p.skills.len())
-                .unwrap_or(0);
+            let skill_count =
+                skillkit_core::Profile::load(&state.paths, &name).map_or(0, |p| p.skills.len());
             let bound = proj.applied_profiles.iter().any(|n| n == &name);
             ProfileCard {
                 name,

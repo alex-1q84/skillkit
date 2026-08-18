@@ -55,8 +55,7 @@ pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport
                 .into_iter()
                 .find(|p| {
                     std::fs::symlink_metadata(p)
-                        .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
-                        .unwrap_or(false)
+                        .is_ok_and(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
                 });
             if let Some(src) = real_canon {
                 // unmanaged：迁移真实 canonical 到池子（managed-local）

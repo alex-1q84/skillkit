@@ -64,7 +64,7 @@ fn spawn_watcher(watch_dir: PathBuf, tx: broadcast::Sender<String>) {
         // 保活：notify 的 watcher 在回调可用期间持续工作；循环防线程被回收。
         // 生产每目录一个常驻线程，量级固定，不再随连接数增长（旧实现每连接一个）。
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
+            std::thread::sleep(std::time::Duration::from_mins(1));
         }
     });
 }

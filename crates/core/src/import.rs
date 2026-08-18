@@ -120,10 +120,7 @@ fn adopt_unmanaged(
     report: &mut ImportReport,
 ) -> Result<()> {
     // 步骤 0：symlink src → skipped（dry_run 分叉前生效，防 rename symlink 产悬空 canonical）
-    if std::fs::symlink_metadata(canon_path)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
+    if std::fs::symlink_metadata(canon_path).is_ok_and(|m| m.file_type().is_symlink()) {
         report
             .skipped
             .push(format!("{name}（symlink，只迁真实目录）"));
@@ -259,8 +256,7 @@ fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> 
         if !canon.starts_with(&pool) {
             // canonical 不在池：尝试归槽
             let is_real_dir = std::fs::symlink_metadata(canon)
-                .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
-                .unwrap_or(false);
+                .is_ok_and(|m| m.file_type().is_dir() && !m.file_type().is_symlink());
             if !is_real_dir {
                 tracing::warn!(
                     "relink 跳过 unmanaged {}：canonical {} 非真实目录（dangling/symlink）",

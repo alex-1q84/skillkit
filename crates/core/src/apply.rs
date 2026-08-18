@@ -96,12 +96,7 @@ fn land_one(
     let dest = agent_skills.join(skill);
     let canonical = Path::new(&target.canonical_path);
 
-    if dest.exists()
-        && !dest.is_symlink()
-        && std::fs::metadata(&dest)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-    {
+    if dest.exists() && !dest.is_symlink() && std::fs::metadata(&dest).is_ok_and(|m| m.is_dir()) {
         // 真实目录占位：copy 模式判断副本是否过期，symlink 模式疑似 shared 报错
         if !supports_symlink {
             let sha_file = dest.join(".skillkit-sha");

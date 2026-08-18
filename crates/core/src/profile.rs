@@ -39,7 +39,7 @@ impl Profile {
     /// 加 skill：先查 registry 拒绝 global（core 硬约束），再查重。非幂等（重复返 SkillAlreadyInstalled）。
     /// registry 无记录的 id 按 Local 兜底（不拒绝），仅拦截明确的 global。
     pub fn add_skill(&mut self, id: &str, registry: &Registry) -> Result<()> {
-        if registry.get(id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global {
+        if registry.get(id).map_or(Scope::Local, |m| m.scope) == Scope::Global {
             return Err(SkillkitError::SkillIsGlobal { id: id.to_string() });
         }
         if self.skills.iter().any(|s| s == id) {
@@ -84,7 +84,7 @@ pub fn list_names(paths: &Paths) -> Result<Vec<String>> {
 pub fn skill_profiles(paths: &Paths, skill_id: &str) -> Vec<String> {
     let reg = Registry::load(paths).unwrap_or_default();
     // global 直接空（不依赖 profile 实存，registry 标 global 即不属任何 profile）
-    if reg.get(skill_id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global {
+    if reg.get(skill_id).map_or(Scope::Local, |m| m.scope) == Scope::Global {
         return Vec::new();
     }
     let mut out = Vec::new();

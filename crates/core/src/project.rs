@@ -86,7 +86,7 @@ impl Project {
 
     /// 加 skill：先查 registry 拒绝 global（core 硬约束），再查重。registry 无记录按 Local 兜底。
     pub fn add_skill(&mut self, id: &str, registry: &Registry) -> Result<()> {
-        if registry.get(id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global {
+        if registry.get(id).map_or(Scope::Local, |m| m.scope) == Scope::Global {
             return Err(SkillkitError::SkillIsGlobal { id: id.to_string() });
         }
         if self.installed_skills.iter().any(|s| s == id) {
@@ -130,7 +130,7 @@ impl Project {
             if let Some(p) = profiles.iter().find(|p| &p.name == name) {
                 for id in &p.skills {
                     let is_global =
-                        registry.get(id).map(|m| m.scope).unwrap_or(Scope::Local) == Scope::Global;
+                        registry.get(id).map_or(Scope::Local, |m| m.scope) == Scope::Global;
                     if !is_global && !skills.contains(id) {
                         skills.push(id.clone());
                     }
