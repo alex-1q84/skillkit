@@ -92,6 +92,41 @@ async fn home_renders_layout_with_nav() {
 }
 
 #[tokio::test]
+async fn layout_write_lifecycle_initialization_is_idempotent() {
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(
+        body.contains("__skillkitEventSource"),
+        "SSE 必须使用页面级单例，避免 body swap 后重复连接"
+    );
+    assert!(
+        body.contains("__skillkitKeydownBound"),
+        "document 级监听器必须幂等绑定"
+    );
+    assert!(
+        body.contains("__skillkitEventLifecycleBound"),
+        "SSE 生命周期必须全局幂等绑定"
+    );
+    assert!(
+        body.contains("addEventListener('pagehide'"),
+        "页面离开时必须关闭 SSE，避免完整导航累积长连接"
+    );
+    assert!(
+        body.contains("window.__skillkitEventSource.close()"),
+        "页面离开时必须显式关闭 SSE 连接"
+    );
+}
+
+#[tokio::test]
 async fn sources_page_lists_sources() {
     let dir = tempfile::tempdir().unwrap();
     let state = skillkit_server::AppState {

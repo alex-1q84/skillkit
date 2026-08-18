@@ -579,22 +579,42 @@ pub async fn rescope(
     } else {
         Scope::Local
     };
-    match skillkit_core::set_scope(&state.paths, &id, target) {
-        Ok(report) => {
-            let summary = match target {
-                Scope::Global => format!(
+    let page_query = q.page;
+    let log_id = id.clone();
+    let job = tokio::task::spawn_blocking(move || {
+        match skillkit_core::set_scope(&state.paths, &id, target) {
+            Ok(report) => {
+                let summary = match target {
+                    Scope::Global => format!(
                     "✓ 已转全局，从 {} 个 profile / {} 个项目移除引用；以下项目需重新 apply：{}",
                     report.affected_profiles.len(),
                     report.affected_projects.len(),
                     report.affected_projects.join(", ")
                 ),
-                Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
-            };
-            render_skills(state, token, Some(&summary), &q.page)
+                    Scope::Local => {
+                        "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string()
+                    }
+                };
+                Ok(render_skills(
+                    state,
+                    token,
+                    Some(&summary),
+                    &page_query,
+                ))
+            }
+            Err(e) => Err(e),
+        }
+    })
+    .await;
+    match job {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => {
+            tracing::error!(error = ?e, "GUI rescope 失败：{log_id}");
+            error_response(format!("rescope 失败：{e}"))
         }
         Err(e) => {
-            tracing::error!(error = ?e, "GUI rescope 失败：{id}");
-            error_response(format!("rescope 失败：{e}"))
+            tracing::error!(error = ?e, "GUI rescope 失败：任务线程异常");
+            error_response("rescope 失败：服务线程异常")
         }
     }
 }

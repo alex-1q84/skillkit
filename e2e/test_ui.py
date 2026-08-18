@@ -160,6 +160,33 @@ def test_skills_toggle_local_row_highlights(page, base):
     expect(page.locator("#skill-batch")).to_be_hidden()
 
 
+def test_sse_connection_stays_single_after_body_swap(page, base):
+    """Skills 写操作替换 body 后不得重复创建 SSE 连接。"""
+    import time
+
+    event_requests = []
+
+    def record_event_request(request):
+        if request.url.endswith("/events"):
+            event_requests.append(request.url)
+
+    page.on("request", record_event_request)
+    page.reload(wait_until="load")
+    deadline = time.time() + 5
+    while len(event_requests) < 1 and time.time() < deadline:
+        time.sleep(0.05)
+    assert len(event_requests) == 1, f"初始 SSE 连接数异常：{len(event_requests)}"
+
+    row = page.locator(ROWS_SEL).filter(has_text="unmanaged/legacy")
+    row.locator("button", has_text="→local").click()
+    expect(row).to_contain_text("local")
+    assert_nav_single(page)
+
+    # body 被 hx-swap=outerHTML 替换后等待新页面脚本执行；修复前这里会变成 2。
+    page.wait_for_timeout(500)
+    assert len(event_requests) == 1, f"body 替换后 SSE 连接泄漏：{event_requests}"
+
+
 TESTS = [
     ("test_nav_not_duplicated_after_source_delete", test_nav_not_duplicated_after_source_delete, "sources"),
     ("test_source_name_preview", test_source_name_preview, "sources"),
@@ -168,6 +195,7 @@ TESTS = [
     ("test_skills_unmanaged_badge", test_skills_unmanaged_badge, "skills"),
     ("test_skills_upgrade_button_only_managed", test_skills_upgrade_button_only_managed, "skills"),
     ("test_skills_toggle_local_row_highlights", test_skills_toggle_local_row_highlights, "skills"),
+    ("test_sse_connection_stays_single_after_body_swap", test_sse_connection_stays_single_after_body_swap, "skills"),
 ]
 
 
