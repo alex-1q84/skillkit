@@ -4,6 +4,7 @@ use crate::error::{atomic_write, Result, SkillkitError};
 use crate::paths::Paths;
 use crate::registry::{Registry, Scope};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
@@ -97,6 +98,33 @@ pub fn skill_profiles(paths: &Paths, skill_id: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// 全量反向索引：skill_id → 所属 profile 名列表，一次遍历所有 profile 文件。
+/// 直接从 profile 文件构建（add_skill 已拒 global；legacy profile 含 global 由 is_unassigned 的 local 判定兜底）。
+/// server Skills 过滤视图与 CLI list --unassigned 共用此索引（core 单点，两壳不重复）。
+pub fn skills_profiles_map(paths: &Paths) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    if let Ok(names) = list_names(paths) {
+        for name in names {
+            if let Ok(p) = Profile::load(paths, &name) {
+                for id in &p.skills {
+                    map.entry(id.clone()).or_default().push(name.clone());
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 「未纳入 profile」判定：local 且不属于任何 profile。
+/// global 永不属 profile（语义保证），不算未纳入——否则筛选混杂全部 global，与「找无主 skill 归类」场景不符。
+#[allow(clippy::implicit_hasher)] // 泛型化 hasher 会传染 skills_profiles_map 及两壳调用方签名，内部工具不值
+pub fn is_unassigned(
+    meta: &crate::registry::SkillMeta,
+    profiles_of: &HashMap<String, Vec<String>>,
+) -> bool {
+    meta.is_local() && !profiles_of.contains_key(&meta.id)
 }
 
 #[cfg(test)]
@@ -219,6 +247,50 @@ mod tests {
         assert_eq!(got, vec!["base".to_string(), "fe".to_string()]);
         // global 永远空（即使 legacy profile 含它）
         assert!(skill_profiles(&p, "skills.sh/g1").is_empty());
+    }
+
+    /// 全量反向索引：一 skill 属多 profile 都登记；「未纳入」= local 且无主（global 不算）。
+    #[test]
+    fn skills_profiles_map_and_unassigned_semantics() {
+        let p = paths();
+        reg_with(&p, "skills.sh/fe", Scope::Local);
+        reg_with(&p, "skills.sh/be", Scope::Local);
+        reg_with(&p, "skills.sh/g1", Scope::Global);
+        Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["skills.sh/fe".into()],
+        }
+        .save(&p)
+        .unwrap();
+        Profile {
+            name: "base".into(),
+            description: String::new(),
+            skills: vec!["skills.sh/fe".into()],
+        }
+        .save(&p)
+        .unwrap();
+
+        let map = skills_profiles_map(&p);
+        let mut fe_profiles = map.get("skills.sh/fe").cloned().unwrap_or_default();
+        fe_profiles.sort();
+        assert_eq!(fe_profiles, vec!["base".to_string(), "fe".to_string()]);
+        assert!(!map.contains_key("skills.sh/be"), "无主 local 不在 map");
+
+        let reg = Registry::load(&p).unwrap();
+        assert!(
+            !is_unassigned(reg.get("skills.sh/fe").unwrap(), &map),
+            "有主 local"
+        );
+        assert!(
+            is_unassigned(reg.get("skills.sh/be").unwrap(), &map),
+            "无主 local"
+        );
+        // global 永不属 profile（语义保证），不算「未纳入」
+        assert!(
+            !is_unassigned(reg.get("skills.sh/g1").unwrap(), &map),
+            "global"
+        );
     }
 
     #[test]

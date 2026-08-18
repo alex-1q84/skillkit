@@ -27,6 +27,8 @@ pub struct SkillsTpl<'a> {
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
     pub scope: String,
+    /// 「未纳入 profile」过滤生效中（chip on 状态 + filter_qs 透传）。
+    pub unassigned: bool,
     /// 当前过滤的 query 后缀（&scope=…&profiles=…），rescope 按钮 URL 携带，写后保持过滤视图。
     pub filter_qs: String,
 }
@@ -44,6 +46,7 @@ pub struct SkillsMainTpl<'a> {
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
     pub scope: String,
+    pub unassigned: bool,
     pub filter_qs: String,
 }
 
@@ -52,25 +55,19 @@ pub async fn page(
     Path(token): Path<String>,
     Query(q): Query<SkillsQuery>,
 ) -> Response {
-    render_skills_with_scope(
-        state,
-        token,
-        None,
-        q.is_fragment(),
-        q.selected_list(),
-        q.profile_filter(),
-        q.scope_filter(),
-    )
+    render_skills(state, token, None, &q)
 }
 
-/// 数据准备：建 skill_id→profile 反向 map（一次遍历），按 profile_filter + scope_filter 过滤 skill 列表。
+/// 数据准备：建 skill_id→profile 反向 map（一次遍历），按 profile_filter + scope_filter + unassigned 过滤 skill 列表。
 /// profile_filter 空 = 全部（含 global）；非空 = OR 语义（属任一选中 profile 的 local skill，global 不显示）。
 /// scope_filter 非空 = 只 global 或只 local。
+/// unassigned = 只 local 且不属于任何 profile（global 永不属 profile，不算「未纳入」）。
 #[allow(clippy::type_complexity)] // 元组承载三组返回值，调用方解构
 fn build_skills_view(
     paths: &skillkit_core::Paths,
     profile_filter: &[String],
     scope_filter: Option<Scope>,
+    unassigned: bool,
 ) -> skillkit_core::Result<(
     Vec<(SkillMeta, String)>,
     HashMap<String, Vec<String>>,
@@ -78,17 +75,8 @@ fn build_skills_view(
 )> {
     let reg = Registry::load(paths)?;
     let all_profile_names = skillkit_core::list_profile_names(paths).unwrap_or_default();
-    let mut profiles_of: HashMap<String, Vec<String>> = HashMap::new();
-    for name in &all_profile_names {
-        if let Ok(p) = skillkit_core::Profile::load(paths, name) {
-            for id in &p.skills {
-                profiles_of
-                    .entry(id.clone())
-                    .or_default()
-                    .push(name.clone());
-            }
-        }
-    }
+    // 反向索引与「未纳入」判定调 core（CLI list --unassigned 共用，语义单点）
+    let profiles_of = skillkit_core::skills_profiles_map(paths);
     let skills: Vec<(SkillMeta, String)> = reg
         .skills
         .values()
@@ -97,6 +85,9 @@ fn build_skills_view(
                 if m.scope != *s {
                     return false;
                 }
+            }
+            if unassigned && !skillkit_core::is_unassigned(m, &profiles_of) {
+                return false;
             }
             if profile_filter.is_empty() {
                 true
@@ -111,49 +102,41 @@ fn build_skills_view(
     Ok((skills, profiles_of, all_profile_names))
 }
 
+/// Skills 页统一渲染入口：过滤条件全从 q 取（fragment/selected/profiles/scope/unassigned）。
+/// 写操作后重置视图传 `&SkillsQuery::default()`，透传过滤视图传原 q。
 fn render_skills(
     state: AppState,
     token: String,
     summary: Option<&str>,
-    fragment: bool,
-    selected: Vec<String>,
-    profile_filter: Vec<String>,
+    q: &SkillsQuery,
 ) -> Response {
-    render_skills_with_scope(
-        state,
-        token,
-        summary,
-        fragment,
-        selected,
-        profile_filter,
-        None,
-    )
-}
-
-fn render_skills_with_scope(
-    state: AppState,
-    token: String,
-    summary: Option<&str>,
-    fragment: bool,
-    selected: Vec<String>,
-    profile_filter: Vec<String>,
-    scope_filter: Option<Scope>,
-) -> Response {
-    match build_skills_view(&state.paths, &profile_filter, scope_filter) {
+    let scope_filter = q.scope_filter();
+    let fragment = q.is_fragment();
+    match build_skills_view(
+        &state.paths,
+        &q.profile_filter(),
+        scope_filter,
+        q.is_unassigned(),
+    ) {
         Ok((skills, profiles_of, all_profile_names)) => {
+            let selected = q.selected_list();
             let selected_csv = selected.join(",");
             let scope_str = scope_filter
                 .as_ref()
                 .map(Scope::to_string)
                 .unwrap_or_default();
+            let unassigned = q.is_unassigned();
             let mut filter_qs = String::new();
             if let Some(ref s) = scope_filter {
                 filter_qs.push_str("&scope=");
                 filter_qs.push_str(&s.to_string());
             }
-            if !profile_filter.is_empty() {
+            if !q.profile_filter().is_empty() {
                 filter_qs.push_str("&profiles=");
-                filter_qs.push_str(&profile_filter.join(","));
+                filter_qs.push_str(&q.profile_filter().join(","));
+            }
+            if unassigned {
+                filter_qs.push_str("&unassigned=1");
             }
             let rendered = if fragment {
                 SkillsMainTpl {
@@ -161,11 +144,12 @@ fn render_skills_with_scope(
                     skills,
                     summary,
                     selected,
-                    profile_filter,
+                    profile_filter: q.profile_filter(),
                     profiles_of,
                     all_profile_names,
                     selected_csv,
                     scope: scope_str,
+                    unassigned,
                     filter_qs,
                 }
                 .render()
@@ -175,11 +159,12 @@ fn render_skills_with_scope(
                     skills,
                     summary,
                     selected,
-                    profile_filter,
+                    profile_filter: q.profile_filter(),
                     profiles_of,
                     all_profile_names,
                     selected_csv,
                     scope: scope_str,
+                    unassigned,
                     filter_qs,
                 }
                 .render()
@@ -276,7 +261,7 @@ pub async fn install(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match skillkit_core::install(&state.paths, source, skill, &package, scope) {
-        Ok(_) => render_skills(state, token, None, false, vec![], vec![]),
+        Ok(_) => render_skills(state, token, None, &SkillsQuery::default()),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -309,9 +294,7 @@ pub async fn install_candidate(
             state,
             token,
             Some(&format!("✓ 已安装 skills.sh/{}", f.skill)),
-            false,
-            vec![],
-            vec![],
+            &SkillsQuery::default(),
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
             error_response("该 skill 已安装，可在列表中 upgrade 或 remove")
@@ -328,7 +311,7 @@ pub async fn uninstall(
     Path((token, id)): Path<(String, String)>,
 ) -> Response {
     match skillkit_core::uninstall(&state.paths, &id) {
-        Ok(()) => render_skills(state, token, None, false, vec![], vec![]),
+        Ok(()) => render_skills(state, token, None, &SkillsQuery::default()),
         Err(e) => {
             tracing::error!(error = ?e, "uninstall 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -342,7 +325,7 @@ pub async fn upgrade(
 ) -> Response {
     // GUI 场景已显式点击升级，yes=true 不二次确认
     match skillkit_core::upgrade_skill(&state.paths, &id, true) {
-        Ok(_) => render_skills(state, token, None, false, vec![], vec![]),
+        Ok(_) => render_skills(state, token, None, &SkillsQuery::default()),
         Err(e) => {
             tracing::error!(error = ?e, "upgrade 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -372,7 +355,7 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
                 summary.push_str("；skipped：");
                 summary.push_str(&r.skipped.join("、"));
             }
-            render_skills(state, token, Some(&summary), false, vec![], vec![])
+            render_skills(state, token, Some(&summary), &SkillsQuery::default())
         }
         Ok(Err(e)) => {
             tracing::error!(error = ?e, "import 失败");
@@ -403,7 +386,7 @@ pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String
                     b.affected.join(", ")
                 );
             }
-            render_skills(state, token, Some(&summary), false, vec![], vec![])
+            render_skills(state, token, Some(&summary), &SkillsQuery::default())
         }
         Ok(Err(e)) => {
             tracing::error!(error = ?e, "upgrade-all 失败");
@@ -479,14 +462,7 @@ pub async fn unassign(
             if p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(
-                state,
-                token,
-                None,
-                false,
-                q.selected_list(),
-                q.profile_filter(),
-            )
+            render_skills(state, token, None, &q)
         }
         Err(_) => error_response(format!("profile {name} 不存在")),
     }
@@ -526,14 +502,7 @@ pub async fn assign(
             if p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(
-                state,
-                token,
-                None,
-                false,
-                q.selected_list(),
-                q.profile_filter(),
-            )
+            render_skills(state, token, None, &q)
         }
         Err(_) => error_response(format!("profile {name} 不存在，改用新建或先创建")),
     }
@@ -576,14 +545,7 @@ pub async fn assign_new(
     if p.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    render_skills(
-        state,
-        token,
-        None,
-        false,
-        q.selected_list(),
-        q.profile_filter(),
-    )
+    render_skills(state, token, None, &q)
 }
 
 /// chip ×：从 profile 移除单个 skill 归属。返回完整 Skills 页。
@@ -598,14 +560,7 @@ pub async fn delete_profile(
             if p.remove_skill(&id).is_err() || p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(
-                state,
-                token,
-                None,
-                false,
-                q.selected_list(),
-                q.profile_filter(),
-            )
+            render_skills(state, token, None, &q)
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
@@ -635,15 +590,7 @@ pub async fn rescope(
                 ),
                 Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
             };
-            render_skills_with_scope(
-                state,
-                token,
-                Some(&summary),
-                false,
-                q.page.selected_list(),
-                q.page.profile_filter(),
-                q.page.scope_filter(),
-            )
+            render_skills(state, token, Some(&summary), &q.page)
         }
         Err(e) => {
             tracing::error!(error = ?e, "GUI rescope 失败：{id}");
@@ -702,9 +649,7 @@ pub async fn install_local(
             state,
             token,
             Some(&format!("✓ 已安装本地 skill：{}", m.id)),
-            false,
-            vec![],
-            vec![],
+            &SkillsQuery::default(),
         ),
         Err(e) => {
             tracing::error!(error = ?e, "install-local 失败：{}", f.path);
@@ -809,9 +754,7 @@ fn install_from_path(
             state.clone(),
             token,
             Some(&format!("✓ 已安装本地 skill：{}", m.id)),
-            false,
-            vec![],
-            vec![],
+            &SkillsQuery::default(),
         ),
         Err(e) => {
             tracing::error!(error = ?e, "install-local upload 失败");
@@ -897,7 +840,7 @@ mod tests {
         .unwrap();
 
         // 全部（filter 空）：含 global
-        let (all, m, _) = build_skills_view(&p, &[], None).unwrap();
+        let (all, m, _) = build_skills_view(&p, &[], None, false).unwrap();
         assert_eq!(all.len(), 3);
         assert_eq!(
             m.get("dc/fe").cloned().unwrap_or_default(),
@@ -906,9 +849,29 @@ mod tests {
         assert!(!m.contains_key("dc/g"), "global 不在反向 map");
 
         // 过滤 fe：只 local 且属 fe 的（global 不显示）
-        let (filtered, _, _) = build_skills_view(&p, &["fe".into()], None).unwrap();
+        let (filtered, _, _) = build_skills_view(&p, &["fe".into()], None, false).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0.id, "dc/fe");
+    }
+
+    /// 「未纳入 profile」：只 local 且无主（global 永不属 profile，不算未纳入）。
+    #[test]
+    fn build_view_unassigned_keeps_orphan_local_only() {
+        let p = paths();
+        seed(&p, "dc/fe", Scope::Local);
+        seed(&p, "dc/be", Scope::Local);
+        seed(&p, "dc/g", Scope::Global);
+        Profile {
+            name: "fe".into(),
+            description: String::new(),
+            skills: vec!["dc/fe".into()],
+        }
+        .save(&p)
+        .unwrap();
+
+        let (got, _, _) = build_skills_view(&p, &[], None, true).unwrap();
+        assert_eq!(got.len(), 1, "只有无主 local：{got:?}");
+        assert_eq!(got[0].0.id, "dc/be");
     }
 
     #[test]
@@ -964,6 +927,7 @@ mod tests {
             all_profile_names: vec!["fe".into()],
             selected_csv: "dc/fe".into(),
             scope: String::new(),
+            unassigned: false,
             filter_qs: String::new(),
         }
         .render()
@@ -989,6 +953,7 @@ mod tests {
             all_profile_names: vec!["fe".into()],
             selected_csv: String::new(),
             scope: "global".into(),
+            unassigned: false,
             filter_qs: "&scope=global&profiles=fe".into(),
         }
         .render()
@@ -997,6 +962,34 @@ mod tests {
         assert!(
             html.contains("rescope?to=local&amp;id=dc%2Fg&#38;scope=global&#38;profiles=fe"),
             "rescope 按钮 URL 应携带过滤参数：{html}"
+        );
+    }
+
+    /// 回归：unassigned 视图下 chip 亮、rescope 按钮携带 unassigned=1 保持过滤视图。
+    #[test]
+    fn skills_main_unassigned_chip_and_filter_qs() {
+        let html = SkillsMainTpl {
+            token: "tok",
+            skills: vec![(meta("dc/be", Scope::Local), "dc%2Fbe".into())],
+            summary: None,
+            selected: vec![],
+            profile_filter: vec![],
+            profiles_of: std::collections::HashMap::new(),
+            all_profile_names: vec!["fe".into()],
+            selected_csv: String::new(),
+            scope: String::new(),
+            unassigned: true,
+            filter_qs: "&unassigned=1".into(),
+        }
+        .render()
+        .unwrap();
+        assert!(
+            html.contains(r#"class="chip on""#) && html.contains("未纳入 profile</a>"),
+            "「未纳入 profile」chip 存在且 on：{html}"
+        );
+        assert!(
+            html.contains("rescope?to=global&amp;id=dc%2Fbe&#38;unassigned=1"),
+            "rescope 按钮应携带 unassigned=1：{html}"
         );
     }
 }

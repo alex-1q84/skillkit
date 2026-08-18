@@ -34,12 +34,15 @@ pub fn run_find(cmd: FindCmd) -> anyhow::Result<()> {
     print_candidates(&Paths::production(), &cmd.query, cmd.json)
 }
 
-/// list：skillkit list [--json]，列 registry 全部已装 skill。
+/// list：skillkit list [--json] [--unassigned]，列 registry 全部已装 skill。
 #[derive(Args)]
 pub struct ListCmd {
     /// JSON 输出：SkillMeta[]
     #[arg(long)]
     pub json: bool,
+    /// 只列未纳入任何 profile 的 skill（local 且无主；global 不算）
+    #[arg(long)]
+    pub unassigned: bool,
 }
 
 fn scope_str(s: Scope) -> &'static str {
@@ -84,10 +87,20 @@ pub fn run_list(cmd: ListCmd) -> anyhow::Result<()> {
     let reg = Registry::load(&paths)?;
     let mut skills: Vec<SkillMeta> = reg.skills.values().cloned().collect();
     skills.sort_by(|a, b| a.id.cmp(&b.id));
+    if cmd.unassigned {
+        // 反向索引与判定调 core（web Skills 过滤视图共用，语义单点）
+        let profiles_of = skillkit_core::skills_profiles_map(&paths);
+        skills.retain(|m| skillkit_core::is_unassigned(m, &profiles_of));
+    }
     if cmd.json {
         println!("{}", render_list_json(&skills)?);
     } else if skills.is_empty() {
-        println!("（registry 为空，尚无已装 skill）");
+        let hint = if cmd.unassigned {
+            "（没有未纳入 profile 的 skill）"
+        } else {
+            "（registry 为空，尚无已装 skill）"
+        };
+        println!("{hint}");
     } else {
         print!("{}", render_list_table(&skills));
     }
@@ -225,10 +238,26 @@ mod tests {
     #[test]
     fn list_parses_json_flag() {
         let TestCli { cmd } = TestCli::parse_from(["skillkit", "list", "--json"]);
-        let TestCmd::List(ListCmd { json }) = cmd else {
+        let TestCmd::List(ListCmd { json, .. }) = cmd else {
             panic!("expected List")
         };
         assert!(json);
+    }
+
+    /// `list --unassigned`：flag 解析 + 默认 false。
+    #[test]
+    fn list_parses_unassigned_flag() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "list", "--unassigned"]);
+        let TestCmd::List(ListCmd { unassigned, .. }) = cmd else {
+            panic!("expected List")
+        };
+        assert!(unassigned);
+
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "list"]);
+        let TestCmd::List(ListCmd { unassigned, .. }) = cmd else {
+            panic!("expected List")
+        };
+        assert!(!unassigned);
     }
 
     #[test]

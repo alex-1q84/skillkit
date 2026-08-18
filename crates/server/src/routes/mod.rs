@@ -38,7 +38,7 @@ impl FragmentQuery {
     }
 }
 
-/// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles（过滤）。
+/// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles/unassigned/scope（过滤）。
 /// 不复用 FragmentQuery——后者只有 fragment 字段，serde 默认忽略未知字段，不扩就静默丢参。
 /// selected/profiles 用 CSV（?selected=a,b），serde_urlencoded 对 Vec 字段的单值会拒绝，CSV 单/多值都兼容。
 #[derive(Debug, Default, Deserialize)]
@@ -51,6 +51,9 @@ pub struct SkillsQuery {
     /// 按 scope 筛选：global | local。None=全部。
     #[serde(default)]
     pub scope: Option<String>,
+    /// 只显未纳入任何 profile 的 skill（=1 生效）。
+    #[serde(default)]
+    pub unassigned: Option<String>,
 }
 
 impl SkillsQuery {
@@ -69,6 +72,9 @@ impl SkillsQuery {
             Some("local") => Some(skillkit_core::Scope::Local),
             _ => None,
         }
+    }
+    pub fn is_unassigned(&self) -> bool {
+        self.unassigned.as_deref() == Some("1")
     }
 }
 

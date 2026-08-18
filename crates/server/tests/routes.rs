@@ -1668,6 +1668,37 @@ async fn skills_profiles_filter_hides_global() {
     assert!(!body.contains("demo/g"), "global 不显示");
 }
 
+/// 「未纳入 profile」筛选：只显无主 local（有主 local 与 global 都不显示）。
+#[tokio::test]
+async fn skills_unassigned_filter_shows_orphan_local_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    seed_skill(&state.paths, "demo/be", skillkit_core::Scope::Local);
+    seed_skill(&state.paths, "demo/g", skillkit_core::Scope::Global);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/fe".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills?unassigned=1&fragment=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("demo/be"), "无主 local 显示");
+    assert!(!body.contains("demo/fe"), "有主 local 不显示");
+    assert!(!body.contains("demo/g"), "global 不算未纳入");
+}
+
 #[tokio::test]
 async fn skills_assign_persists_to_profile() {
     let dir = tempfile::tempdir().unwrap();
