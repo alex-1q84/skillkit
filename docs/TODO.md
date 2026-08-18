@@ -10,9 +10,9 @@
 
 ## 一、基建与发布
 
-- [ ] 补齐三个 crate 的 Cargo.toml 元数据（`description` / `license` / `repository`）。README 已声明 MIT，元数据未跟上。完成标准：`crates/{core,cli,server}/Cargo.toml` 三处补齐且 `cargo package --list`（或 lint）无警告。
-- [ ] 建 GitHub Actions CI：`.github/workflows/` 目前不存在。Makefile 注释已写明「CI 与本地走同一套规则」，只需一个 workflow 跑 `make check`（fmt + clippy -D warnings + 全测试）。可选加 `make e2e-cli`（联网，见第三类第 6 条）作为手动触发 job。
-- [ ] 发布分发未做：crates.io / brew tap 均未发布（M3 spec §11 YAGNI 边界）；主 spec §15 M3 的「打包进 mac-config Brewfile」待确认是否已做。
+- [x] 补齐三个 crate 的 Cargo.toml 元数据（`description` / `license` / `repository`）。README 已声明 MIT，元数据未跟上。完成标准：`crates/{core,cli,server}/Cargo.toml` 三处补齐且 `cargo package --list`（或 lint）无警告。已修 `bbbe479`：workspace.package 共享 license/repository + 各 crate description，`cargo package --list` 无警告，另补缺失的 MIT LICENSE 文件。
+- [x] 建 GitHub Actions CI：`.github/workflows/` 目前不存在。Makefile 注释已写明「CI 与本地走同一套规则」，只需一个 workflow 跑 `make check`（fmt + clippy -D warnings + 全测试）。可选加 `make e2e-cli`（联网，见第三类第 6 条）作为手动触发 job。已修 `bbbe479`：macos runner 跑 `make check` + `v*` tag 自动出 Release（附 tarball 与 sha256.txt）。首跑因 runner 最新 stable 的新 clippy 挂过一次，`5b731a2` 适配后绿；e2e-cli 手动 job 未加（可选项，有需要再补）。
+- [x] 发布分发未做：crates.io / brew tap 均未发布（M3 spec §11 YAGNI 边界）；主 spec §15 M3 的「打包进 mac-config Brewfile」待确认是否已做。已做（私有渠道，`bbbe479`）：GitHub Release v0.1.0 二进制（aarch64）+ mac-config 内嵌 `Formula/skillkit.rb`，经本地 tap（Homebrew 4.x 拒绝路径 formula）+ `just install_skillkit` 实测 `brew install skillkit` 成功（mac-config `23bc746dd`、`ada3d65db`）。crates.io 缓行，解冻条件：有外部受众或决定开源推广。
 
 ## 二、并发锁既有债（两处同源，全闭需池级共享锁）
 
