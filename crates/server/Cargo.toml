@@ -2,6 +2,9 @@
 name = "skillkit-server"
 version = "0.1.0"
 edition = "2021"
+description = "Local web GUI server of skillkit for browsing and configuring AI agent skills"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 skillkit-core = { path = "../core" }

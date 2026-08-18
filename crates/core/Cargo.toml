@@ -2,6 +2,9 @@
 name = "skillkit-core"
 version = "0.1.0"
 edition = "2021"
+description = "Core library of skillkit: unified management for AI agent skills (sources, registry, profiles, project apply)"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

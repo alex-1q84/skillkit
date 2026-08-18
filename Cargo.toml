@@ -2,6 +2,11 @@
 members = ["crates/core", "crates/cli", "crates/server"]
 resolver = "2"
 
+# 各 crate 共享元数据，crate 内用 xxx.workspace = true 继承（避免三处重复维护）
+[workspace.package]
+license = "MIT"
+repository = "https://github.com/alex-1q84/skillkit"
+
 # workspace 级 clippy lints（对标 Java 的 Error Prone / NullAway 静态检查）。
 # 各 crate 的 Cargo.toml 用 [lints] workspace = true 继承。
 [workspace.lints.clippy]

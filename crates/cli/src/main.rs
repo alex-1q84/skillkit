@@ -13,7 +13,7 @@ use commands::source::SourceCmd;
 use commands::upgrade::{run as run_upgrade, UpgradeCmd};
 
 #[derive(Parser)]
-#[command(name = "skillkit", about = "AI agent skill 统一管理工具")]
+#[command(name = "skillkit", version, about = "AI agent skill 统一管理工具")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

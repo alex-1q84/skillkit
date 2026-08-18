@@ -2,6 +2,9 @@
 name = "skillkit-cli"
 version = "0.1.0"
 edition = "2021"
+description = "CLI of skillkit: install, organize and apply AI agent skills across projects and agents"
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "skillkit"
