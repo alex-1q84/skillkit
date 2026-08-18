@@ -28,7 +28,7 @@ skillkit/
     core/                 # package: skillkit-core（lib）—— 全部业务逻辑
     cli/                  # package: skillkit-cli，binary name: skillkit —— 薄壳调 core
     server/               # package: skillkit-server（M2 才创建）—— Axum + Askama 模板 + rust-embed 静态
-  docs/                   # 设计文档 + sessions/ 交接材料
+  docs/                   # 设计文档 + TODO.md（全项目待办跟踪）+ sessions/ 交接材料
   CLAUDE.md
 ```
 
