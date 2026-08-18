@@ -17,8 +17,7 @@ pub struct UpgradeReport {
 }
 
 pub fn upgrade_skill(paths: &Paths, id: &str, yes: bool) -> Result<UpgradeReport> {
-    let mut reg = Registry::load(paths)?;
-    let mut meta = reg.get(id)?.clone();
+    let meta = Registry::load(paths)?.get(id)?.clone();
     let old_hash = meta
         .computed_hash
         .clone()
@@ -34,10 +33,15 @@ pub fn upgrade_skill(paths: &Paths, id: &str, yes: bool) -> Result<UpgradeReport
     }
     crate::npx::update(paths, &meta.name)?;
     let new_hash = crate::npx::read_computed_hash(paths, &meta.name)?;
+    // 写回：npx 下载在锁外（网络秒级），锁内重读再 upsert，
+    // 防基于下载前快照的 save 把并发写方（rescope/import）的写入覆盖回滚。
+    let mut meta = meta;
     meta.computed_hash = Some(new_hash.clone());
     meta.installed_at = crate::install::now_iso();
+    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
+    let mut reg = Registry::load(paths)?;
     reg.upsert(meta);
-    reg.save(paths)?;
+    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
     Ok(UpgradeReport {
         id: id.to_string(),
         old_hash,

@@ -88,10 +88,10 @@
     </td>
     <td class="ops">
       {% if s.is_local() %}
-      <button class="pill-btn u" hx-post="/{{ token }}/skills/rescope?to=global&amp;id={{ enc }}"
+      <button class="pill-btn u" hx-post="/{{ token }}/skills/rescope?to=global&amp;id={{ enc }}{{ filter_qs }}"
               hx-target="body" hx-swap="outerHTML">→global</button>
       {% else %}
-      <button class="pill-btn u" hx-post="/{{ token }}/skills/rescope?to=local&amp;id={{ enc }}"
+      <button class="pill-btn u" hx-post="/{{ token }}/skills/rescope?to=local&amp;id={{ enc }}{{ filter_qs }}"
               hx-target="body" hx-swap="outerHTML">→local</button>
       {% endif %}
       {% if s.computed_hash.is_some() %}

@@ -16,7 +16,10 @@ pub struct RescopeReport {
 ///   必须先把 meta.scope 改成 Global 再调 ensure，否则建链被守卫跳过（留 scope=global 却无 symlink）。
 /// global→local：撤全局落地（remove_global_claude 不加守卫，meta.scope 仍 Global 时安全删）→ 改 scope → 落盘。
 /// 落地/落盘失败原子回滚（registry 不 save，scope 不变）；profile/project 多文件清理非原子（见 spec §6）。
+/// 全程持 "registry" 锁：load→物理迁移→save 完整窗口与并发写方（import/upgrade）串行化，
+/// 防旧快照 save 把本函数的写入覆盖回滚（rescope 效果静默丢失）。
 pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport> {
+    let lock = crate::lock::FileLock::acquire(paths, "registry")?;
     let mut reg = Registry::load(paths)?;
     let mut meta: SkillMeta = reg.get(id)?.clone();
     if meta.scope == target {
@@ -32,8 +35,9 @@ pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport
             meta.scope = Scope::Global;
             crate::symlink::ensure_global_claude(paths, &meta)?;
             reg.upsert(meta.clone());
-            reg.save(paths)?;
-            // 清 profile/project 引用（跨多文件，非原子——失败给可恢复文案，见 spec §6）
+            reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+            drop(lock); // registry 写完即放，引用清理（profile/project 独立锁）不占 registry 锁
+                        // 清 profile/project 引用（跨多文件，非原子——失败给可恢复文案，见 spec §6）
             let (ap, aproj) = remove_refs(paths, id)?;
             Ok(RescopeReport {
                 affected_profiles: ap,
@@ -75,8 +79,8 @@ pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport
             crate::symlink::remove_global_claude(paths, &meta)?;
             meta.scope = Scope::Local;
             reg.upsert(meta.clone());
-            reg.save(paths)?;
-            // global 本不在 profile/project，无需清
+            reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+                                  // global 本不在 profile/project，无需清
             Ok(RescopeReport {
                 affected_profiles: vec![],
                 affected_projects: vec![],
@@ -342,5 +346,44 @@ mod tests {
             .clone();
         assert_eq!(m2.scope, Scope::Local);
         assert_eq!(m2.canonical_path, pool.to_string_lossy());
+    }
+
+    /// 回归：rescope 的 registry 写入曾被并发写方（import/upgrade 的长 load→save 窗口）
+    /// 用旧快照覆盖回滚——GUI 表现为「点 →local 无声失效」。锁化后两方串行，写入并存。
+    #[test]
+    fn rescope_survives_concurrent_registry_writer() {
+        let p = paths();
+        seed_skill(&p, "dc/g", Scope::Global);
+        seed_skill(&p, "dc/other", Scope::Local);
+
+        // writer 模拟锁化的并发写方（import 每 adopt 一对持锁 load→save_raw）
+        let wpaths = p.clone();
+        let writer = std::thread::spawn(move || {
+            for i in 0..50 {
+                let _lock = crate::lock::FileLock::acquire(&wpaths, "registry").unwrap();
+                let mut reg = Registry::load(&wpaths).unwrap();
+                if let Some(m) = reg.skills.get_mut("dc/other") {
+                    m.version = Some(format!("v{i}"));
+                }
+                reg.save_raw(&wpaths).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+        // 等 writer 跑进循环中途再 rescope，制造真实的窗口交叠
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        set_scope(&p, "dc/g", Scope::Local).unwrap();
+        writer.join().unwrap();
+
+        let reg = Registry::load(&p).unwrap();
+        assert_eq!(
+            reg.get("dc/g").unwrap().scope,
+            Scope::Local,
+            "rescope 写入不被并发写方覆盖回滚"
+        );
+        assert_eq!(
+            reg.get("dc/other").unwrap().version.as_deref(),
+            Some("v49"),
+            "并发写方的写入不丢"
+        );
     }
 }

@@ -136,7 +136,9 @@ fn adopt_unmanaged(
         report.imported.push(name.to_string());
         return Ok(());
     }
-    // adopt → registry save → 桥接（对齐 install.rs:45-52 顺序）
+    // adopt → registry save → 桥接（对齐 install.rs:45-52 顺序）。
+    // 迁移+登记全程持 "registry" 锁：防并发写方（rescope/upgrade）的旧快照 save 覆盖回滚
+    let lock = crate::lock::FileLock::acquire(paths, "registry")?;
     let target = adopt_into_pool(paths, name, canon_path)?;
     let meta = SkillMeta {
         id: Registry::skill_id("unmanaged", name),
@@ -150,7 +152,8 @@ fn adopt_unmanaged(
     };
     let mut reg = Registry::load(paths)?;
     reg.upsert(meta.clone());
-    reg.save(paths)?;
+    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    drop(lock); // 桥接是纯 fs 操作，不占 registry 锁
     registered.insert(name.to_string());
     report.unmanaged.push(name.to_string());
     report.relocated.push(name.to_string());
@@ -270,12 +273,15 @@ fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> 
                 report.relinked.push(meta.name.clone());
                 continue;
             }
+            // 迁移+登记全程持 "registry" 锁（防并发写方旧快照覆盖回滚，对齐 adopt_unmanaged）
+            let lock = crate::lock::FileLock::acquire(paths, "registry")?;
             let target = adopt_into_pool(paths, &meta.name, canon)?;
             meta.canonical_path = target.to_string_lossy().into_owned();
             // 立即落盘（每 skill adopt 后 save，失败面可推导）
             let mut reg = Registry::load(paths)?;
             reg.upsert(meta.clone());
-            reg.save(paths)?;
+            reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+            drop(lock); // 桥接是纯 fs 操作，不占 registry 锁
             report.relinked.push(meta.name.clone());
         }
         // canonical 已在池（刚归槽或本就在）：补建缺失桥接（幂等，在位跳过）。

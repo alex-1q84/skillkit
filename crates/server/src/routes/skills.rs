@@ -27,6 +27,8 @@ pub struct SkillsTpl<'a> {
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
     pub scope: String,
+    /// 当前过滤的 query 后缀（&scope=…&profiles=…），rescope 按钮 URL 携带，写后保持过滤视图。
+    pub filter_qs: String,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -42,6 +44,7 @@ pub struct SkillsMainTpl<'a> {
     pub all_profile_names: Vec<String>,
     pub selected_csv: String,
     pub scope: String,
+    pub filter_qs: String,
 }
 
 pub async fn page(
@@ -143,6 +146,15 @@ fn render_skills_with_scope(
                 .as_ref()
                 .map(Scope::to_string)
                 .unwrap_or_default();
+            let mut filter_qs = String::new();
+            if let Some(ref s) = scope_filter {
+                filter_qs.push_str("&scope=");
+                filter_qs.push_str(&s.to_string());
+            }
+            if !profile_filter.is_empty() {
+                filter_qs.push_str("&profiles=");
+                filter_qs.push_str(&profile_filter.join(","));
+            }
             let rendered = if fragment {
                 SkillsMainTpl {
                     token: &token,
@@ -154,6 +166,7 @@ fn render_skills_with_scope(
                     all_profile_names,
                     selected_csv,
                     scope: scope_str,
+                    filter_qs,
                 }
                 .render()
             } else {
@@ -167,6 +180,7 @@ fn render_skills_with_scope(
                     all_profile_names,
                     selected_csv,
                     scope: scope_str,
+                    filter_qs,
                 }
                 .render()
             };
@@ -337,9 +351,14 @@ pub async fn upgrade(
 }
 
 /// 导入存量 skill 目录，登记进 registry（无源 → unmanaged）。
+/// import_existing 同步阻塞且耗时（扫描+迁池），spawn_blocking 卸到 blocking 线程池，
+/// 避免占用 tokio 工作线程拉长其他请求（含 rescope）的响应窗口（对齐 find 的处理）。
 pub async fn import(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    match skillkit_core::import_existing(&state.paths, false) {
-        Ok(r) => {
+    let paths = state.paths.clone();
+    let result =
+        tokio::task::spawn_blocking(move || skillkit_core::import_existing(&paths, false)).await;
+    match result {
+        Ok(Ok(r)) => {
             let mut summary = format!(
                 "imported {}（入池迁址 {}，含存量补迁 {}），reinstalled {}，skipped {}",
                 r.imported.len(),
@@ -355,17 +374,25 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
             }
             render_skills(state, token, Some(&summary), false, vec![], vec![])
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!(error = ?e, "import 失败");
             error_response(format!("导入失败：{e}"))
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "import join 失败");
+            error_response("导入失败，请重试")
         }
     }
 }
 
 /// 全部升级：批量升级 registry 全部 managed skill，冲突进 blocked 列出（不升级）。
+/// 同 import：长阻塞（每个 managed 一次 npx 网络调用），spawn_blocking 卸载。
 pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String>) -> Response {
-    match skillkit_core::upgrade_all(&state.paths, false) {
-        Ok(all) => {
+    let paths = state.paths.clone();
+    let result =
+        tokio::task::spawn_blocking(move || skillkit_core::upgrade_all(&paths, false)).await;
+    match result {
+        Ok(Ok(all)) => {
             use std::fmt::Write as _;
             let mut summary = format!("已升级 {} 个", all.upgraded.len());
             for b in &all.blocked {
@@ -378,9 +405,13 @@ pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String
             }
             render_skills(state, token, Some(&summary), false, vec![], vec![])
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!(error = ?e, "upgrade-all 失败");
             error_response("批量升级失败")
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "upgrade-all join 失败");
+            error_response("批量升级失败，请重试")
         }
     }
 }
@@ -581,6 +612,7 @@ pub async fn delete_profile(
 }
 
 /// GUI scope 转移：POST /skills/rescope?to=global|local&id=<enc>。直接执行 + summary 横幅（去 hx-confirm 方向）。
+/// 透传 scope/profiles/selected（按钮 URL 携带），返回页保持当前过滤视图，不再跳回「全部」。
 pub async fn rescope(
     State(state): State<AppState>,
     Path(token): Path<String>,
@@ -603,7 +635,15 @@ pub async fn rescope(
                 ),
                 Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
             };
-            render_skills(state, token, Some(&summary), false, vec![], vec![])
+            render_skills_with_scope(
+                state,
+                token,
+                Some(&summary),
+                false,
+                q.page.selected_list(),
+                q.page.profile_filter(),
+                q.page.scope_filter(),
+            )
         }
         Err(e) => {
             tracing::error!(error = ?e, "GUI rescope 失败：{id}");
@@ -616,6 +656,9 @@ pub async fn rescope(
 pub struct RescopeGuiQuery {
     pub to: Option<String>,
     pub id: String,
+    /// 页面过滤参数（scope/profiles/selected），随按钮 URL 回传，渲染时还原过滤视图。
+    #[serde(flatten)]
+    pub page: SkillsQuery,
 }
 
 #[derive(Deserialize)]
@@ -921,6 +964,7 @@ mod tests {
             all_profile_names: vec!["fe".into()],
             selected_csv: "dc/fe".into(),
             scope: String::new(),
+            filter_qs: String::new(),
         }
         .render()
         .unwrap();
@@ -928,5 +972,31 @@ mod tests {
         assert!(html.contains("selected"), "选中行有 selected 标记");
         assert!(html.contains("fe"), "所属 profile chip");
         assert!(html.contains("assign"), "归入端点");
+    }
+
+    /// 回归：过滤视图下 rescope 按钮携带 scope/profiles（filter_qs），
+    /// 写操作返回页保持过滤视图，不再跳回「全部」。
+    #[test]
+    fn skills_main_rescope_button_carries_filter_qs() {
+        let skills = vec![(meta("dc/g", Scope::Global), "dc%2Fg".into())];
+        let html = SkillsMainTpl {
+            token: "tok",
+            skills,
+            summary: None,
+            selected: vec![],
+            profile_filter: vec!["fe".into()],
+            profiles_of: std::collections::HashMap::new(),
+            all_profile_names: vec!["fe".into()],
+            selected_csv: String::new(),
+            scope: "global".into(),
+            filter_qs: "&scope=global&profiles=fe".into(),
+        }
+        .render()
+        .unwrap();
+        // filter_qs 插值经 Askama 转义，& → &#38;（浏览器解析后同 &amp;，语义等价）
+        assert!(
+            html.contains("rescope?to=local&amp;id=dc%2Fg&#38;scope=global&#38;profiles=fe"),
+            "rescope 按钮 URL 应携带过滤参数：{html}"
+        );
     }
 }
