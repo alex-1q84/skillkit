@@ -1344,6 +1344,10 @@ async fn project_set_profiles_binds_lands_and_reports() {
         proj_root.join(".claude/skills/logseq").is_symlink(),
         "set_profiles 应一步落地建 symlink"
     );
+    assert!(
+        proj_root.join(".agents/skills/logseq/SKILL.md").exists(),
+        "绑定即落 .agents/skills（决策 20：总是落地，其他 agent 直读可见）"
+    );
     let body = common::body_string(resp).await;
     assert!(body.contains("上次应用"), "响应含落地结果区");
     assert!(body.contains("status-panel"), "响应含 status");

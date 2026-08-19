@@ -1,6 +1,7 @@
 //! apply：让项目 <agent>/skills/ 下 skillkit 管的 local skill 与 installed_skills 一致。
 //! 本模块含 diff 计算（纯逻辑，status 与 apply 共用）+ 落地执行（Task 7-8）。
 use crate::config::Config;
+use crate::detect::OPEN_STANDARD_AGENT;
 use crate::error::{Result, SkillkitError};
 use crate::paths::Paths;
 use crate::project::Project;
@@ -25,9 +26,38 @@ pub struct ApplyDiff {
     pub conflicts: Vec<String>,
 }
 
-/// 计算 diff：expected = installed_skills 中 local scope 的 skill × agents；
+/// 落地目标 agent 集合（决策 20）：开源标准 `agents` 总在列——`.agents/skills/` 是
+/// cursor/codex/opencode 等直读的通用目录，绑定 profile 的结果对全部 agent 立即可见；
+/// 探测到的 agent 中 `reads_agents_dir=false` 的（默认配置即 claude-code，Claude 不
+/// 直读 `.agents`）额外落私有目录桥接。`project_agents` 为空也保底返回开源标准，
+/// 杜绝「有绑定记录但项目里没有 skill」。
+pub fn landing_agents(config: &Config, project_agents: &[String]) -> Vec<String> {
+    let mut agents = vec![OPEN_STANDARD_AGENT.to_string()];
+    for a in project_agents {
+        if config
+            .find_agent(a)
+            .is_some_and(|agent| !agent.reads_agents_dir)
+            && !agents.contains(a)
+        {
+            agents.push(a.clone());
+        }
+    }
+    agents
+}
+
+/// 清理扫描集合：探测 agents ∪ 开源标准。旧版按 `.cursor/`/`.codex/` 落的 skillkit
+/// local（目录在即会被探测到）也能扫到，按新 expected 清理。
+fn scan_agents(project_agents: &[String]) -> Vec<String> {
+    let mut agents = project_agents.to_vec();
+    if !agents.iter().any(|a| a == OPEN_STANDARD_AGENT) {
+        agents.push(OPEN_STANDARD_AGENT.to_string());
+    }
+    agents
+}
+
+/// 计算 diff：expected = installed_skills 中 local scope 的 skill × 落地目标 agents；
 /// conflicts = locked_shas 与 registry.computed_hash 不一致（sha 漂移）。
-pub fn compute_diff(project: &Project, registry: &Registry) -> Result<ApplyDiff> {
+pub fn compute_diff(project: &Project, registry: &Registry, config: &Config) -> Result<ApplyDiff> {
     let mut expected = Vec::new();
     let mut conflicts = Vec::new();
     for id in &project.installed_skills {
@@ -44,10 +74,10 @@ pub fn compute_diff(project: &Project, registry: &Registry) -> Result<ApplyDiff>
             }
         }
         let canonical = meta.canonical_path.clone();
-        for agent in &project.agents {
+        for agent in landing_agents(config, &project.agents) {
             expected.push(LocalTarget {
                 skill_id: id.clone(),
-                agent: agent.clone(),
+                agent,
                 canonical_path: canonical.clone(),
                 computed_hash: sha.clone(),
             });
@@ -240,7 +270,7 @@ fn collect_shared(project_root: &Path, dir: &str, label: &str, found: &mut Vec<S
 pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<ApplyReport> {
     let registry = Registry::load(paths)?;
     let config = Config::load(paths)?;
-    let diff = compute_diff(project, &registry)?;
+    let diff = compute_diff(project, &registry, &config)?;
     let project_root = Path::new(&project.path);
 
     for id in &project.installed_skills {
@@ -302,11 +332,11 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
             )
         })
         .collect();
-    for agent in &project.agents {
-        for name in scan_local_landed(project_root, agent, &skm_skills)? {
+    for agent in scan_agents(&project.agents) {
+        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
             let key = format!("{agent}/{name}");
             if !expected_names.contains(&key) {
-                let p = project_root.join(format!(".{}/skills/{}", agent_dir_name(agent), name));
+                let p = project_root.join(format!(".{}/skills/{}", agent_dir_name(&agent), name));
                 let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
                 report.removed.push(key);
             }
@@ -349,8 +379,8 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
         }
     }
     let mut extra = Vec::new();
-    for agent in &project.agents {
-        for name in scan_local_landed(project_root, agent, &skm_skills)? {
+    for agent in scan_agents(&project.agents) {
+        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
             let key = format!("{agent}/{name}");
             if !expected.contains(&key) {
                 extra.push(key);
@@ -406,10 +436,85 @@ mod tests {
         reg.upsert(meta("dc/logseq", Scope::Local, "sha1"));
         reg.upsert(meta("dc/global", Scope::Global, "sha2"));
         let project = proj(&["dc/logseq", "dc/global"], &[]);
-        let diff = compute_diff(&project, &reg).unwrap();
-        assert_eq!(diff.expected.len(), 1, "global 不 per-project 落地");
-        assert_eq!(diff.expected[0].skill_id, "dc/logseq");
+        let diff = compute_diff(&project, &reg, &Config::default()).unwrap();
+        let agents: Vec<&str> = diff.expected.iter().map(|t| t.agent.as_str()).collect();
+        assert_eq!(
+            agents,
+            vec!["agents", "claude-code"],
+            "local 落 .agents（总是）+ .claude（claude-code 桥接），global 不 per-project 落地"
+        );
         assert!(diff.conflicts.is_empty());
+    }
+
+    #[test]
+    fn landing_agents_rules() {
+        let cfg = Config::default();
+        // 空 agents（旧项目 toml）：保底开源标准，杜绝「有绑定记录无落地」
+        assert_eq!(landing_agents(&cfg, &[]), vec!["agents"]);
+        // claude-code 不直读 .agents：额外桥接
+        assert_eq!(
+            landing_agents(&cfg, &["claude-code".into()]),
+            vec!["agents", "claude-code"]
+        );
+        // cursor/codex 直读 .agents：不再落私有目录
+        assert_eq!(
+            landing_agents(&cfg, &["cursor".into(), "codex".into()]),
+            vec!["agents"]
+        );
+        // 已含开源标准：不重复
+        assert_eq!(
+            landing_agents(&cfg, &["agents".into(), "claude-code".into()]),
+            vec!["agents", "claude-code"]
+        );
+    }
+
+    #[test]
+    fn run_apply_cursor_project_lands_only_open_standard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/keep", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "P4".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["cursor".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/keep".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        let report = run_apply(&paths, &mut proj, false).unwrap();
+        assert_eq!(report.created, vec!["agents/keep"]);
+        assert!(
+            project_root.join(".agents/skills/keep/SKILL.md").exists(),
+            "cursor 项目 local 落 .agents/skills（cursor 直读）"
+        );
+        assert!(
+            !project_root.join(".cursor/skills/keep").exists(),
+            "不再给 cursor 落私有目录副本"
+        );
+    }
+
+    #[test]
+    fn run_apply_empty_agents_still_lands_open_standard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/logseq", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "P5".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec![],
+            applied_profiles: vec!["demo".into()],
+            installed_skills: vec!["dc/logseq".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        let report = run_apply(&paths, &mut proj, false).unwrap();
+        assert_eq!(report.created, vec!["agents/logseq"]);
+        assert!(project_root.join(".agents/skills/logseq/SKILL.md").exists());
     }
 
     #[test]
@@ -417,7 +522,7 @@ mod tests {
         let mut reg = Registry::default();
         reg.upsert(meta("dc/logseq", Scope::Local, "new"));
         let project = proj(&["dc/logseq"], &[("dc/logseq", "old")]);
-        let diff = compute_diff(&project, &reg).unwrap();
+        let diff = compute_diff(&project, &reg, &Config::default()).unwrap();
         assert_eq!(diff.conflicts, vec!["dc/logseq"]);
     }
 
@@ -425,7 +530,7 @@ mod tests {
     fn diff_skips_uninstalled() {
         let reg = Registry::default();
         let project = proj(&["dc/missing"], &[]);
-        let diff = compute_diff(&project, &reg).unwrap();
+        let diff = compute_diff(&project, &reg, &Config::default()).unwrap();
         assert!(diff.expected.is_empty());
     }
 
@@ -522,7 +627,12 @@ mod tests {
             locked_shas: BTreeMap::new(),
         };
         let report = run_apply(&paths, &mut proj, false).unwrap();
-        assert_eq!(report.created, vec!["claude-code/logseq"]);
+        assert_eq!(
+            report.created,
+            vec!["agents/logseq", "claude-code/logseq"],
+            "claude-code 项目落 .agents（copy）+ .claude（symlink）"
+        );
+        assert!(project_root.join(".agents/skills/logseq/SKILL.md").exists());
         assert!(project_root.join(".claude/skills/logseq").is_symlink());
         assert_eq!(proj.locked_shas.get("dc/logseq").unwrap(), "sha1");
         let report2 = run_apply(&paths, &mut proj, false).unwrap();

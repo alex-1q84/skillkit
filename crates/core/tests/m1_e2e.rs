@@ -62,14 +62,16 @@ fn m1_full_flow_apply_and_status() {
     proj.apply_profile("frontend", &profile.skills);
     proj.save(&paths).unwrap();
 
-    // status（apply 前 missing=2）
-    let diff = skillkit_core::apply::compute_diff(&proj, &reg).unwrap();
+    // status（apply 前 missing=4：每个 skill 落 .agents + .claude 两处，决策 20）
+    let config = skillkit_core::config::Config::load(&paths).unwrap();
+    let diff = skillkit_core::apply::compute_diff(&proj, &reg, &config).unwrap();
     let st = build_status(&paths, &proj, &diff).unwrap();
-    assert_eq!(st.missing.len(), 2);
+    assert_eq!(st.missing.len(), 4);
 
     // apply 落地
     let report = run_apply(&paths, &mut proj, false).unwrap();
-    assert_eq!(report.created.len(), 2);
+    assert_eq!(report.created.len(), 4);
+    assert!(project_root.join(".agents/skills/logseq/SKILL.md").exists());
     assert!(project_root.join(".claude/skills/logseq").is_symlink());
     assert!(project_root.join(".claude/skills/dataviz").is_symlink());
 
@@ -86,6 +88,7 @@ fn m1_full_flow_apply_and_status() {
     // exclude 维护
     let excl = std::fs::read_to_string(project_root.join(".git/info/exclude")).unwrap();
     assert!(excl.contains(".claude/skills/logseq"));
+    assert!(excl.contains(".agents/skills/logseq"));
 }
 
 #[test]

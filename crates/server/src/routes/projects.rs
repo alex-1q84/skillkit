@@ -406,7 +406,8 @@ fn render_workspace(
     report: Option<ApplyReport>,
 ) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
-    let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
+    let config = skillkit_core::config::Config::load(&state.paths).unwrap_or_default();
+    let diff = compute_diff(&proj, &reg, &config).unwrap_or_else(|_| ApplyDiff {
         expected: vec![],
         conflicts: vec![],
     });
@@ -466,7 +467,8 @@ fn render_workspace(
 /// 计算 status 并渲染 fragments/status.html（供 set_skills 返回 + SSE hx-get 刷新）。
 fn status_fragment(state: AppState, proj: Project) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
-    let diff = compute_diff(&proj, &reg).unwrap_or_else(|_| ApplyDiff {
+    let config = skillkit_core::config::Config::load(&state.paths).unwrap_or_default();
+    let diff = compute_diff(&proj, &reg, &config).unwrap_or_else(|_| ApplyDiff {
         expected: vec![],
         conflicts: vec![],
     });

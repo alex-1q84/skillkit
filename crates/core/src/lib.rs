@@ -18,8 +18,8 @@ pub mod symlink;
 pub mod upgrade;
 
 pub use apply::{
-    build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, LocalTarget,
-    StatusView,
+    build_status, compute_diff, landing_agents, run_apply, scan_shared, ApplyDiff, ApplyReport,
+    LocalTarget, StatusView,
 };
 pub use detect::detect_agents;
 pub use error::{Result, SkillkitError};

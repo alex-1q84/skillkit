@@ -126,20 +126,20 @@ local skill 与 shared skill **同级平铺**在 `<agent>/skills/<skill-name>/`�
 
 ```
 <project>/
-  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/.agents/skills/<skill-name>/
-  .cursor/skills/<skill-name>/        # shared 真实文件 或 local copy 自 ~/.skillkit/.agents/skills/<skill-name>/
-  .codex/skills/...                   # 同理
-  .agents/skills/<skill-name>/        # 开源标准目录：shared 真实文件只读发现；探测未命中具体 agent 时作 local 落地（见 §7）
+  .agents/skills/<skill-name>/        # 开源标准目录：local copy 自 ~/.skillkit/.agents/skills/<skill-name>/（总是落地）；shared 真实文件只读发现
+  .claude/skills/<skill-name>/        # shared 真实文件（git 提交，skillkit 只读）或 local symlink → ~/.skillkit/.agents/skills/<skill-name>/（探测到 claude-code 才落）
+  .cursor/skills/<skill-name>/        # 仅 shared 真实文件（cursor 直读 .agents/skills/，local 不再落私有目录）
+  .codex/skills/...                   # 同 cursor
 ```
 
-项目级 `.agents/skills/` 是各 agent 通用的开源标准目录（区别于全局 `~/.agents/skills/` canonical 池子），双重角色：shared 真实目录由项目 git 自管，skillkit 只扫描展示、以 `agents/<skill-name>` 归属；探测未命中具体 agent 时（无 `.claude`/`.codex`/`.cursor` 等痕迹）作为开源标准 local 落地目录，参与 apply（见 §7、决策 19）。
+项目级 `.agents/skills/` 是各 agent 通用的开源标准目录（区别于全局 `~/.agents/skills/` canonical 池子）：local skill **总是**落地于此（copy + `.skillkit-sha` 标记，`agents = []` 也保底，杜绝「有绑定记录无落地」）；shared 真实目录由项目 git 自管，skillkit 只扫描展示、以 `agents/<skill-name>` 归属（见 §7、决策 20）。探测到不直读 `.agents` 的 agent（默认配置即 claude-code）时，额外在其私有目录落一份（symlink 桥接）。
 
 **local skill 的 git 忽略用 git 自带的本地忽略文件 `<project>/.git/info/exclude`，不碰项目 `.gitignore`**。`apply` 把当前 local skill 清单写入 exclude（每行一条 `<agent>/skills/<skill-name>`）；该文件天然本地、不入库，每个开发者 clone 后跑自己的 apply 自动生成，团队成员互不冲突。示例：
 
 ```
 # skillkit managed — local skills (per-developer, not committed)
+.agents/skills/frontend-design
 .claude/skills/frontend-design
-.cursor/skills/frontend-design
 ```
 
 skillkit 不在项目目录写入自己的配置文件（项目元数据全部放在 `~/.skillkit/projects/<project-id>.toml`，保持 local 配置个人本地、不入库）。非 git 项目（无 `.git/info/exclude`）：local 直接平铺，无需忽略。边界：local 与 shared 同名时 shared（已在 git）优先、local 跳过并警告；apply 前若 local 已被 `git add`，exclude 对已追踪文件无效，apply 检测到并提示 `git rm --cached`（见 §13）。
@@ -154,11 +154,11 @@ skillkit 不在项目目录写入自己的配置文件（项目元数据全部�
 
 | agent | 直读 `~/.agents/skills/` | 支持 symlink | 全局公共落地 | 项目 local 落地 |
 |-------|:---:|:---:|------|------|
-| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | symlink `<project>/.claude/skills/<skill>` → `~/.skillkit/.agents/skills/<skill>` |
-| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy `~/.skillkit/.agents/skills/<skill>` → `<project>/.cursor/skills/<skill>/` |
-| OpenCode / Codex / Gemini | 是 | 是 | 无需操作（直读） | symlink 或 copy 均可，默认 symlink |
+| Claude Code | 否 | 是 | symlink `~/.claude/skills/<skill>` → `~/.agents/skills/<skill>` | copy → `<project>/.agents/skills/<skill>/`（总是）+ symlink `<project>/.claude/skills/<skill>` → `~/.skillkit/.agents/skills/<skill>`（探测到才加） |
+| Cursor | 是 | 否 | 无需操作（直读 `~/.agents/skills/`） | copy → `<project>/.agents/skills/<skill>/`（直读，不落私有目录） |
+| OpenCode / Codex / Gemini | 是 | 是 | 无需操作（直读） | copy → `<project>/.agents/skills/<skill>/`（直读，不落私有目录） |
 
-agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。`Config::default()` 默认声明 claude-code/cursor/codex 三大主流 agent（开箱覆盖 `.claude`/`.cursor`/`.codex` 能力）；其余 agent（OpenCode/Gemini 等）按需在 config.toml 追加。**项目 `proj.agents` 不默认全量，注册/绑定 profile/同步时精确探测**：按项目内配置目录（`.claude`/`.codex`/`.cursor`/`.agents`）→ 指令文件（`CLAUDE.md`/`AGENTS.md`）判定实际使用的 agent，多个命中全部返回，全部未命中回退开源标准 `.agents/`（只建这一个目录，见决策 19）；`--agents` 仍可显式覆盖。旧项目（注册时绑了全 agent）用 `POST /projects/{id}/sync-agents`（GUI 详情页「重新探测 agents」按钮）一键校正。Cursor 因不支持 symlink，项目 local skill 用 copy 兜底，apply 时按 canonical 内嵌的 computed_hash 检测副本是否过期，过期则重新 copy。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
+agent 列表和能力在 `~/.skillkit/config.toml` 声明，新增 agent 只改配置不改代码。`Config::default()` 默认声明 claude-code/cursor/codex 三大主流 agent；其余 agent（OpenCode/Gemini 等）按需在 config.toml 追加。**项目 `proj.agents` 不默认全量，注册/绑定 profile/同步时精确探测**：按项目内配置目录（`.claude`/`.codex`/`.cursor`/`.agents`）→ 指令文件（`CLAUDE.md`/`AGENTS.md`）判定实际使用的 agent，多个命中全部返回，全部未命中回退开源标准 `.agents/`；`--agents` 仍可显式覆盖。旧项目（注册时绑了全 agent）用 `POST /projects/{id}/sync-agents`（GUI 详情页「重新探测 agents」按钮）一键校正（见决策 19）。**落地目标由 `apply::landing_agents(config, proj.agents)` 派生，与探测结果解耦（决策 20）**：`.agents/skills/` 总是落地（copy，按 canonical 内嵌的 computed_hash 检测副本是否过期，过期重 copy）；探测到的 agent 中 `reads_agents_dir=false` 的（默认配置即 claude-code，Claude 不直读 `.agents`）额外落私有目录 symlink 桥接；其余 agent 直读 `.agents/skills/`，不落私有目录。全局层面这些 agent 直读 `~/.agents/skills/`，不再依赖各自的历史私有目录（`~/.codex/skills/`、`~/.cursor/skills/` 等）；存量 skill 在 M3 迁移时导入（见 §15）。
 
 ## 8. 数据模型
 

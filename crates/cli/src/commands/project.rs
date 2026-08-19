@@ -134,7 +134,8 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
         ProjectSub::Status { project, json } => {
             let proj = Project::load(&paths, &project)?;
             let reg = skillkit_core::Registry::load(&paths)?;
-            let diff = skillkit_core::apply::compute_diff(&proj, &reg)?;
+            let config = skillkit_core::config::Config::load(&paths)?;
+            let diff = skillkit_core::apply::compute_diff(&proj, &reg, &config)?;
             let status = skillkit_core::apply::build_status(&paths, &proj, &diff)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&status)?);

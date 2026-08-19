@@ -215,3 +215,19 @@
 - 绑定 profile 时不刷新、只靠注册时探测：旧项目（已注册为全量）痛点不解，用户观察到的「绑个 profile 建一堆目录」仍在。
 
 **后续提醒**：`detect_agents` 探测表当前固定（claude/codex/cursor/agents），若未来出现新的主流 agent 私有目录/指令文件，在 `detect.rs` 表里加一行即可。
+
+## 决策 20：`.agents/skills/` 总是作为项目 local 落地目录（绑定即落地）
+
+**背景**：决策 19 把落地目录收敛为「探测到的 agent 各自目录，未命中才回退 `.agents/`」，实际用出两类问题：① 项目只有 `.claude` 时 skill 只落 `.claude/skills/`，不直读 `.claude` 的 agent（cursor/codex/opencode 等）在 `.agents/skills/` 里看不到绑定结果；② 旧项目 toml `agents = []` 时 apply 静默零落地——有绑定记录但项目里没有任何 skill，也无警告。
+
+**决策**：
+- 项目 local skill 的落地目标固定为「开源标准 `agents` 总在列 + 探测到的 agent 中 `reads_agents_dir=false` 的额外落自己目录」。默认配置下后者仅 claude-code（Claude 不直读 `.agents`，决策 5）：`.agents/skills/<skill>` 必落（copy + `.skillkit-sha` 标记），探测到 claude-code 再加 `.claude/skills/<skill>`（symlink）；cursor/codex 直读 `.agents/skills/`，不再各自 copy 一份私有目录。
+- 探测结果仍写入 `proj.agents`（展示与 shared 扫描用），落地集合由 `apply::landing_agents(config, proj.agents)` 派生；`agents = []` 也保底落 `.agents/`，结构性杜绝「有绑定记录无落地」。
+- 落地前 `create_dir_all` 按需创建 `.<agent>/skills/`（含 `.agents/`）；旧版落在 `.cursor/`/`.codex/` 的 skillkit local 在下次 apply 按 extra 清理。
+- 修订决策 19 第 4 条：`.agents/skills/` 从「探测未命中才参与 apply」升级为「总是参与 apply」。
+
+**理由**：`.agents/skills/` 是各 agent 通用的开源标准目录（Codex/Gemini/OpenCode/Cursor 都直读），总是落它让「绑定 profile」的结果对全部 agent 立即可见；Claude 是唯一不直读它的主流 agent，用 `reads_agents_dir=false` 的能力声明桥接，保持「新增 agent 只改配置不改代码」的硬约束。
+
+**否定的备选**：
+- 探测到的 agent 各自目录 ∪ `.agents/` 全落：cursor/codex 项目会同时存 `.cursor/skills/` copy 和 `.agents/skills/` copy 两份，冗余且重新制造决策 19 要解决的目录噪音。
+- 绑定时为每个 config 声明的 agent 建目录：回到决策 19 否定过的「给未使用的 agent 建目录」。
