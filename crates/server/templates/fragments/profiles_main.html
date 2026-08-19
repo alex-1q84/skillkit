@@ -1,11 +1,18 @@
-<h1>Profiles</h1>
+<div class="page-head">
+  <h1>Profiles</h1>
+  {% if let Some(s) = summary %}<p class="summary">{{ s }}</p>{% endif %}
+</div>
 <form hx-post="/{{ token }}/profiles" hx-target="body" hx-swap="outerHTML">
   <input name="name" placeholder="新 profile 名" required>
   <button>create</button>
 </form>
 {% for profile in profiles %}
 <section class="card">
-  <h2>{{ profile.name }}</h2>
+  <h2>{{ profile.name }}
+    <button class="x"
+            hx-delete="/{{ token }}/profiles/{{ profile.name }}"
+            hx-target="body" hx-swap="outerHTML">删除</button>
+  </h2>
   <p>{{ profile.description }}</p>
   <div id="skills-{{ profile.name }}">
     {% include "fragments/profile_skills.html" %}

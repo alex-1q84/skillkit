@@ -29,6 +29,13 @@ enum ProfileSub {
         #[arg(long)]
         json: bool,
     },
+    /// 删除 profile（先解绑所有绑定它的项目，再删文件）
+    Delete {
+        profile: String,
+        /// 跳过交互确认
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 pub fn run(cmd: ProfileCmd) -> anyhow::Result<()> {
@@ -75,6 +82,29 @@ pub fn run(cmd: ProfileCmd) -> anyhow::Result<()> {
                 }
             }
         }
+        ProfileSub::Delete { profile, yes } => {
+            // 危险操作默认交互确认；--yes 跳过（CI/agent 友好）。对齐 skill/project remove 的确认模式。
+            if !yes {
+                println!("将删除 profile {profile}（所有绑定它的项目会解绑），确认？(y/n)");
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                if line.trim() != "y" {
+                    println!("已取消");
+                    return Ok(());
+                }
+            }
+            let report = skillkit_core::remove_profile(&paths, &profile)?;
+            println!("✓ 已删除 profile：{profile}");
+            if !report.unbound.is_empty() {
+                println!("  已解绑项目：{}", report.unbound.join("、"));
+            }
+            if !report.fallback.is_empty() {
+                println!(
+                    "  {} 落地失败仅清除绑定记录，项目内残留文件下次 apply 时清理",
+                    report.fallback.join("、")
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -109,6 +139,26 @@ mod tests {
             panic!("expected Show")
         };
         assert!(!json);
+    }
+
+    /// `profile delete <name> --yes`：位置参数 + flag 解析（CI/agent 契约，对齐 remove 系列）。
+    #[test]
+    fn delete_parses_profile_and_yes() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "delete", "fe", "--yes"]);
+        let ProfileSub::Delete { profile, yes } = cmd else {
+            panic!("expected Delete")
+        };
+        assert_eq!(profile, "fe");
+        assert!(yes);
+    }
+
+    #[test]
+    fn delete_defaults_yes_false() {
+        let TestCli { cmd } = TestCli::parse_from(["skillkit", "delete", "fe"]);
+        let ProfileSub::Delete { yes, .. } = cmd else {
+            panic!("expected Delete")
+        };
+        assert!(!yes, "默认走交互确认");
     }
 
     /// --json schema 锁定：Profile 序列化为 {name, description, skills}。

@@ -17,6 +17,7 @@ use crate::AppState;
 pub struct ProfilesTpl<'a> {
     pub token: &'a str,
     pub profiles: Vec<Profile>,
+    pub summary: Option<&'a str>,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -25,6 +26,7 @@ pub struct ProfilesTpl<'a> {
 pub struct ProfilesMainTpl<'a> {
     pub token: &'a str,
     pub profiles: Vec<Profile>,
+    pub summary: Option<&'a str>,
 }
 
 #[derive(Template)]
@@ -52,6 +54,15 @@ fn filter_global_skills(mut p: Profile, reg: &skillkit_core::Registry) -> Profil
 }
 
 fn render_profiles(state: AppState, token: String, fragment: bool) -> Response {
+    render_profiles_with_summary(state, token, fragment, None)
+}
+
+fn render_profiles_with_summary(
+    state: AppState,
+    token: String,
+    fragment: bool,
+    summary: Option<&str>,
+) -> Response {
     let reg = skillkit_core::Registry::load(&state.paths).unwrap_or_default();
     let mut profiles = Vec::new();
     if let Ok(names) = skillkit_core::list_profile_names(&state.paths) {
@@ -65,12 +76,14 @@ fn render_profiles(state: AppState, token: String, fragment: bool) -> Response {
         ProfilesMainTpl {
             token: &token,
             profiles,
+            summary,
         }
         .render()
     } else {
         ProfilesTpl {
             token: &token,
             profiles,
+            summary,
         }
         .render()
     };
@@ -175,6 +188,36 @@ pub async fn reorder(
             render_str(rendered)
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// 删除 profile：core 先解绑所有绑定项目（落地失败仅清记录）再删文件，
+/// 返回完整页 + summary 反馈解绑影响。
+pub async fn remove(
+    State(state): State<AppState>,
+    Path((token, name)): Path<(String, String)>,
+) -> Response {
+    match skillkit_core::remove_profile(&state.paths, &name) {
+        Ok(report) => {
+            let mut summary = format!("已删除 profile：{name}");
+            if !report.unbound.is_empty() {
+                summary.push_str("；已解绑项目：");
+                summary.push_str(&report.unbound.join("、"));
+            }
+            if !report.fallback.is_empty() {
+                summary.push('；');
+                summary.push_str(&report.fallback.join("、"));
+                summary.push_str(" 落地失败仅清除绑定记录，项目内残留文件下次 apply 时清理");
+            }
+            render_profiles_with_summary(state, token, false, Some(&summary))
+        }
+        Err(skillkit_core::SkillkitError::ProfileNotFound { name }) => {
+            (StatusCode::NOT_FOUND, format!("profile 不存在：{name}")).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "删除 profile 失败：{name}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

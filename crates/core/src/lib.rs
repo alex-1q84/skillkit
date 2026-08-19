@@ -30,7 +30,8 @@ pub use lock::FileLock;
 pub use npx::Candidate;
 pub use paths::Paths;
 pub use profile::{
-    is_unassigned, list_names as list_profile_names, skill_profiles, skills_profiles_map, Profile,
+    is_unassigned, list_names as list_profile_names, remove_profile, skill_profiles,
+    skills_profiles_map, Profile, ProfileRemovalReport,
 };
 pub use project::{list_ids as list_project_ids, scan_projects, Project};
 pub use registry::{Registry, Scope, SkillMeta};

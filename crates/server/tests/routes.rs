@@ -2253,3 +2253,111 @@ async fn install_local_get_returns_modal_fragment() {
     assert!(text.contains("取消"), "缺取消按钮");
     assert!(!text.contains("install-local-form"), "不应残留旧表单 class");
 }
+
+// ===== Profiles 视图删除（解绑项目 + 删 profile） =====
+
+#[tokio::test]
+async fn profile_delete_unbinds_project_and_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    seed_skill(&state.paths, "demo/fe", skillkit_core::Scope::Local);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/fe".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let proj_root = dir.path().join("proj");
+    std::fs::create_dir_all(proj_root.join(".git/info")).unwrap();
+    skillkit_core::Project {
+        id: "ABCDEF12".into(),
+        name: "proj".into(),
+        path: proj_root.to_string_lossy().into_owned(),
+        agents: vec![],
+        applied_profiles: vec!["fe".into()],
+        installed_skills: vec!["demo/fe".into()],
+        locked_shas: std::collections::BTreeMap::new(),
+    }
+    .save(&state.paths)
+    .unwrap();
+    // 先落地（模拟此前 apply），删除时应把项目内落地文件清掉
+    let mut proj = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    skillkit_core::run_apply(&state.paths, &mut proj, false).unwrap();
+    proj.save(&state.paths).unwrap();
+    assert!(proj_root.join(".agents/skills/fe/SKILL.md").exists());
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/test-token/profiles/fe")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("已删除 profile：fe"), "summary 反馈：{body}");
+    assert!(
+        body.contains("已解绑项目：proj"),
+        "summary 应列出解绑影响：{body}"
+    );
+    let after = skillkit_core::Project::load(&state.paths, "ABCDEF12").unwrap();
+    assert!(after.applied_profiles.is_empty(), "绑定记录已清除");
+    assert!(after.installed_skills.is_empty(), "installed_skills 重算");
+    assert!(
+        !proj_root.join(".agents/skills/fe").exists(),
+        "项目内落地文件被清理"
+    );
+    assert!(
+        skillkit_core::Profile::load(&state.paths, "fe").is_err(),
+        "profile 文件已删"
+    );
+}
+
+#[tokio::test]
+async fn profile_delete_page_renders_delete_button() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec![],
+    }
+    .save(&state.paths)
+    .unwrap();
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/profiles")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(
+        body.contains("hx-delete=\"/test-token/profiles/fe\""),
+        "profile 卡片含删除按钮：{body}"
+    );
+}
+
+#[tokio::test]
+async fn profile_delete_missing_returns_404() {
+    let app = skillkit_server::app(common::test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/test-token/profiles/nope")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}

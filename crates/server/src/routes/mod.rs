@@ -128,6 +128,7 @@ pub fn protected() -> Router<AppState> {
             "/{token}/profiles",
             get(profiles::page).post(profiles::create),
         )
+        .route("/{token}/profiles/{name}", delete(profiles::remove))
         .route(
             "/{token}/profiles/{name}/skills",
             get(profiles::page).post(profiles::add_skill),
