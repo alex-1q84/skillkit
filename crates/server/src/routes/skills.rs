@@ -2,7 +2,7 @@
 use askama::Template;
 use axum::body::Bytes;
 use axum::extract::{Multipart, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
@@ -25,12 +25,9 @@ pub struct SkillsTpl<'a> {
     /// skill_id → 所属 profile name 列表（反向 map，一次遍历现算）。global 不在（不属 profile）。
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
-    pub selected_csv: String,
     pub scope: String,
-    /// 「未纳入 profile」过滤生效中（chip on 状态 + filter_qs 透传）。
+    /// 「未纳入 profile」过滤生效中（chip on 状态）。
     pub unassigned: bool,
-    /// 当前过滤的 query 后缀（&scope=…&profiles=…），rescope 按钮 URL 携带，写后保持过滤视图。
-    pub filter_qs: String,
 }
 
 /// 纯 main 内容片段（SSE 刷新用），不含 nav。
@@ -44,10 +41,8 @@ pub struct SkillsMainTpl<'a> {
     pub profile_filter: Vec<String>,
     pub profiles_of: HashMap<String, Vec<String>>,
     pub all_profile_names: Vec<String>,
-    pub selected_csv: String,
     pub scope: String,
     pub unassigned: bool,
-    pub filter_qs: String,
 }
 
 pub async fn page(
@@ -102,8 +97,33 @@ fn build_skills_view(
     Ok((skills, profiles_of, all_profile_names))
 }
 
+/// 从 htmx 请求头 HX-Current-URL 还原 Skills 页过滤参数（scope/profiles/unassigned/selected）。
+/// 过滤 chip 点击后过滤条件已写进地址栏（layout JS pushState），htmx 发请求自动携带该 URL；
+/// 写操作返回页用它渲染，过滤视图在写操作后保持——URL 是过滤状态的唯一事实源，
+/// 免去逐按钮拼 filter_qs（漏一个操作就重置，曾致 assign/unassign 实际未透传）。
+fn page_query(headers: &HeaderMap) -> SkillsQuery {
+    headers
+        .get("hx-current-url")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|url| url.split_once('?'))
+        .map(|(_, qs)| {
+            let mut q = SkillsQuery::default();
+            for (k, v) in form_urlencoded::parse(qs.as_bytes()) {
+                match k.as_ref() {
+                    "selected" => q.selected = Some(v.into_owned()),
+                    "profiles" => q.profiles = Some(v.into_owned()),
+                    "scope" => q.scope = Some(v.into_owned()),
+                    "unassigned" => q.unassigned = Some(v.into_owned()),
+                    _ => {}
+                }
+            }
+            q
+        })
+        .unwrap_or_default()
+}
+
 /// Skills 页统一渲染入口：过滤条件全从 q 取（fragment/selected/profiles/scope/unassigned）。
-/// 写操作后重置视图传 `&SkillsQuery::default()`，透传过滤视图传原 q。
+/// 写操作后渲染传 page_query(headers)（从 HX-Current-URL 还原当前过滤），非 htmx 来源（无该头）退回默认视图。
 fn render_skills(
     state: AppState,
     token: String,
@@ -120,24 +140,11 @@ fn render_skills(
     ) {
         Ok((skills, profiles_of, all_profile_names)) => {
             let selected = q.selected_list();
-            let selected_csv = selected.join(",");
             let scope_str = scope_filter
                 .as_ref()
                 .map(Scope::to_string)
                 .unwrap_or_default();
             let unassigned = q.is_unassigned();
-            let mut filter_qs = String::new();
-            if let Some(ref s) = scope_filter {
-                filter_qs.push_str("&scope=");
-                filter_qs.push_str(&s.to_string());
-            }
-            if !q.profile_filter().is_empty() {
-                filter_qs.push_str("&profiles=");
-                filter_qs.push_str(&q.profile_filter().join(","));
-            }
-            if unassigned {
-                filter_qs.push_str("&unassigned=1");
-            }
             let rendered = if fragment {
                 SkillsMainTpl {
                     token: &token,
@@ -147,10 +154,8 @@ fn render_skills(
                     profile_filter: q.profile_filter(),
                     profiles_of,
                     all_profile_names,
-                    selected_csv,
                     scope: scope_str,
                     unassigned,
-                    filter_qs,
                 }
                 .render()
             } else {
@@ -162,10 +167,8 @@ fn render_skills(
                     profile_filter: q.profile_filter(),
                     profiles_of,
                     all_profile_names,
-                    selected_csv,
                     scope: scope_str,
                     unassigned,
-                    filter_qs,
                 }
                 .render()
             };
@@ -232,6 +235,7 @@ pub struct InstallForm {
 pub async fn install(
     State(state): State<AppState>,
     Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
     Form(f): Form<InstallForm>,
 ) -> Response {
     let Some((source, skill)) = id.split_once('/') else {
@@ -261,7 +265,7 @@ pub async fn install(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match skillkit_core::install(&state.paths, source, skill, &package, scope) {
-        Ok(_) => render_skills(state, token, None, &SkillsQuery::default()),
+        Ok(_) => render_skills(state, token, None, &page_query(&headers)),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -282,6 +286,7 @@ pub struct InstallCandidateForm {
 pub async fn install_candidate(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
     Form(f): Form<InstallCandidateForm>,
 ) -> Response {
     let scope = if matches!(f.scope.as_deref(), Some("global")) {
@@ -294,7 +299,7 @@ pub async fn install_candidate(
             state,
             token,
             Some(&format!("✓ 已安装 skills.sh/{}", f.skill)),
-            &SkillsQuery::default(),
+            &page_query(&headers),
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
             error_response("该 skill 已安装，可在列表中 upgrade 或 remove")
@@ -309,9 +314,10 @@ pub async fn install_candidate(
 pub async fn uninstall(
     State(state): State<AppState>,
     Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> Response {
     match skillkit_core::uninstall(&state.paths, &id) {
-        Ok(()) => render_skills(state, token, None, &SkillsQuery::default()),
+        Ok(()) => render_skills(state, token, None, &page_query(&headers)),
         Err(e) => {
             tracing::error!(error = ?e, "uninstall 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -322,10 +328,11 @@ pub async fn uninstall(
 pub async fn upgrade(
     State(state): State<AppState>,
     Path((token, id)): Path<(String, String)>,
+    headers: HeaderMap,
 ) -> Response {
     // GUI 场景已显式点击升级，yes=true 不二次确认
     match skillkit_core::upgrade_skill(&state.paths, &id, true) {
-        Ok(_) => render_skills(state, token, None, &SkillsQuery::default()),
+        Ok(_) => render_skills(state, token, None, &page_query(&headers)),
         Err(e) => {
             tracing::error!(error = ?e, "upgrade 失败：{id}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -336,7 +343,11 @@ pub async fn upgrade(
 /// 导入存量 skill 目录，登记进 registry（无源 → unmanaged）。
 /// import_existing 同步阻塞且耗时（扫描+迁池），spawn_blocking 卸到 blocking 线程池，
 /// 避免占用 tokio 工作线程拉长其他请求（含 rescope）的响应窗口（对齐 find 的处理）。
-pub async fn import(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+pub async fn import(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     let paths = state.paths.clone();
     let result =
         tokio::task::spawn_blocking(move || skillkit_core::import_existing(&paths, false)).await;
@@ -355,7 +366,7 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
                 summary.push_str("；skipped：");
                 summary.push_str(&r.skipped.join("、"));
             }
-            render_skills(state, token, Some(&summary), &SkillsQuery::default())
+            render_skills(state, token, Some(&summary), &page_query(&headers))
         }
         Ok(Err(e)) => {
             tracing::error!(error = ?e, "import 失败");
@@ -370,7 +381,11 @@ pub async fn import(State(state): State<AppState>, Path(token): Path<String>) ->
 
 /// 全部升级：批量升级 registry 全部 managed skill，冲突进 blocked 列出（不升级）。
 /// 同 import：长阻塞（每个 managed 一次 npx 网络调用），spawn_blocking 卸载。
-pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+pub async fn upgrade_all(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     let paths = state.paths.clone();
     let result =
         tokio::task::spawn_blocking(move || skillkit_core::upgrade_all(&paths, false)).await;
@@ -386,7 +401,7 @@ pub async fn upgrade_all(State(state): State<AppState>, Path(token): Path<String
                     b.affected.join(", ")
                 );
             }
-            render_skills(state, token, Some(&summary), &SkillsQuery::default())
+            render_skills(state, token, Some(&summary), &page_query(&headers))
         }
         Ok(Err(e)) => {
             tracing::error!(error = ?e, "upgrade-all 失败");
@@ -433,7 +448,7 @@ fn apply_unassign(
 pub async fn unassign(
     State(state): State<AppState>,
     Path(token): Path<String>,
-    Query(q): Query<SkillsQuery>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
@@ -462,17 +477,17 @@ pub async fn unassign(
             if p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(state, token, None, &q)
+            render_skills(state, token, None, &page_query(&headers))
         }
         Err(_) => error_response(format!("profile {name} 不存在")),
     }
 }
 
-/// 批量归入已有 profile。body: profile=<名>&id=<...>（id 重复 key）。返回完整 Skills 页（透传 selected/profiles）。
+/// 批量归入已有 profile。body: profile=<名>&id=<...>（id 重复 key）。返回完整 Skills 页（过滤经 HX-Current-URL 还原）。
 pub async fn assign(
     State(state): State<AppState>,
     Path(token): Path<String>,
-    Query(q): Query<SkillsQuery>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
@@ -502,7 +517,7 @@ pub async fn assign(
             if p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(state, token, None, &q)
+            render_skills(state, token, None, &page_query(&headers))
         }
         Err(_) => error_response(format!("profile {name} 不存在，改用新建或先创建")),
     }
@@ -512,7 +527,7 @@ pub async fn assign(
 pub async fn assign_new(
     State(state): State<AppState>,
     Path(token): Path<String>,
-    Query(q): Query<SkillsQuery>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
@@ -545,14 +560,14 @@ pub async fn assign_new(
     if p.save(&state.paths).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    render_skills(state, token, None, &q)
+    render_skills(state, token, None, &page_query(&headers))
 }
 
 /// chip ×：从 profile 移除单个 skill 归属。返回完整 Skills 页。
 pub async fn delete_profile(
     State(state): State<AppState>,
     Path((token, id, name)): Path<(String, String, String)>,
-    Query(q): Query<SkillsQuery>,
+    headers: HeaderMap,
 ) -> Response {
     let id = id.replace("%2F", "/");
     match skillkit_core::Profile::load(&state.paths, &name) {
@@ -560,18 +575,19 @@ pub async fn delete_profile(
             if p.remove_skill(&id).is_err() || p.save(&state.paths).is_err() {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
-            render_skills(state, token, None, &q)
+            render_skills(state, token, None, &page_query(&headers))
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 /// GUI scope 转移：POST /skills/rescope?to=global|local&id=<enc>。直接执行 + summary 横幅（去 hx-confirm 方向）。
-/// 透传 scope/profiles/selected（按钮 URL 携带），返回页保持当前过滤视图，不再跳回「全部」。
+/// 返回页经 HX-Current-URL 还原过滤视图（替代按钮 URL 拼 filter_qs，免逐按钮维护）。
 pub async fn rescope(
     State(state): State<AppState>,
     Path(token): Path<String>,
     Query(q): Query<RescopeGuiQuery>,
+    headers: HeaderMap,
 ) -> Response {
     let id = q.id.replace("%2F", "/");
     let target = if q.to.as_deref() == Some("global") {
@@ -590,7 +606,7 @@ pub async fn rescope(
                 ),
                 Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
             };
-            render_skills(state, token, Some(&summary), &q.page)
+            render_skills(state, token, Some(&summary), &page_query(&headers))
         }
         Err(e) => {
             tracing::error!(error = ?e, "GUI rescope 失败：{id}");
@@ -603,9 +619,6 @@ pub async fn rescope(
 pub struct RescopeGuiQuery {
     pub to: Option<String>,
     pub id: String,
-    /// 页面过滤参数（scope/profiles/selected），随按钮 URL 回传，渲染时还原过滤视图。
-    #[serde(flatten)]
-    pub page: SkillsQuery,
 }
 
 #[derive(Deserialize)]
@@ -634,6 +647,7 @@ pub async fn install_local_form(
 pub async fn install_local(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
     Form(f): Form<InstallLocalForm>,
 ) -> Response {
     let scope = if matches!(f.scope.as_deref(), Some("global")) {
@@ -649,7 +663,7 @@ pub async fn install_local(
             state,
             token,
             Some(&format!("✓ 已安装本地 skill：{}", m.id)),
-            &SkillsQuery::default(),
+            &page_query(&headers),
         ),
         Err(e) => {
             tracing::error!(error = ?e, "install-local 失败：{}", f.path);
@@ -666,6 +680,7 @@ pub const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 pub async fn install_local_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
     let mut archive: Option<Vec<u8>> = None;
@@ -723,7 +738,15 @@ pub async fn install_local_upload(
         if let Err(e) = rebuild_dir(tmp.path(), dir_files) {
             return error_response(e);
         }
-        return install_from_path(&state, token, tmp.path(), name.as_deref(), scope, force);
+        return install_from_path(
+            &state,
+            token,
+            tmp.path(),
+            name.as_deref(),
+            scope,
+            force,
+            &page_query(&headers),
+        );
     }
     // zip 上传：单个 archive part → 临时 .zip → core
     let Some(archive) = archive else {
@@ -737,7 +760,15 @@ pub async fn install_local_upload(
     if let Err(e) = std::fs::write(&zip_path, &archive) {
         return error_response(format!("写入临时文件失败：{e}"));
     }
-    install_from_path(&state, token, &zip_path, name.as_deref(), scope, force)
+    install_from_path(
+        &state,
+        token,
+        &zip_path,
+        name.as_deref(),
+        scope,
+        force,
+        &page_query(&headers),
+    )
 }
 
 /// 调 core install_local 并渲染结果（zip/目录分支共用，避免重复 render_skills 逻辑）。
@@ -748,13 +779,14 @@ fn install_from_path(
     name: Option<&str>,
     scope: Scope,
     force: bool,
+    q: &SkillsQuery,
 ) -> Response {
     match skillkit_core::install_local(&state.paths, path.to_str().unwrap(), name, scope, force) {
         Ok(m) => render_skills(
             state.clone(),
             token,
             Some(&format!("✓ 已安装本地 skill：{}", m.id)),
-            &SkillsQuery::default(),
+            q,
         ),
         Err(e) => {
             tracing::error!(error = ?e, "install-local upload 失败");
@@ -925,10 +957,8 @@ mod tests {
             profile_filter: vec![],
             profiles_of,
             all_profile_names: vec!["fe".into()],
-            selected_csv: "dc/fe".into(),
             scope: String::new(),
             unassigned: false,
-            filter_qs: String::new(),
         }
         .render()
         .unwrap();
@@ -938,36 +968,32 @@ mod tests {
         assert!(html.contains("assign"), "归入端点");
     }
 
-    /// 回归：过滤视图下 rescope 按钮携带 scope/profiles（filter_qs），
-    /// 写操作返回页保持过滤视图，不再跳回「全部」。
+    /// 回归：写操作返回页的过滤视图经 HX-Current-URL 还原（page_query），
+    /// rescope 按钮只带 to/id，不再逐按钮拼 filter_qs。
     #[test]
-    fn skills_main_rescope_button_carries_filter_qs() {
-        let skills = vec![(meta("dc/g", Scope::Global), "dc%2Fg".into())];
+    fn skills_main_rescope_button_plain_url() {
         let html = SkillsMainTpl {
             token: "tok",
-            skills,
+            skills: vec![(meta("dc/g", Scope::Global), "dc%2Fg".into())],
             summary: None,
             selected: vec![],
             profile_filter: vec!["fe".into()],
             profiles_of: std::collections::HashMap::new(),
             all_profile_names: vec!["fe".into()],
-            selected_csv: String::new(),
             scope: "global".into(),
             unassigned: false,
-            filter_qs: "&scope=global&profiles=fe".into(),
         }
         .render()
         .unwrap();
-        // filter_qs 插值经 Askama 转义，& → &#38;（浏览器解析后同 &amp;，语义等价）
         assert!(
-            html.contains("rescope?to=local&amp;id=dc%2Fg&#38;scope=global&#38;profiles=fe"),
-            "rescope 按钮 URL 应携带过滤参数：{html}"
+            html.contains("rescope?to=local&amp;id=dc%2Fg\""),
+            "rescope 按钮 URL 只带 to/id：{html}"
         );
     }
 
-    /// 回归：unassigned 视图下 chip 亮、rescope 按钮携带 unassigned=1 保持过滤视图。
+    /// 回归：unassigned 视图下 chip 亮；过滤保持走 HX-Current-URL，按钮 URL 无过滤参数。
     #[test]
-    fn skills_main_unassigned_chip_and_filter_qs() {
+    fn skills_main_unassigned_chip_on() {
         let html = SkillsMainTpl {
             token: "tok",
             skills: vec![(meta("dc/be", Scope::Local), "dc%2Fbe".into())],
@@ -976,10 +1002,8 @@ mod tests {
             profile_filter: vec![],
             profiles_of: std::collections::HashMap::new(),
             all_profile_names: vec!["fe".into()],
-            selected_csv: String::new(),
             scope: String::new(),
             unassigned: true,
-            filter_qs: "&unassigned=1".into(),
         }
         .render()
         .unwrap();
@@ -988,8 +1012,38 @@ mod tests {
             "「未纳入 profile」chip 存在且 on：{html}"
         );
         assert!(
-            html.contains("rescope?to=global&amp;id=dc%2Fbe&#38;unassigned=1"),
-            "rescope 按钮应携带 unassigned=1：{html}"
+            html.contains("rescope?to=global&amp;id=dc%2Fbe\""),
+            "rescope 按钮 URL 只带 to/id：{html}"
         );
+    }
+
+    /// HX-Current-URL → SkillsQuery：过滤四参（scope/profiles/unassigned/selected）全还原，
+    /// 无关参数忽略、无头/无 query 退回默认（不过滤）。
+    #[test]
+    fn page_query_restores_filter_from_hx_current_url() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            "hx-current-url",
+            "http://127.0.0.1:7788/tok/skills?scope=local&profiles=fe,be&unassigned=1&selected=dc%2Ffe,dc%2Fbe&fragment=9"
+                .parse()
+                .unwrap(),
+        );
+        let q = page_query(&h);
+        assert_eq!(q.scope.as_deref(), Some("local"));
+        assert_eq!(q.profiles.as_deref(), Some("fe,be"));
+        assert_eq!(q.unassigned.as_deref(), Some("1"));
+        // selected 里的 %2F 经 form 解码还原（与 selected_list 期望一致）
+        assert_eq!(q.selected.as_deref(), Some("dc/fe,dc/be"));
+        assert!(
+            q.fragment.is_none(),
+            "fragment 不是过滤状态，地址栏 URL 不含它也不还原"
+        );
+
+        // 无头（非 htmx 来源，如 curl）→ 默认视图
+        assert_eq!(page_query(&HeaderMap::new()), SkillsQuery::default());
+        // 头无 query → 默认视图
+        let mut h2 = HeaderMap::new();
+        h2.insert("hx-current-url", "http://x/tok/skills".parse().unwrap());
+        assert_eq!(page_query(&h2), SkillsQuery::default());
     }
 }

@@ -58,6 +58,7 @@ crates/server/
 - **尾斜杠 404**：axum 0.8 `/{token}` 严格匹配，`/TOKEN/` 需额外注册。
 - **scope serde**：`#[serde(rename_all = "lowercase")]`，json 里 `"global"`/`"local"`。
 - **htmx 2.x SSE 扩展独立包**：不用 htmx 的 sse 扩展，用浏览器原生 `EventSource` + `htmx.ajax`。
+- **视图过滤状态进 URL，写操作经 HX-Current-URL 还原**：过滤 chip 点击在 `htmx:configRequest` 里 `pushState` 把过滤参数写进地址栏（去掉 `fragment=1`；不能放 afterRequest——chip 已被 innerHTML 替换出 DOM，事件不冒泡到 body）；selected 等易变状态也以 DOM 实时值经 `parameters.set` 注入请求，不信模板渲染的快照。写操作 handler 一律传 `page_query(&headers)`（解析 htmx 自动携带的 `HX-Current-URL` 头）渲染返回页，禁止逐按钮拼 `filter_qs`（每个操作都要手工维护，漏一个就重置过滤）或 `SkillsQuery::default()`（必然重置）。非 htmx 的 fetch 提交须手动带 `HX-Current-URL: location.href` 头。
 
 ## 5. 测试策略（前端相关）
 
@@ -81,3 +82,5 @@ crates/server/
 - 改模板/静态资源后不跑 `make check`（Askama 模板编译错误只有 `make check`/`cargo test` 能暴露）。
 - 用 htmx 2.x 的 sse 扩展（拆包了），应走原生 `EventSource`。
 - 表单重复 key（checkbox 多选）用 serde 结构体接收（会失败），应手动 `form_urlencoded::parse`。
+- Skills 页写操作渲染用 `SkillsQuery::default()`（过滤必被重置），应传 `page_query(&headers)`。
+- 过滤/选中状态只存模板渲染的 URL 快照里（用户 toggle 后即过期），应以 DOM 实时值注入。

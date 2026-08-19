@@ -41,7 +41,7 @@ impl FragmentQuery {
 /// Skills 页专属 query：fragment（SSE 片段）+ selected（高亮选中）+ profiles/unassigned/scope（过滤）。
 /// 不复用 FragmentQuery——后者只有 fragment 字段，serde 默认忽略未知字段，不扩就静默丢参。
 /// selected/profiles 用 CSV（?selected=a,b），serde_urlencoded 对 Vec 字段的单值会拒绝，CSV 单/多值都兼容。
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct SkillsQuery {
     pub fragment: Option<String>,
     #[serde(default)]

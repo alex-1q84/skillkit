@@ -471,6 +471,78 @@ async fn skill_uninstall_removes_from_registry() {
     assert!(after.skills.is_empty());
 }
 
+/// 回归：过滤视图下写操作（uninstall 等）经 HX-Current-URL 还原过滤，
+/// 返回页保持 profile 过滤（chip on + 只列属该 profile 的 skill），不再跳回「全部」。
+#[tokio::test]
+async fn skill_write_op_restores_filter_from_hx_current_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let mut reg = skillkit_core::Registry::default();
+    for name in ["x", "y", "z"] {
+        reg.skills.insert(
+            format!("demo/{name}"),
+            skillkit_core::registry::SkillMeta {
+                id: format!("demo/{name}"),
+                name: name.into(),
+                source: "demo".into(),
+                scope: skillkit_core::Scope::Global,
+                version: None,
+                computed_hash: None,
+                installed_at: "2026-07-31".into(),
+                canonical_path: dir
+                    .path()
+                    .join(format!(".agents/skills/{name}"))
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+        );
+    }
+    reg.save(&state.paths).unwrap();
+    skillkit_core::Profile {
+        name: "fe".into(),
+        description: String::new(),
+        skills: vec!["demo/x".into()],
+    }
+    .save(&state.paths)
+    .unwrap();
+
+    // 卸载 demo/y（不属 fe），模拟 htmx 携带当前过滤地址栏；
+    // demo/z 同不属 fe 且未被卸载——过滤保持时它不出现，过滤重置时它会出现
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/test-token/skills/demo%2Fy")
+                .header(
+                    "hx-current-url",
+                    "http://127.0.0.1:7788/test-token/skills?profiles=fe",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(body.contains("<nav"), "写操作应返回完整页");
+    // 过滤视图保持：fe chip 唯一亮、demo/z（过滤外、未卸载）不出现
+    assert_eq!(
+        body.matches(r#"class="chip on""#).count(),
+        1,
+        "只有 fe 一个 chip 亮（scope/profile「全部」均不应亮）"
+    );
+    assert!(body.contains(">fe</a>"), "fe profile chip 存在");
+    assert!(body.contains("demo/x"), "属 fe 的 demo/x 在列");
+    assert!(
+        !body.contains("demo/z"),
+        "不属 fe 的 demo/z 不应出现（过滤被重置）"
+    );
+}
+
 #[tokio::test]
 async fn sse_events_endpoint_reachable() {
     let dir = tempfile::tempdir().unwrap();

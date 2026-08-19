@@ -35,7 +35,7 @@ def expect_row(page, name, present: bool):
 
 
 def seed_registry(home: str) -> None:
-    """向临时 HOME 写 registry.json：一个 unmanaged + 一个 managed（GUI Skills 用例预置）。
+    """向临时 HOME 写 registry.json + profile fe：一个 unmanaged + 一个 managed（GUI Skills 用例预置）。
     canonical 目录不必真实存在——Skills 页只读 registry 渲染。"""
     registry_dir = Path(home) / ".skillkit"
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +62,12 @@ def seed_registry(home: str) -> None:
         },
     }
     (registry_dir / "registry.json").write_text(json.dumps({"skills": meta}))
+    # profile fe 含 dc/real（过滤保持用例的过滤维度）
+    profiles_dir = registry_dir / "profiles"
+    profiles_dir.mkdir(exist_ok=True)
+    (profiles_dir / "fe.toml").write_text(
+        'name = "fe"\ndescription = ""\nskills = ["dc/real"]\n'
+    )
 
 
 def skills_rows(page):
@@ -160,6 +166,29 @@ def test_skills_toggle_local_row_highlights(page, base):
     expect(page.locator("#skill-batch")).to_be_hidden()
 
 
+def test_skills_filter_kept_in_url_across_write_op(page, base):
+    """过滤进 URL：chip 点击写地址栏；写操作后过滤视图保持；后退恢复全部（回归：过滤被重置）。"""
+    import re
+    # 点 profile chip「fe」：URL 写入过滤参数，视图只剩属 fe 的 local skill
+    page.locator("#skill-profile-filter .chip", has_text="fe").first.click()
+    expect(page.locator(ROWS_SEL).filter(has_text="dc/real")).to_have_count(1)
+    expect(page.locator(ROWS_SEL).filter(has_text="unmanaged/legacy")).to_have_count(0)
+    assert "profiles=fe" in page.url, f"过滤参数应写进 URL：{page.url}"
+
+    # 写操作（chip × 从 profile 移出）：返回页保持过滤（fe chip 仍亮，URL 不变）
+    page.locator("#skills .chip .x").first.click()
+    expect(page.locator(ROWS_SEL).filter(has_text="dc/real")).to_have_count(0)
+    fe_chip = page.locator("#skill-profile-filter .chip", has_text="fe").first
+    expect(fe_chip).to_have_class(re.compile(r"\bon\b"))
+    assert "profiles=fe" in page.url, f"写操作后 URL 过滤应保持：{page.url}"
+
+    # 后退：回到无过滤状态，全部行恢复（popstate 片段刷新）
+    page.evaluate("history.back()")
+    expect(page.locator(ROWS_SEL).filter(has_text="unmanaged/legacy")).to_have_count(1)
+    expect(page.locator(ROWS_SEL).filter(has_text="dc/real")).to_have_count(1)
+    assert "profiles=fe" not in page.url, f"后退应离开过滤视图：{page.url}"
+
+
 TESTS = [
     ("test_nav_not_duplicated_after_source_delete", test_nav_not_duplicated_after_source_delete, "sources"),
     ("test_source_name_preview", test_source_name_preview, "sources"),
@@ -168,6 +197,7 @@ TESTS = [
     ("test_skills_unmanaged_badge", test_skills_unmanaged_badge, "skills"),
     ("test_skills_upgrade_button_only_managed", test_skills_upgrade_button_only_managed, "skills"),
     ("test_skills_toggle_local_row_highlights", test_skills_toggle_local_row_highlights, "skills"),
+    ("test_skills_filter_kept_in_url_across_write_op", test_skills_filter_kept_in_url_across_write_op, "skills"),
 ]
 
 

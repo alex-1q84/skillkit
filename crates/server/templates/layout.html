@@ -164,6 +164,31 @@
     }
     document.body.addEventListener('htmx:afterSettle', refreshSkillBatch);
 
+    // ===== 过滤条件进 URL（URL 是过滤状态唯一事实源） =====
+    // 写操作返回页的过滤还原依赖服务端读 HX-Current-URL（地址栏），所以 chip 点击必须先把它写进地址栏。
+    // 注意：在 configRequest（swap 前）做——afterRequest 时 chip 已被 innerHTML 替换出 DOM，
+    // 事件不再冒泡到 body，body 级监听收不到。
+    document.body.addEventListener('htmx:configRequest', function (e) {
+      var chip = e.target.closest && e.target.closest('#skill-scope-filter .chip, #skill-profile-filter .chip');
+      if (!chip) return;
+      var selected = selectedSkillIds().join(','); // 以 DOM 实时选中为准（chip URL 是渲染时快照）
+      e.detail.parameters.set('selected', selected);
+      // 过滤参数取自 chip 的 hx-get URL（去掉 fragment=1），与请求实际携带一致
+      var params = new URLSearchParams(chip.getAttribute('hx-get').split('?')[1] || '');
+      params.delete('fragment');
+      if (selected) params.set('selected', selected);
+      var qs = params.toString();
+      history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
+    });
+    // 后退/前进：按地址栏过滤状态片段刷新 main（pushState 记录间移动）
+    window.addEventListener('popstate', function () {
+      var params = new URLSearchParams(location.search);
+      params.set('fragment', '1');
+      htmx.ajax('GET', location.pathname + '?' + params.toString(), {
+        target: 'main', swap: 'innerHTML'
+      });
+    });
+
     // ===== 写操作错误 toast（4xx 响应不刷页，弹提示框）=====
     function showToast(msg) {
       var t = document.getElementById('toast');
@@ -314,7 +339,7 @@
       btn.disabled = true;
       var orig = btn.textContent;
       btn.textContent = '安装中…';
-      fetch(url, { method: 'POST', body: body, headers: { 'HX-Request': 'true' } })
+      fetch(url, { method: 'POST', body: body, headers: { 'HX-Request': 'true', 'HX-Current-URL': location.href } })
         .then(function (r) {
           if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || '安装失败'); });
           return r.text();
