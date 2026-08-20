@@ -583,6 +583,7 @@ pub async fn delete_profile(
 
 /// GUI scope 转移：POST /skills/rescope?to=global|local&id=<enc>。直接执行 + summary 横幅（去 hx-confirm 方向）。
 /// 返回页经 HX-Current-URL 还原过滤视图（替代按钮 URL 拼 filter_qs，免逐按钮维护）。
+/// 同步 core 操作 + 渲染放 spawn_blocking，避免阻塞 Tokio runtime、与 SSE 刷新竞态。
 pub async fn rescope(
     State(state): State<AppState>,
     Path(token): Path<String>,
@@ -595,22 +596,34 @@ pub async fn rescope(
     } else {
         Scope::Local
     };
-    match skillkit_core::set_scope(&state.paths, &id, target) {
-        Ok(report) => {
-            let summary = match target {
-                Scope::Global => format!(
-                    "✓ 已转全局，从 {} 个 profile / {} 个项目移除引用；以下项目需重新 apply：{}",
-                    report.affected_profiles.len(),
-                    report.affected_projects.len(),
-                    report.affected_projects.join(", ")
-                ),
-                Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
-            };
-            render_skills(state, token, Some(&summary), &page_query(&headers))
+    let log_id = id.clone();
+    let job = tokio::task::spawn_blocking(move || {
+        match skillkit_core::set_scope(&state.paths, &id, target) {
+            Ok(report) => {
+                let summary = match target {
+                    Scope::Global => format!(
+                        "✓ 已转全局，从 {} 个 profile / {} 个项目移除引用；以下项目需重新 apply：{}",
+                        report.affected_profiles.len(),
+                        report.affected_projects.len(),
+                        report.affected_projects.join(", ")
+                    ),
+                    Scope::Local => "✓ 已转 local，撤销全局落地（可 rescope global 恢复）".to_string(),
+                };
+                Ok(render_skills(state, token, Some(&summary), &page_query(&headers)))
+            }
+            Err(e) => Err(e),
+        }
+    })
+    .await;
+    match job {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => {
+            tracing::error!(error = ?e, "GUI rescope 失败：{log_id}");
+            error_response(format!("rescope 失败：{e}"))
         }
         Err(e) => {
-            tracing::error!(error = ?e, "GUI rescope 失败：{id}");
-            error_response(format!("rescope 失败：{e}"))
+            tracing::error!(error = ?e, "GUI rescope 失败：任务线程异常");
+            error_response("rescope 失败：服务线程异常")
         }
     }
 }

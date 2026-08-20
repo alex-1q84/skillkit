@@ -25,25 +25,73 @@
         new Sortable(el, { animation: 150 });
       });
     });
-    // SSE：CLI 在另一进程改了 ~/.skillkit/ 时刷新当前页 main。
-    // 请求 ?fragment=1 拿纯 main 内容（服务端渲染，不含 nav），innerHTML 替换。
-    // 响应是片段而非完整页，从根上杜绝「nav 被塞进 main」的导航重复。
-    var es = new EventSource('/{{ token }}/events');
-    es.addEventListener('changed', function () {
-      // scan 浮层开时跳过整页刷新（注册写 toml 触发 SSE，刷 main 会清浮层，破坏连续注册）
-      if (document.querySelector('.scan-flyout')) return;
-      // 稍延迟：写操作先写状态文件触发 SSE，后渲染完整页返回。直接刷新会与 POST 响应竞态，
-      // 把刚渲染的 summary 反馈冲掉。延迟到完整页落地后再检查跳过。
-      setTimeout(function () {
-        // 写操作刚返回的 summary 反馈在展示时跳过刷新（片段刷新会冲掉它，用户还没看到反馈）
-        if (document.querySelector('.page-head .summary')) return;
-        // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1
+    // body 会被写操作用 outerHTML 替换；跨 body 保存的状态必须挂在 window 上。
+    var skillkitWriteState = window.__skillkitWriteState || {
+      pendingWrites: 0,
+      sseDirty: false,
+      refreshTimer: null
+    };
+    window.__skillkitWriteState = skillkitWriteState;
+
+    function skillkitScheduleRefresh() {
+      skillkitWriteState.sseDirty = true;
+      if (skillkitWriteState.pendingWrites > 0 || skillkitWriteState.refreshTimer !== null) return;
+      skillkitWriteState.refreshTimer = setTimeout(function () {
+        skillkitWriteState.refreshTimer = null;
+        if (skillkitWriteState.pendingWrites > 0) return;
+        // scan 浮层开时跳过整页刷新（注册写 toml 触发 SSE，刷 main 会清浮层，破坏连续注册）
+        if (document.querySelector('.scan-flyout')) return;
+        // 写操作刚返回的 summary 在展示期不再用 SSE 覆盖，避免反馈竞态。
+        if (document.querySelector('.page-head .summary')) {
+          skillkitWriteState.sseDirty = false;
+          return;
+        }
+        skillkitWriteState.sseDirty = false;
+        // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1。
         var params = new URLSearchParams(location.search);
         params.set('fragment', '1');
         htmx.ajax('GET', location.pathname + '?' + params.toString(), {
           target: 'main', swap: 'innerHTML'
         });
       }, 300);
+    }
+
+    function skillkitIsWriteRequest(e) {
+      var config = e.detail && e.detail.requestConfig;
+      return config && String(config.verb || '').toLowerCase() !== 'get';
+    }
+
+    function skillkitOpenEventSource() {
+      // body swap 会重执行脚本；同一 document 内只允许一个 SSE。
+      if (window.__skillkitEventSource &&
+          window.__skillkitEventSource.readyState !== EventSource.CLOSED) return;
+      window.__skillkitEventSource = new EventSource('/{{ token }}/events');
+      window.__skillkitEventSource.addEventListener('changed', skillkitScheduleRefresh);
+    }
+    function skillkitCloseEventSource() {
+      if (!window.__skillkitEventSource) return;
+      // 完整页面导航不会复用旧 window；显式 close 防止 SSE 占满浏览器连接池。
+      window.__skillkitEventSource.close();
+      window.__skillkitEventSource = null;
+    }
+    // 页面导航和 BFCache 也必须走统一生命周期，不能只依赖 body swap 单例。
+    if (!window.__skillkitEventLifecycleBound) {
+      window.__skillkitEventLifecycleBound = true;
+      window.addEventListener('pagehide', skillkitCloseEventSource);
+      window.addEventListener('pageshow', skillkitOpenEventSource);
+    }
+    // SSE：CLI 在另一进程改了 ~/.skillkit/ 时刷新当前页 main。
+    skillkitOpenEventSource();
+    // 写操作期间只记 dirty，POST 完成后再合并成一次 fragment 刷新。
+    document.body.addEventListener('htmx:beforeRequest', function (e) {
+      if (skillkitIsWriteRequest(e)) skillkitWriteState.pendingWrites += 1;
+    });
+    document.body.addEventListener('htmx:afterRequest', function (e) {
+      if (!skillkitIsWriteRequest(e)) return;
+      skillkitWriteState.pendingWrites = Math.max(0, skillkitWriteState.pendingWrites - 1);
+      if (skillkitWriteState.pendingWrites === 0 && skillkitWriteState.sseDirty) {
+        skillkitScheduleRefresh();
+      }
     });
 
     // ===== 目录浏览浮层关闭：✕ / 点遮罩 / ESC（纯 UI 收起，不涉业务） =====
@@ -63,11 +111,14 @@
         closeBrowseOverlay(overlay);
       }
     });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
-        document.querySelectorAll('.browse-overlay').forEach(closeBrowseOverlay);
-      }
-    });
+    if (!window.__skillkitKeydownBound) {
+      window.__skillkitKeydownBound = true;
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('.browse-overlay').forEach(closeBrowseOverlay);
+        }
+      });
+    }
     // scan 候选 toggle：靠 toggle 端点 hx-swap=outerHTML 替换按钮片段，无需 JS 标记
 
     // ===== 路径输入框 Tab 补全 =====
