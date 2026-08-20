@@ -7,7 +7,8 @@ use crate::paths::Paths;
 use crate::project::Project;
 use crate::registry::{Registry, Scope};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 /// 一个 skill 在某 agent 下的落地目标（Task 7 落地用）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +108,26 @@ fn agent_dir_name(agent: &str) -> &str {
         "claude-code" => "claude",
         other => other,
     }
+}
+
+fn landed_path(project_root: &Path, agent: &str, skill: &str) -> PathBuf {
+    project_root.join(format!(".{}/skills/{skill}", agent_dir_name(agent)))
+}
+
+fn expected_physical_paths(project_root: &Path, targets: &[LocalTarget]) -> HashSet<PathBuf> {
+    targets
+        .iter()
+        .filter_map(|target| {
+            let skill = target
+                .skill_id
+                .split('/')
+                .next_back()
+                .unwrap_or(&target.skill_id);
+            landed_path(project_root, &target.agent, skill)
+                .canonicalize()
+                .ok()
+        })
+        .collect()
 }
 
 /// 对一个 local target 落地（按 agent 能力 symlink 或 copy）。返回 (created, recopied)。
@@ -332,11 +353,16 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
             )
         })
         .collect();
+    let expected_physical = expected_physical_paths(project_root, &diff.expected);
     for agent in scan_agents(&project.agents) {
         for name in scan_local_landed(project_root, &agent, &skm_skills)? {
             let key = format!("{agent}/{name}");
-            if !expected_names.contains(&key) {
-                let p = project_root.join(format!(".{}/skills/{}", agent_dir_name(&agent), name));
+            let p = landed_path(project_root, &agent, &name);
+            let is_expected_alias = p
+                .canonicalize()
+                .ok()
+                .is_some_and(|physical| expected_physical.contains(&physical));
+            if !expected_names.contains(&key) && !is_expected_alias {
                 let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
                 report.removed.push(key);
             }
@@ -369,11 +395,12 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
     let skm_skills = paths.skillkit_skills_dir();
     let mut expected = Vec::new();
     let mut missing = Vec::new();
+    let expected_physical = expected_physical_paths(project_root, &diff.expected);
     for t in &diff.expected {
         let skill = t.skill_id.split('/').next_back().unwrap_or(&t.skill_id);
         let key = format!("{}/{}", t.agent, skill);
         expected.push(key.clone());
-        let dest = project_root.join(format!(".{}/skills/{}", agent_dir_name(&t.agent), skill));
+        let dest = landed_path(project_root, &t.agent, skill);
         if !dest.exists() && !dest.is_symlink() {
             missing.push(key);
         }
@@ -382,7 +409,12 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
     for agent in scan_agents(&project.agents) {
         for name in scan_local_landed(project_root, &agent, &skm_skills)? {
             let key = format!("{agent}/{name}");
-            if !expected.contains(&key) {
+            let p = landed_path(project_root, &agent, &name);
+            let is_expected_alias = p
+                .canonicalize()
+                .ok()
+                .is_some_and(|physical| expected_physical.contains(&physical));
+            if !expected.contains(&key) && !is_expected_alias {
                 extra.push(key);
             }
         }
@@ -637,6 +669,49 @@ mod tests {
         assert_eq!(proj.locked_shas.get("dc/logseq").unwrap(), "sha1");
         let report2 = run_apply(&paths, &mut proj, false).unwrap();
         assert!(report2.created.is_empty(), "幂等：再 apply 零 created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_apply_does_not_remove_targets_through_aliased_agent_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/keep", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        std::fs::create_dir_all(project_root.join("skills")).unwrap();
+        std::fs::create_dir_all(project_root.join(".claude")).unwrap();
+        std::fs::create_dir_all(project_root.join(".cursor")).unwrap();
+        std::os::unix::fs::symlink("../skills", project_root.join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink("../skills", project_root.join(".cursor/skills")).unwrap();
+        let mut proj = Project {
+            id: "P6".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["claude-code".into(), "cursor".into(), "agents".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/keep".into()],
+            locked_shas: BTreeMap::new(),
+        };
+
+        let report = run_apply(&paths, &mut proj, false).unwrap();
+        assert!(
+            report.removed.is_empty(),
+            "同一物理目录的 agent alias 不应互相清理：{report:?}"
+        );
+        assert!(
+            project_root.join(".claude/skills/keep").is_symlink(),
+            "Claude 链接应保留在共享物理目录中"
+        );
+
+        let registry = Registry::load(&paths).unwrap();
+        let config = Config::load(&paths).unwrap();
+        let diff = compute_diff(&proj, &registry, &config).unwrap();
+        let status = build_status(&paths, &proj, &diff).unwrap();
+        assert!(
+            status.missing.is_empty(),
+            "共享 agent 目录不应导致目标误报 missing：{status:?}"
+        );
     }
 
     #[test]
