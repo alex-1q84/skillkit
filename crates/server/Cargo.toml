@@ -1,6 +1,6 @@
 [package]
 name = "skillkit-server"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Local web GUI server of skillkit for browsing and configuring AI agent skills"
 license.workspace = true
