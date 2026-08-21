@@ -1,6 +1,6 @@
 [package]
 name = "skillkit-core"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Core library of skillkit: unified management for AI agent skills (sources, registry, profiles, project apply)"
 license.workspace = true
