@@ -237,6 +237,44 @@ pub(crate) fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Res
     Ok(())
 }
 
+/// 扫描 extra：项目各 agent 目录下已落地（skillkit 管的 local）但不在 expected 的 skill 项。
+/// alias 豁免：落地路径 canonicalize 后指向 expected 的物理目录（如 .claude/skills、
+/// .cursor/skills 同指 ../skills 共享池）不算 extra。apply（删除）与 status（报告）
+/// 共用此判定，闭环两端不漂移。
+fn scan_extras(
+    project_root: &Path,
+    project_agents: &[String],
+    skm_skills: &Path,
+    expected: &[LocalTarget],
+) -> Result<Vec<(String, PathBuf)>> {
+    let expected_keys: HashSet<String> = expected
+        .iter()
+        .map(|t| {
+            format!(
+                "{}/{}",
+                t.agent,
+                t.skill_id.split('/').next_back().unwrap_or(&t.skill_id)
+            )
+        })
+        .collect();
+    let expected_physical = expected_physical_paths(project_root, expected);
+    let mut extras = Vec::new();
+    for agent in scan_agents(project_agents) {
+        for name in scan_local_landed(project_root, &agent, skm_skills)? {
+            let key = format!("{agent}/{name}");
+            let p = landed_path(project_root, &agent, &name);
+            let is_expected_alias = p
+                .canonicalize()
+                .ok()
+                .is_some_and(|physical| expected_physical.contains(&physical));
+            if !expected_keys.contains(&key) && !is_expected_alias {
+                extras.push((key, p));
+            }
+        }
+    }
+    Ok(extras)
+}
+
 /// 扫描 <project>/<agent>/skills/ 下 skillkit 管的 local 落地点。
 fn scan_local_landed(project_root: &Path, agent: &str, skm_skills: &Path) -> Result<Vec<String>> {
     let dir = project_root.join(format!(".{}/skills", agent_dir_name(agent)));
@@ -341,32 +379,11 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
         }
     }
 
-    // extra：清理现状 skillkit-local 不在 expected 的
-    let expected_names: std::collections::HashSet<String> = diff
-        .expected
-        .iter()
-        .map(|t| {
-            format!(
-                "{}/{}",
-                t.agent,
-                t.skill_id.split('/').next_back().unwrap_or(&t.skill_id)
-            )
-        })
-        .collect();
-    let expected_physical = expected_physical_paths(project_root, &diff.expected);
-    for agent in scan_agents(&project.agents) {
-        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
-            let key = format!("{agent}/{name}");
-            let p = landed_path(project_root, &agent, &name);
-            let is_expected_alias = p
-                .canonicalize()
-                .ok()
-                .is_some_and(|physical| expected_physical.contains(&physical));
-            if !expected_names.contains(&key) && !is_expected_alias {
-                let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
-                report.removed.push(key);
-            }
-        }
+    // extra：清理现状 skillkit-local 不在 expected 的（alias 豁免判定与 status 共用 scan_extras，
+    // 保证「感知-执行」闭环一致：status 报的 extra 恰是 apply 会清理的）
+    for (key, p) in scan_extras(project_root, &project.agents, &skm_skills, &diff.expected)? {
+        let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
+        report.removed.push(key);
     }
 
     write_exclude(project_root, &diff.expected)?;
@@ -396,7 +413,6 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
     let skm_skills = paths.skillkit_skills_dir();
     let mut expected = Vec::new();
     let mut missing = Vec::new();
-    let expected_physical = expected_physical_paths(project_root, &diff.expected);
     for t in &diff.expected {
         let skill = t.skill_id.split('/').next_back().unwrap_or(&t.skill_id);
         let key = format!("{}/{}", t.agent, skill);
@@ -406,20 +422,11 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
             missing.push(key);
         }
     }
-    let mut extra = Vec::new();
-    for agent in scan_agents(&project.agents) {
-        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
-            let key = format!("{agent}/{name}");
-            let p = landed_path(project_root, &agent, &name);
-            let is_expected_alias = p
-                .canonicalize()
-                .ok()
-                .is_some_and(|physical| expected_physical.contains(&physical));
-            if !expected.contains(&key) && !is_expected_alias {
-                extra.push(key);
-            }
-        }
-    }
+    let extra: Vec<String> =
+        scan_extras(project_root, &project.agents, &skm_skills, &diff.expected)?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
     Ok(StatusView {
         expected,
         missing,
@@ -712,6 +719,10 @@ mod tests {
         assert!(
             status.missing.is_empty(),
             "共享 agent 目录不应导致目标误报 missing：{status:?}"
+        );
+        assert!(
+            status.extra.is_empty(),
+            "status 的 alias 豁免判定须与 apply 一致，不应误报 extra：{status:?}"
         );
     }
 
