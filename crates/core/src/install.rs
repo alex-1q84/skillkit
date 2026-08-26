@@ -42,12 +42,12 @@ pub fn install(
         installed_at: now_iso(),
         canonical_path: target.display().to_string(),
     };
-    // 登记 registry：持锁 load→upsert→save（npx 下载在锁外，网络操作不占锁），
+    // 登记 registry：持锁写事务（npx 下载在锁外，网络操作不占锁），
     // 与并发写方（import/rescope）串行化，防旧快照 save 互相覆盖。
-    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let mut reg = Registry::load(paths)?;
-    reg.upsert(meta.clone());
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    crate::registry::with_registry(paths, |reg| {
+        reg.upsert(meta.clone());
+        Ok(())
+    })?;
 
     // global：池子 → ~/.agents/skills/（agent 直读）+ ~/.claude/skills/（Claude 桥接）
     if scope == Scope::Global {
@@ -75,10 +75,7 @@ pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
     }
     // 摘记录：物理删除/npx 在锁外（秒级），锁内重读再 remove，
     // 防基于删除前快照的 save 把并发写方（rescope/import）的写入覆盖回滚。
-    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let mut reg = Registry::load(paths)?;
-    reg.remove(id)?;
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    crate::registry::with_registry(paths, |reg| reg.remove(id).map(|_| ()))?;
     Ok(())
 }
 

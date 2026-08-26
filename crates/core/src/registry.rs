@@ -99,6 +99,21 @@ impl Registry {
     }
 }
 
+/// 持 "registry" 锁的写事务：acquire → load → f → save_raw。
+/// 闭包内做 registry 变更（可含必要的物理迁移，锁窗口内与并发写方串行化）；
+/// 网络等长耗时操作应在调用前完成（锁外）。闭包内勿再 Registry::load / FileLock::acquire
+/// （同进程 flock 重取自死锁），一律操作传入的 &mut Registry。
+pub(crate) fn with_registry<R>(
+    paths: &Paths,
+    f: impl FnOnce(&mut Registry) -> Result<R>,
+) -> Result<R> {
+    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
+    let mut reg = Registry::load(paths)?;
+    let out = f(&mut reg)?;
+    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +168,33 @@ mod tests {
             reg.remove("nope"),
             Err(SkillkitError::SkillNotInstalled { .. })
         ));
+    }
+
+    #[test]
+    fn with_registry_persists_and_releases_lock() {
+        let p = paths();
+        with_registry(&p, |reg| {
+            reg.upsert(meta("local/x", Scope::Local));
+            Ok(())
+        })
+        .unwrap();
+        // 事务落盘可见
+        assert!(Registry::load(&p).unwrap().get("local/x").is_ok());
+        // 锁已释放：下一笔事务能正常进行（若锁泄漏此处会 LockTimeout）
+        with_registry(&p, |reg| reg.remove("local/x").map(|_| ())).unwrap();
+        assert!(Registry::load(&p).unwrap().get("local/x").is_err());
+    }
+
+    #[test]
+    fn with_registry_error_skips_save() {
+        let p = paths();
+        let err = with_registry(&p, |reg| -> Result<()> {
+            reg.upsert(meta("local/y", Scope::Local));
+            Err(SkillkitError::SkillNotInstalled { id: "boom".into() })
+        })
+        .unwrap_err();
+        assert!(matches!(err, SkillkitError::SkillNotInstalled { .. }));
+        // 闭包报错则不落盘：中途变更不残留
+        assert!(Registry::load(&p).unwrap().get("local/y").is_err());
     }
 }

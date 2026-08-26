@@ -38,10 +38,10 @@ pub fn upgrade_skill(paths: &Paths, id: &str, yes: bool) -> Result<UpgradeReport
     let mut meta = meta;
     meta.computed_hash = Some(new_hash.clone());
     meta.installed_at = crate::install::now_iso();
-    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let mut reg = Registry::load(paths)?;
-    reg.upsert(meta);
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    crate::registry::with_registry(paths, |reg| {
+        reg.upsert(meta);
+        Ok(())
+    })?;
     Ok(UpgradeReport {
         id: id.to_string(),
         old_hash,
