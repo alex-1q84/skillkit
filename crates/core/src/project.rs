@@ -102,6 +102,7 @@ impl Project {
         if self.installed_skills.len() == before {
             return Err(SkillkitError::SkillNotInstalled { id: id.to_string() });
         }
+        self.locked_shas.remove(id);
         Ok(())
     }
 
@@ -138,6 +139,9 @@ impl Project {
             }
         }
         self.installed_skills = skills;
+        // 替换语义同步清孤儿锁：被解绑 skill 的 locked_shas 随之移除
+        self.locked_shas
+            .retain(|k, _| self.installed_skills.iter().any(|s| s == k));
     }
 
     /// 注销项目：删 ~/.skillkit/projects/<id>.toml。不存在返回 ProjectNotFound。
@@ -399,6 +403,59 @@ mod tests {
             proj.installed_skills,
             vec!["dc/l".to_string()],
             "global 被跳过，只留 local"
+        );
+    }
+
+    #[test]
+    fn remove_skill_drops_locked_sha_too() {
+        let mut proj = Project {
+            id: "X3".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/a".into()],
+            locked_shas: [("dc/a".to_string(), "sha1".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        proj.remove_skill("dc/a").unwrap();
+        assert!(
+            proj.locked_shas.is_empty(),
+            "移除 skill 后 locked_shas 不应残留（孤儿锁）"
+        );
+    }
+
+    #[test]
+    fn set_profiles_drops_orphan_locked_shas() {
+        let mut proj = Project {
+            id: "X4".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec!["old".into()],
+            installed_skills: vec!["dc/a".into(), "dc/b".into()],
+            locked_shas: [
+                ("dc/a".to_string(), "sha1".to_string()),
+                ("dc/b".to_string(), "sha2".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let base = crate::profile::Profile {
+            name: "base".into(),
+            description: String::new(),
+            skills: vec!["dc/b".into()],
+        };
+        // 改绑只剩 base：dc/a 解绑，其锁应随之清除，dc/b 保留
+        proj.set_profiles(&["base".into()], &[base], &Registry::default());
+        assert!(
+            !proj.locked_shas.contains_key("dc/a"),
+            "解绑 skill 的锁应清除"
+        );
+        assert!(
+            proj.locked_shas.contains_key("dc/b"),
+            "仍绑定的 skill 锁保留"
         );
     }
 

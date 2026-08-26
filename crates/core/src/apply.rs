@@ -371,12 +371,13 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
 
     write_exclude(project_root, &diff.expected)?;
 
-    // 更新 locked_shas 为当前 canonical sha
+    // 更新 locked_shas 为当前 expected 的快照：写入新基线，同时清掉
+    // 已移除 skill 的孤儿锁（存量残留 apply 一次即自愈）
+    let mut locked = std::collections::BTreeMap::new();
     for target in &diff.expected {
-        project
-            .locked_shas
-            .insert(target.skill_id.clone(), target.computed_hash.clone());
+        locked.insert(target.skill_id.clone(), target.computed_hash.clone());
     }
+    project.locked_shas = locked;
     Ok(report)
 }
 
@@ -737,6 +738,47 @@ mod tests {
         let report = run_apply(&paths, &mut proj, false).unwrap();
         assert!(report.removed.iter().any(|r| r.contains("gone")));
         assert!(!project_root.join(".claude/skills/gone").exists());
+    }
+
+    #[test]
+    fn run_apply_cleans_orphan_locked_shas() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/keep", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "P7".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["claude-code".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/keep".into()],
+            // 模拟存量残留：孤儿锁（不在 installed_skills）+ 保留 skill 的锁
+            locked_shas: [
+                ("skills.sh/pdf".to_string(), "old".to_string()),
+                ("dc/keep".to_string(), "stale".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        run_apply(&paths, &mut proj, false).unwrap();
+        assert!(
+            !proj.locked_shas.contains_key("skills.sh/pdf"),
+            "apply 后孤儿锁应被清理"
+        );
+        assert_eq!(
+            proj.locked_shas.get("dc/keep").unwrap(),
+            "sha1",
+            "保留 skill 的锁更新为当前 sha"
+        );
+        // 移除后再 apply：locked_shas 随 installed_skills 清空
+        proj.remove_skill("dc/keep").unwrap();
+        run_apply(&paths, &mut proj, false).unwrap();
+        assert!(
+            proj.locked_shas.is_empty(),
+            "全部移除后 locked_shas 不应残留"
+        );
     }
 
     #[test]
