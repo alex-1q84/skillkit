@@ -32,7 +32,7 @@ pub struct ApplyDiff {
 /// 探测到的 agent 中 `reads_agents_dir=false` 的（默认配置即 claude-code，Claude 不
 /// 直读 `.agents`）额外落私有目录桥接。`project_agents` 为空也保底返回开源标准，
 /// 杜绝「有绑定记录但项目里没有 skill」。
-pub fn landing_agents(config: &Config, project_agents: &[String]) -> Vec<String> {
+pub(crate) fn landing_agents(config: &Config, project_agents: &[String]) -> Vec<String> {
     let mut agents = vec![OPEN_STANDARD_AGENT.to_string()];
     for a in project_agents {
         if config
@@ -205,7 +205,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// 重写 <project>/.git/info/exclude 的 skillkit 段，列入当前 local 落地清单。
-pub fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Result<()> {
+pub(crate) fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Result<()> {
     let exclude = project_root.join(".git/info/exclude");
     if let Some(parent) = exclude.parent() {
         std::fs::create_dir_all(parent)?;

@@ -28,7 +28,7 @@ pub struct Project {
 }
 
 /// 生成新 project-id：uuid v4 前 8 hex 大写（独立于 path，支持 rebind）。
-pub fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     Uuid::new_v4().simple().to_string()[..8].to_uppercase()
 }
 

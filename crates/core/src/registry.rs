@@ -38,9 +38,6 @@ impl SkillMeta {
     pub fn is_local(&self) -> bool {
         self.scope == Scope::Local
     }
-    pub fn is_global(&self) -> bool {
-        self.scope == Scope::Global
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
