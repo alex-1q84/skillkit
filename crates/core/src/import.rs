@@ -217,11 +217,11 @@ fn read_git_remote(dir: &Path) -> Option<String> {
     }
 }
 
-/// 把真实目录 src 迁入池子 ~/.skillkit/.agents/skills/<name>。
-/// 池子已有同名 → 删 src 冗余副本（池子权威，对齐 scope.rs:60-64）；
+/// 把真实目录 src 迁入池子 ~/.skillkit/.agents/skills/<name>（import 存量归槽与 rescope 降级共用）。
+/// 池子已有同名 → 删 src 冗余副本（池子权威）；
 /// 池子空、src 在 → rename（同 FS 原子）；src 空 target 在 → 幂等返回 target（中间态收敛）。
 /// src 必须是真实目录——调用方负责过滤 symlink（对齐 import.rs:129「只迁真实目录」）。
-fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
+pub(crate) fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
     let target = paths.skillkit_skills_dir().join(name);
     if target.exists() {
         if src.exists() {
