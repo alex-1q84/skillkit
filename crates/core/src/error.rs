@@ -8,6 +8,12 @@ pub enum SkillkitError {
     #[error("源不存在：{name}（先 `skillkit source add` 添加）")]
     SourceNotFound { name: String },
 
+    #[error("无法从 package 推导源名称：{package}（可用 --name / name 字段指定）")]
+    SourceNameUnderived { package: String },
+
+    #[error("该名称已被源 {name} 占用（可用别名重新添加）")]
+    SourceNameTaken { name: String },
+
     #[error("skill 未安装：{id}（先 `skillkit install {id}`）")]
     SkillNotInstalled { id: String },
 

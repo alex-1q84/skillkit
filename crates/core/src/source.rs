@@ -85,6 +85,30 @@ impl SourcesStore {
             })
     }
 
+    /// 注册源：CLI source add 与 server sources::add 的业务单点。
+    /// name = 显式名（trim 非空）或从 package 推导；推导失败报 SourceNameUnderived，
+    /// 撞名报 SourceNameTaken（调用方按错误类型决定呈现：CLI 打印文案 / server 返 400）。
+    /// 返回最终 name。
+    pub fn register(paths: &Paths, package: &str, name_override: Option<&str>) -> Result<String> {
+        let name = name_override
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| derive_source_name(package))
+            .ok_or_else(|| SkillkitError::SourceNameUnderived {
+                package: package.to_string(),
+            })?;
+        let mut store = Self::load(paths)?;
+        if store.get(&name).is_ok() {
+            return Err(SkillkitError::SourceNameTaken { name });
+        }
+        store.add(Source {
+            name: name.clone(),
+            package: Some(package.to_string()),
+        })?;
+        store.save(paths)?;
+        Ok(name)
+    }
+
     /// 入口层（CLI main / server 启动）调：sources.toml 不存在或列表里没有 name="skills.sh"
     /// 时，补回默认 registry 搜索入口。覆盖旧语义「文件不存在才种入」：用户删了 skills.sh，
     /// 下次任意入口启动都会自动补回（保证 GUI/CLI 始终有默认源）。
@@ -225,6 +249,57 @@ mod tests {
         // 再调不重复
         SourcesStore::ensure_default(&p2).unwrap();
         assert_eq!(SourcesStore::load(&p2).unwrap().list().len(), 2);
+    }
+
+    #[test]
+    fn register_derives_name_and_persists() {
+        let p = paths();
+        let name = SourcesStore::register(&p, "https://github.com/org/team.git", None).unwrap();
+        assert_eq!(name, "team");
+        let store = SourcesStore::load(&p).unwrap();
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.list()[0].name, "team");
+        assert_eq!(
+            store.list()[0].package.as_deref(),
+            Some("https://github.com/org/team.git")
+        );
+    }
+
+    #[test]
+    fn register_explicit_name_trims_and_overrides() {
+        let p = paths();
+        // 显式名 trim 后非空即生效，不从 package 推导
+        let name = SourcesStore::register(&p, "org/repo", Some("  alias  ")).unwrap();
+        assert_eq!(name, "alias");
+        // 显式名 trim 后为空 → 回退推导
+        let name2 = SourcesStore::register(&p, "org/other", Some("   ")).unwrap();
+        assert_eq!(name2, "other");
+    }
+
+    #[test]
+    fn register_fails_when_name_underived() {
+        let p = paths();
+        let err = SourcesStore::register(&p, "", None).unwrap_err();
+        assert!(
+            matches!(err, SkillkitError::SourceNameUnderived { .. }),
+            "推导失败应报 SourceNameUnderived：{err:?}"
+        );
+        // 不落任何源
+        assert!(SourcesStore::load(&p).unwrap().list().is_empty());
+    }
+
+    #[test]
+    fn register_fails_on_duplicate_name() {
+        let p = paths();
+        SourcesStore::register(&p, "org/team", None).unwrap();
+        // 同推导名撞车
+        let err =
+            SourcesStore::register(&p, "https://github.com/other/team.git", None).unwrap_err();
+        assert!(
+            matches!(err, SkillkitError::SourceNameTaken { .. }),
+            "撞名应报 SourceNameTaken：{err:?}"
+        );
+        assert_eq!(SourcesStore::load(&p).unwrap().list().len(), 1);
     }
 
     #[test]
