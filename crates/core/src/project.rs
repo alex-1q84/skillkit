@@ -175,6 +175,22 @@ pub fn list_ids(paths: &Paths) -> Result<Vec<String>> {
     Ok(ids)
 }
 
+/// 加载全部已注册项目：list_ids → 逐个 load。单个项目文件损坏/缺失跳过（warn），
+/// 不让一个坏文件拖垮整个列表视图；ids 列举失败返回空。CLI project list 与
+/// server 各项目路由共用（跳过语义单点）。
+pub fn load_all(paths: &Paths) -> Vec<Project> {
+    let mut out = Vec::new();
+    if let Ok(ids) = list_ids(paths) {
+        for id in ids {
+            match Project::load(paths, &id) {
+                Ok(p) => out.push(p),
+                Err(e) => tracing::warn!(error = ?e, "跳过项目 {id}：加载失败"),
+            }
+        }
+    }
+    out
+}
+
 /// 扫描目录树，返回含 .git 的项目目录（depth 限制递归深度，跳过 .git 自身子目录）。
 pub fn scan_projects(dir: &Path, depth: u32) -> Result<Vec<PathBuf>> {
     let mut found = Vec::new();
@@ -457,6 +473,25 @@ mod tests {
             proj.locked_shas.contains_key("dc/b"),
             "仍绑定的 skill 锁保留"
         );
+    }
+
+    #[test]
+    fn load_all_skips_corrupt_files_and_loads_rest() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        Project::register(PathBuf::from("/tmp/a"), vec![])
+            .save(&paths)
+            .unwrap();
+        Project::register(PathBuf::from("/tmp/b"), vec![])
+            .save(&paths)
+            .unwrap();
+        // 坏 toml 混进 ids 目录：跳过不 panic，好项目全载
+        std::fs::create_dir_all(paths.projects_dir()).unwrap();
+        std::fs::write(paths.projects_dir().join("BROKEN.toml"), "not toml [[[").unwrap();
+        let all = load_all(&paths);
+        assert_eq!(all.len(), 2, "坏文件跳过、好项目全载：{all:?}");
+        // 目录不存在：空列表不报错
+        assert!(load_all(&Paths::new(PathBuf::from("/nonexistent-skillkit-dir"))).is_empty());
     }
 
     #[test]

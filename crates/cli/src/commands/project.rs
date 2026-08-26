@@ -1,6 +1,6 @@
 //! project 子命令：调 core 的 Project / apply。
 use clap::{Args, Subcommand};
-use skillkit_core::{detect_agents, list_project_ids, paths::Paths, Project};
+use skillkit_core::{detect_agents, paths::Paths, Project};
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -133,10 +133,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
         }
         ProjectSub::Status { project, json } => {
             let proj = Project::load(&paths, &project)?;
-            let reg = skillkit_core::Registry::load(&paths)?;
-            let config = skillkit_core::config::Config::load(&paths)?;
-            let diff = skillkit_core::apply::compute_diff(&proj, &reg, &config)?;
-            let status = skillkit_core::apply::build_status(&paths, &proj, &diff)?;
+            let status = skillkit_core::compute_status(&paths, &proj)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
@@ -147,11 +144,10 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<()> {
             }
         }
         ProjectSub::List => {
-            for id in list_project_ids(&paths)? {
-                let proj = Project::load(&paths, &id)?;
+            for proj in skillkit_core::load_all_projects(&paths) {
                 println!(
                     "{:10} {} ({} skills)",
-                    id,
+                    proj.id,
                     proj.path,
                     proj.installed_skills.len()
                 );

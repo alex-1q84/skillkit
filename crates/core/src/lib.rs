@@ -18,8 +18,8 @@ pub mod symlink;
 pub mod upgrade;
 
 pub use apply::{
-    build_status, compute_diff, run_apply, scan_shared, ApplyDiff, ApplyReport, LocalTarget,
-    StatusView,
+    build_status, compute_diff, compute_status, run_apply, scan_shared, ApplyDiff, ApplyReport,
+    LocalTarget, StatusView,
 };
 pub use detect::detect_agents;
 pub use error::{Result, SkillkitError};
@@ -33,7 +33,9 @@ pub use profile::{
     is_unassigned, list_names as list_profile_names, remove_profile, skills_profiles_map, Profile,
     ProfileRemovalReport,
 };
-pub use project::{list_ids as list_project_ids, scan_projects, Project};
+pub use project::{
+    list_ids as list_project_ids, load_all as load_all_projects, scan_projects, Project,
+};
 pub use registry::{Registry, Scope, SkillMeta};
 pub use scope::{set_scope, RescopeReport};
 pub use source::{derive_source_name, Source, SourcesStore};

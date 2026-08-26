@@ -399,12 +399,22 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
 }
 
 /// status 输出：结合 diff.expected 与现状扫描，给具体 id 清单（供 agent 决策）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StatusView {
     pub expected: Vec<String>,
     pub missing: Vec<String>,
     pub extra: Vec<String>,
     pub conflicts: Vec<String>,
+}
+
+/// status 计算管线（CLI project status 与 server workspace/status 片段共用的组装单点）：
+/// load registry + config → compute_diff → build_status。严格传播错误；调用方决定
+/// 呈现策略（CLI `?` 报错给用户诊断，server 降级空视图防白屏——呈现层决策留壳层）。
+pub fn compute_status(paths: &Paths, project: &Project) -> Result<StatusView> {
+    let reg = crate::registry::Registry::load(paths)?;
+    let config = crate::config::Config::load(paths)?;
+    let diff = compute_diff(project, &reg, &config)?;
+    build_status(paths, project, &diff)
 }
 
 /// 计算 status：expected/missing（结合现状）/extra（现状多出）/conflicts。
@@ -648,6 +658,33 @@ mod tests {
             canonical_path: canon.to_string_lossy().into_owned(),
         });
         reg.save(paths).unwrap();
+    }
+
+    #[test]
+    fn compute_status_pipeline_matches_manual_assembly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/logseq", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "PS".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["claude-code".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/logseq".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        run_apply(&paths, &mut proj, false).unwrap();
+        // 管线结果 = 手工组装（load→diff→build_status）结果
+        let reg = Registry::load(&paths).unwrap();
+        let config = Config::load(&paths).unwrap();
+        let diff = compute_diff(&proj, &reg, &config).unwrap();
+        let manual = build_status(&paths, &proj, &diff).unwrap();
+        assert_eq!(compute_status(&paths, &proj).unwrap(), manual);
+        // apply 后无 missing/extra
+        assert!(manual.missing.is_empty() && manual.extra.is_empty());
     }
 
     #[test]
