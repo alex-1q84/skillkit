@@ -126,10 +126,7 @@ mod tests {
             name: "team".into(),
         }
         .to_string();
-        assert!(
-            taken.contains("--name"),
-            "撞名文案给出改名参数：{taken}"
-        );
+        assert!(taken.contains("--name"), "撞名文案给出改名参数：{taken}");
         let underived = SkillkitError::SourceNameUnderived {
             package: "x".into(),
         }
