@@ -399,7 +399,8 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
 }
 
 /// status 输出：结合 diff.expected 与现状扫描，给具体 id 清单（供 agent 决策）。
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Default = 全空视图，供 GUI 容错降级（计算失败时防白屏）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct StatusView {
     pub expected: Vec<String>,
     pub missing: Vec<String>,

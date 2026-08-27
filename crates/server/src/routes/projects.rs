@@ -376,14 +376,8 @@ fn render_workspace(
     report: Option<ApplyReport>,
 ) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
-    // 管线组装在 core::compute_status；这里只做 GUI 容错降级（坏文件不白屏）
-    let status =
-        skillkit_core::compute_status(&state.paths, &proj).unwrap_or_else(|_| StatusView {
-            expected: vec![],
-            missing: vec![],
-            extra: vec![],
-            conflicts: vec![],
-        });
+    // 管线组装在 core::compute_status；这里只做 GUI 容错降级（空视图防白屏）
+    let status = skillkit_core::compute_status(&state.paths, &proj).unwrap_or_default();
     let shared = scan_shared(StdPath::new(&proj.path), &proj.agents);
     let local_skills: Vec<String> = proj
         .installed_skills
@@ -433,14 +427,8 @@ fn render_workspace(
 
 /// 计算 status 并渲染 fragments/status.html（供 set_skills 返回 + SSE hx-get 刷新）。
 fn status_fragment(state: AppState, proj: Project) -> Response {
-    // 管线组装在 core::compute_status；GUI 容错降级（坏文件不白屏）
-    let status =
-        skillkit_core::compute_status(&state.paths, &proj).unwrap_or_else(|_| StatusView {
-            expected: vec![],
-            missing: vec![],
-            extra: vec![],
-            conflicts: vec![],
-        });
+    // 管线组装在 core::compute_status；GUI 容错降级（空视图防白屏）
+    let status = skillkit_core::compute_status(&state.paths, &proj).unwrap_or_default();
     let rendered = StatusTpl { status }.render();
     render_str(rendered)
 }
