@@ -33,6 +33,7 @@
 - [ ] browse 路径含空格/中文/`&` 时 query 不 percent-encode。来源：projects-ui-redesign spec §7。
 - [ ] GUI find 走 npx 偶发超 10s 时的超时方案未评估（现只有 loading 提示 + 可读错误）。来源：gui-parity spec §8 风险。
 - [ ] local skill 的 `version` 恒为 `None`（`--version` 参数 / 读 SKILL.md frontmatter 均未做）。来源：install-local spec §5。
+- [x] project 的 `locked_shas` 残留（非 spec 取舍，新发现）：`~/.skillkit/projects/FF71C76A.toml` 的 `locked_shas` 仍含 `skills.sh/pdf`，但该项目 `installed_skills` 为空、项目 agent 目录无落地——skill 从项目移除后锁记录未随清理。需排查 remove-skill / apply-profile 路径是否漏清 `locked_shas`，并考虑 `project status` 把这类孤儿锁报告出来。同日另发现：`remove` global scope skill 后 `~/.agents/skills/` 的落地 symlink 残留成 dangling（canonical 已删、桥接未清）。来源：2026-08-21 skillkit skill 实测会话发现。已修（commit 待打）：三处清锁——`Project::remove_skill` 同步删条目、`set_profiles` 替换后 retain、`run_apply` 结尾重建 locked_shas 为 expected 快照（存量孤儿 apply 一次自愈，故 status 报告孤儿锁不再需要）；uninstall managed 分支补调 `remove_global_claude` 撤两层桥接（与 install 的 `ensure_global_claude`、rescope 降级路径对称），unmanaged 不受影响（本就无桥接语义）。四个回归测试覆盖。存量 `FF71C76A.toml` 需跑一次 `project apply` 自愈。
 
 ## 五、UI 打磨（可选）
 

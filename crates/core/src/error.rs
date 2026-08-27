@@ -8,6 +8,12 @@ pub enum SkillkitError {
     #[error("源不存在：{name}（先 `skillkit source add` 添加）")]
     SourceNotFound { name: String },
 
+    #[error("无法从 package 推导源名称：{package}（可用 --name / name 字段指定）")]
+    SourceNameUnderived { package: String },
+
+    #[error("该名称已被源 {name} 占用（可用 --name / name 字段指定别名重新添加）")]
+    SourceNameTaken { name: String },
+
     #[error("skill 未安装：{id}（先 `skillkit install {id}`）")]
     SkillNotInstalled { id: String },
 
@@ -111,5 +117,23 @@ mod tests {
             owner_id: None,
         };
         assert!(c.to_string().contains("孤儿") || c.to_string().contains("foo"));
+    }
+
+    /// 反馈引导行动：撞名/推导失败都要写明用哪个参数指定别名（CLI --name / server name 字段）。
+    #[test]
+    fn source_name_errors_guide_how_to_rename() {
+        let taken = SkillkitError::SourceNameTaken {
+            name: "team".into(),
+        }
+        .to_string();
+        assert!(taken.contains("--name"), "撞名文案给出改名参数：{taken}");
+        let underived = SkillkitError::SourceNameUnderived {
+            package: "x".into(),
+        }
+        .to_string();
+        assert!(
+            underived.contains("--name"),
+            "推导失败文案给出改名参数：{underived}"
+        );
     }
 }

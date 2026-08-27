@@ -28,7 +28,7 @@ pub struct Project {
 }
 
 /// 生成新 project-id：uuid v4 前 8 hex 大写（独立于 path，支持 rebind）。
-pub fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     Uuid::new_v4().simple().to_string()[..8].to_uppercase()
 }
 
@@ -102,6 +102,7 @@ impl Project {
         if self.installed_skills.len() == before {
             return Err(SkillkitError::SkillNotInstalled { id: id.to_string() });
         }
+        self.locked_shas.remove(id);
         Ok(())
     }
 
@@ -138,6 +139,9 @@ impl Project {
             }
         }
         self.installed_skills = skills;
+        // 替换语义同步清孤儿锁：被解绑 skill 的 locked_shas 随之移除
+        self.locked_shas
+            .retain(|k, _| self.installed_skills.iter().any(|s| s == k));
     }
 
     /// 注销项目：删 ~/.skillkit/projects/<id>.toml。不存在返回 ProjectNotFound。
@@ -169,6 +173,25 @@ pub fn list_ids(paths: &Paths) -> Result<Vec<String>> {
     }
     ids.sort();
     Ok(ids)
+}
+
+/// 加载全部已注册项目：list_ids → 逐个 load。单个项目文件损坏/缺失跳过（warn），
+/// 不让一个坏文件拖垮整个列表视图；ids 列举失败也 warn（不静默）后按空处理。
+/// CLI project list 与 server 各项目路由共用（跳过语义单点）。
+pub fn load_all(paths: &Paths) -> Vec<Project> {
+    let mut out = Vec::new();
+    match list_ids(paths) {
+        Ok(ids) => {
+            for id in ids {
+                match Project::load(paths, &id) {
+                    Ok(p) => out.push(p),
+                    Err(e) => tracing::warn!(error = ?e, "跳过项目 {id}：加载失败"),
+                }
+            }
+        }
+        Err(e) => tracing::warn!(error = ?e, "列举项目目录失败，按空列表处理"),
+    }
+    out
 }
 
 /// 扫描目录树，返回含 .git 的项目目录（depth 限制递归深度，跳过 .git 自身子目录）。
@@ -400,6 +423,78 @@ mod tests {
             vec!["dc/l".to_string()],
             "global 被跳过，只留 local"
         );
+    }
+
+    #[test]
+    fn remove_skill_drops_locked_sha_too() {
+        let mut proj = Project {
+            id: "X3".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/a".into()],
+            locked_shas: [("dc/a".to_string(), "sha1".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        proj.remove_skill("dc/a").unwrap();
+        assert!(
+            proj.locked_shas.is_empty(),
+            "移除 skill 后 locked_shas 不应残留（孤儿锁）"
+        );
+    }
+
+    #[test]
+    fn set_profiles_drops_orphan_locked_shas() {
+        let mut proj = Project {
+            id: "X4".into(),
+            name: "p".into(),
+            path: "/tmp/p".into(),
+            agents: vec![],
+            applied_profiles: vec!["old".into()],
+            installed_skills: vec!["dc/a".into(), "dc/b".into()],
+            locked_shas: [
+                ("dc/a".to_string(), "sha1".to_string()),
+                ("dc/b".to_string(), "sha2".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let base = crate::profile::Profile {
+            name: "base".into(),
+            description: String::new(),
+            skills: vec!["dc/b".into()],
+        };
+        // 改绑只剩 base：dc/a 解绑，其锁应随之清除，dc/b 保留
+        proj.set_profiles(&["base".into()], &[base], &Registry::default());
+        assert!(
+            !proj.locked_shas.contains_key("dc/a"),
+            "解绑 skill 的锁应清除"
+        );
+        assert!(
+            proj.locked_shas.contains_key("dc/b"),
+            "仍绑定的 skill 锁保留"
+        );
+    }
+
+    #[test]
+    fn load_all_skips_corrupt_files_and_loads_rest() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        Project::register(PathBuf::from("/tmp/a"), vec![])
+            .save(&paths)
+            .unwrap();
+        Project::register(PathBuf::from("/tmp/b"), vec![])
+            .save(&paths)
+            .unwrap();
+        // 坏 toml 混进 ids 目录：跳过不 panic，好项目全载
+        std::fs::create_dir_all(paths.projects_dir()).unwrap();
+        std::fs::write(paths.projects_dir().join("BROKEN.toml"), "not toml [[[").unwrap();
+        let all = load_all(&paths);
+        assert_eq!(all.len(), 2, "坏文件跳过、好项目全载：{all:?}");
+        // 目录不存在：空列表不报错
+        assert!(load_all(&Paths::new(PathBuf::from("/nonexistent-skillkit-dir"))).is_empty());
     }
 
     #[test]

@@ -48,7 +48,7 @@ fn ensure_link(target: &Path, link: &Path) -> Result<()> {
 /// 不加 scope 守卫：set_scope 在改 scope 之后调用本函数，meta.scope 已是 local，
 /// 镜像 ensure 的守卫会 no-op 留悬空链。调用方保证语义（见 spec §3.1 P2-A）。
 /// 幂等：链接不存在静默跳过。真实目录（非 symlink）报错不删（数据损失防护，对齐 ensure_link 守卫）。
-pub fn remove_global_claude(paths: &Paths, meta: &SkillMeta) -> Result<()> {
+pub(crate) fn remove_global_claude(paths: &Paths, meta: &SkillMeta) -> Result<()> {
     let agents_link = paths.agents_skills_dir().join(&meta.name);
     let claude_link = paths.claude_skills_dir().join(&meta.name);
     remove_one_link(&claude_link)?; // 先 claude（→ agents_link）再 agents（→ canonical），反序留悬空链

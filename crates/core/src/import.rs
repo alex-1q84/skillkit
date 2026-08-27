@@ -133,24 +133,23 @@ fn adopt_unmanaged(
         report.imported.push(name.to_string());
         return Ok(());
     }
-    // adopt → registry save → 桥接（对齐 install.rs:45-52 顺序）。
+    // adopt → registry save → 桥接（对齐 install 顺序）。
     // 迁移+登记全程持 "registry" 锁：防并发写方（rescope/upgrade）的旧快照 save 覆盖回滚
-    let lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let target = adopt_into_pool(paths, name, canon_path)?;
-    let meta = SkillMeta {
-        id: Registry::skill_id("unmanaged", name),
-        name: name.into(),
-        source: "unmanaged".into(),
-        scope: Scope::Global,
-        version: None,
-        computed_hash: None,
-        installed_at: crate::install::now_iso(),
-        canonical_path: target.to_string_lossy().into_owned(),
-    };
-    let mut reg = Registry::load(paths)?;
-    reg.upsert(meta.clone());
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
-    drop(lock); // 桥接是纯 fs 操作，不占 registry 锁
+    let meta = crate::registry::with_registry(paths, |reg| {
+        let target = adopt_into_pool(paths, name, canon_path)?;
+        let meta = SkillMeta {
+            id: Registry::skill_id("unmanaged", name),
+            name: name.into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            installed_at: crate::install::now_iso(),
+            canonical_path: target.to_string_lossy().into_owned(),
+        };
+        reg.upsert(meta.clone());
+        Ok(meta)
+    })?;
     registered.insert(name.to_string());
     report.unmanaged.push(name.to_string());
     report.relocated.push(name.to_string());
@@ -217,11 +216,11 @@ fn read_git_remote(dir: &Path) -> Option<String> {
     }
 }
 
-/// 把真实目录 src 迁入池子 ~/.skillkit/.agents/skills/<name>。
-/// 池子已有同名 → 删 src 冗余副本（池子权威，对齐 scope.rs:60-64）；
+/// 把真实目录 src 迁入池子 ~/.skillkit/.agents/skills/<name>（import 存量归槽与 rescope 降级共用）。
+/// 池子已有同名 → 删 src 冗余副本（池子权威）；
 /// 池子空、src 在 → rename（同 FS 原子）；src 空 target 在 → 幂等返回 target（中间态收敛）。
 /// src 必须是真实目录——调用方负责过滤 symlink（对齐 import.rs:129「只迁真实目录」）。
-fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
+pub(crate) fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<PathBuf> {
     let target = paths.skillkit_skills_dir().join(name);
     if target.exists() {
         if src.exists() {
@@ -252,10 +251,11 @@ fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> 
         .cloned()
         .collect();
     for mut meta in unmanaged {
-        let canon = Path::new(&meta.canonical_path);
+        // owned：闭包内改 meta.canonical_path，不能让 canon 借用 &meta.canonical_path
+        let canon = PathBuf::from(&meta.canonical_path);
         if !canon.starts_with(&pool) {
             // canonical 不在池：尝试归槽
-            let is_real_dir = std::fs::symlink_metadata(canon)
+            let is_real_dir = std::fs::symlink_metadata(&canon)
                 .is_ok_and(|m| m.file_type().is_dir() && !m.file_type().is_symlink());
             if !is_real_dir {
                 tracing::warn!(
@@ -270,14 +270,13 @@ fn relink_unmanaged(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> 
                 continue;
             }
             // 迁移+登记全程持 "registry" 锁（防并发写方旧快照覆盖回滚，对齐 adopt_unmanaged）
-            let lock = crate::lock::FileLock::acquire(paths, "registry")?;
-            let target = adopt_into_pool(paths, &meta.name, canon)?;
-            meta.canonical_path = target.to_string_lossy().into_owned();
-            // 立即落盘（每 skill adopt 后 save，失败面可推导）
-            let mut reg = Registry::load(paths)?;
-            reg.upsert(meta.clone());
-            reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
-            drop(lock); // 桥接是纯 fs 操作，不占 registry 锁
+            crate::registry::with_registry(paths, |reg| -> Result<()> {
+                let target = adopt_into_pool(paths, &meta.name, &canon)?;
+                meta.canonical_path = target.to_string_lossy().into_owned();
+                // 立即落盘（每 skill adopt 后 save，失败面可推导）
+                reg.upsert(meta.clone());
+                Ok(())
+            })?; // 桥接是纯 fs 操作，不占 registry 锁
             report.relinked.push(meta.name.clone());
         }
         // canonical 已在池（刚归槽或本就在）：补建缺失桥接（幂等，在位跳过）。

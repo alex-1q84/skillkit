@@ -32,7 +32,7 @@ pub struct ApplyDiff {
 /// 探测到的 agent 中 `reads_agents_dir=false` 的（默认配置即 claude-code，Claude 不
 /// 直读 `.agents`）额外落私有目录桥接。`project_agents` 为空也保底返回开源标准，
 /// 杜绝「有绑定记录但项目里没有 skill」。
-pub fn landing_agents(config: &Config, project_agents: &[String]) -> Vec<String> {
+pub(crate) fn landing_agents(config: &Config, project_agents: &[String]) -> Vec<String> {
     let mut agents = vec![OPEN_STANDARD_AGENT.to_string()];
     for a in project_agents {
         if config
@@ -205,7 +205,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// 重写 <project>/.git/info/exclude 的 skillkit 段，列入当前 local 落地清单。
-pub fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Result<()> {
+pub(crate) fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Result<()> {
     let exclude = project_root.join(".git/info/exclude");
     if let Some(parent) = exclude.parent() {
         std::fs::create_dir_all(parent)?;
@@ -235,6 +235,44 @@ pub fn write_exclude(project_root: &Path, targets: &[LocalTarget]) -> Result<()>
     lines.push(EXCLUDE_END.into());
     crate::error::atomic_write(&exclude, &lines.join("\n"))?;
     Ok(())
+}
+
+/// 扫描 extra：项目各 agent 目录下已落地（skillkit 管的 local）但不在 expected 的 skill 项。
+/// alias 豁免：落地路径 canonicalize 后指向 expected 的物理目录（如 .claude/skills、
+/// .cursor/skills 同指 ../skills 共享池）不算 extra。apply（删除）与 status（报告）
+/// 共用此判定，闭环两端不漂移。
+fn scan_extras(
+    project_root: &Path,
+    project_agents: &[String],
+    skm_skills: &Path,
+    expected: &[LocalTarget],
+) -> Result<Vec<(String, PathBuf)>> {
+    let expected_keys: HashSet<String> = expected
+        .iter()
+        .map(|t| {
+            format!(
+                "{}/{}",
+                t.agent,
+                t.skill_id.split('/').next_back().unwrap_or(&t.skill_id)
+            )
+        })
+        .collect();
+    let expected_physical = expected_physical_paths(project_root, expected);
+    let mut extras = Vec::new();
+    for agent in scan_agents(project_agents) {
+        for name in scan_local_landed(project_root, &agent, skm_skills)? {
+            let key = format!("{agent}/{name}");
+            let p = landed_path(project_root, &agent, &name);
+            let is_expected_alias = p
+                .canonicalize()
+                .ok()
+                .is_some_and(|physical| expected_physical.contains(&physical));
+            if !expected_keys.contains(&key) && !is_expected_alias {
+                extras.push((key, p));
+            }
+        }
+    }
+    Ok(extras)
 }
 
 /// 扫描 <project>/<agent>/skills/ 下 skillkit 管的 local 落地点。
@@ -341,52 +379,43 @@ pub fn run_apply(paths: &Paths, project: &mut Project, frozen: bool) -> Result<A
         }
     }
 
-    // extra：清理现状 skillkit-local 不在 expected 的
-    let expected_names: std::collections::HashSet<String> = diff
-        .expected
-        .iter()
-        .map(|t| {
-            format!(
-                "{}/{}",
-                t.agent,
-                t.skill_id.split('/').next_back().unwrap_or(&t.skill_id)
-            )
-        })
-        .collect();
-    let expected_physical = expected_physical_paths(project_root, &diff.expected);
-    for agent in scan_agents(&project.agents) {
-        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
-            let key = format!("{agent}/{name}");
-            let p = landed_path(project_root, &agent, &name);
-            let is_expected_alias = p
-                .canonicalize()
-                .ok()
-                .is_some_and(|physical| expected_physical.contains(&physical));
-            if !expected_names.contains(&key) && !is_expected_alias {
-                let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
-                report.removed.push(key);
-            }
-        }
+    // extra：清理现状 skillkit-local 不在 expected 的（alias 豁免判定与 status 共用 scan_extras，
+    // 保证「感知-执行」闭环一致：status 报的 extra 恰是 apply 会清理的）
+    for (key, p) in scan_extras(project_root, &project.agents, &skm_skills, &diff.expected)? {
+        let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
+        report.removed.push(key);
     }
 
     write_exclude(project_root, &diff.expected)?;
 
-    // 更新 locked_shas 为当前 canonical sha
+    // 更新 locked_shas 为当前 expected 的快照：写入新基线，同时清掉
+    // 已移除 skill 的孤儿锁（存量残留 apply 一次即自愈）
+    let mut locked = std::collections::BTreeMap::new();
     for target in &diff.expected {
-        project
-            .locked_shas
-            .insert(target.skill_id.clone(), target.computed_hash.clone());
+        locked.insert(target.skill_id.clone(), target.computed_hash.clone());
     }
+    project.locked_shas = locked;
     Ok(report)
 }
 
 /// status 输出：结合 diff.expected 与现状扫描，给具体 id 清单（供 agent 决策）。
-#[derive(Debug, Clone, Serialize)]
+/// Default = 全空视图，供 GUI 容错降级（计算失败时防白屏）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct StatusView {
     pub expected: Vec<String>,
     pub missing: Vec<String>,
     pub extra: Vec<String>,
     pub conflicts: Vec<String>,
+}
+
+/// status 计算管线（CLI project status 与 server workspace/status 片段共用的组装单点）：
+/// load registry + config → compute_diff → build_status。严格传播错误；调用方决定
+/// 呈现策略（CLI `?` 报错给用户诊断，server 降级空视图防白屏——呈现层决策留壳层）。
+pub fn compute_status(paths: &Paths, project: &Project) -> Result<StatusView> {
+    let reg = crate::registry::Registry::load(paths)?;
+    let config = crate::config::Config::load(paths)?;
+    let diff = compute_diff(project, &reg, &config)?;
+    build_status(paths, project, &diff)
 }
 
 /// 计算 status：expected/missing（结合现状）/extra（现状多出）/conflicts。
@@ -395,7 +424,6 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
     let skm_skills = paths.skillkit_skills_dir();
     let mut expected = Vec::new();
     let mut missing = Vec::new();
-    let expected_physical = expected_physical_paths(project_root, &diff.expected);
     for t in &diff.expected {
         let skill = t.skill_id.split('/').next_back().unwrap_or(&t.skill_id);
         let key = format!("{}/{}", t.agent, skill);
@@ -405,20 +433,11 @@ pub fn build_status(paths: &Paths, project: &Project, diff: &ApplyDiff) -> Resul
             missing.push(key);
         }
     }
-    let mut extra = Vec::new();
-    for agent in scan_agents(&project.agents) {
-        for name in scan_local_landed(project_root, &agent, &skm_skills)? {
-            let key = format!("{agent}/{name}");
-            let p = landed_path(project_root, &agent, &name);
-            let is_expected_alias = p
-                .canonicalize()
-                .ok()
-                .is_some_and(|physical| expected_physical.contains(&physical));
-            if !expected.contains(&key) && !is_expected_alias {
-                extra.push(key);
-            }
-        }
-    }
+    let extra: Vec<String> =
+        scan_extras(project_root, &project.agents, &skm_skills, &diff.expected)?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
     Ok(StatusView {
         expected,
         missing,
@@ -643,6 +662,33 @@ mod tests {
     }
 
     #[test]
+    fn compute_status_pipeline_matches_manual_assembly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/logseq", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "PS".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["claude-code".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/logseq".into()],
+            locked_shas: BTreeMap::new(),
+        };
+        run_apply(&paths, &mut proj, false).unwrap();
+        // 管线结果 = 手工组装（load→diff→build_status）结果
+        let reg = Registry::load(&paths).unwrap();
+        let config = Config::load(&paths).unwrap();
+        let diff = compute_diff(&proj, &reg, &config).unwrap();
+        let manual = build_status(&paths, &proj, &diff).unwrap();
+        assert_eq!(compute_status(&paths, &proj).unwrap(), manual);
+        // apply 后无 missing/extra
+        assert!(manual.missing.is_empty() && manual.extra.is_empty());
+    }
+
+    #[test]
     fn run_apply_lands_local_and_locks_sha() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
@@ -712,6 +758,10 @@ mod tests {
             status.missing.is_empty(),
             "共享 agent 目录不应导致目标误报 missing：{status:?}"
         );
+        assert!(
+            status.extra.is_empty(),
+            "status 的 alias 豁免判定须与 apply 一致，不应误报 extra：{status:?}"
+        );
     }
 
     #[test]
@@ -737,6 +787,47 @@ mod tests {
         let report = run_apply(&paths, &mut proj, false).unwrap();
         assert!(report.removed.iter().any(|r| r.contains("gone")));
         assert!(!project_root.join(".claude/skills/gone").exists());
+    }
+
+    #[test]
+    fn run_apply_cleans_orphan_locked_shas() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        install_local_bare(&paths, "dc/keep", "sha1");
+        let project_root = tmp.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".git/info")).unwrap();
+        let mut proj = Project {
+            id: "P7".into(),
+            name: "proj".into(),
+            path: project_root.to_string_lossy().into_owned(),
+            agents: vec!["claude-code".into()],
+            applied_profiles: vec![],
+            installed_skills: vec!["dc/keep".into()],
+            // 模拟存量残留：孤儿锁（不在 installed_skills）+ 保留 skill 的锁
+            locked_shas: [
+                ("skills.sh/pdf".to_string(), "old".to_string()),
+                ("dc/keep".to_string(), "stale".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        run_apply(&paths, &mut proj, false).unwrap();
+        assert!(
+            !proj.locked_shas.contains_key("skills.sh/pdf"),
+            "apply 后孤儿锁应被清理"
+        );
+        assert_eq!(
+            proj.locked_shas.get("dc/keep").unwrap(),
+            "sha1",
+            "保留 skill 的锁更新为当前 sha"
+        );
+        // 移除后再 apply：locked_shas 随 installed_skills 清空
+        proj.remove_skill("dc/keep").unwrap();
+        run_apply(&paths, &mut proj, false).unwrap();
+        assert!(
+            proj.locked_shas.is_empty(),
+            "全部移除后 locked_shas 不应残留"
+        );
     }
 
     #[test]

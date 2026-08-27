@@ -42,12 +42,12 @@ pub fn install(
         installed_at: now_iso(),
         canonical_path: target.display().to_string(),
     };
-    // 登记 registry：持锁 load→upsert→save（npx 下载在锁外，网络操作不占锁），
+    // 登记 registry：持锁写事务（npx 下载在锁外，网络操作不占锁），
     // 与并发写方（import/rescope）串行化，防旧快照 save 互相覆盖。
-    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let mut reg = Registry::load(paths)?;
-    reg.upsert(meta.clone());
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    crate::registry::with_registry(paths, |reg| {
+        reg.upsert(meta.clone());
+        Ok(())
+    })?;
 
     // global：池子 → ~/.agents/skills/（agent 直读）+ ~/.claude/skills/（Claude 桥接）
     if scope == Scope::Global {
@@ -56,11 +56,16 @@ pub fn install(
     Ok(meta)
 }
 
-/// 卸载：managed 删 canonical 池子 + 同步 npx skills lock；unmanaged（computed_hash=None）
-/// 只摘 registry 记录，不删目录（不是 skillkit 装的，避免误删用户手工放置的 skill）。
+/// 卸载：managed 撤 global 桥接 + 删 canonical 池子 + 同步 npx skills lock；unmanaged
+/// （computed_hash=None）只摘 registry 记录，不删目录（不是 skillkit 装的，避免误删用户
+/// 手工放置的 skill）。
 pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
     let meta = Registry::load(paths)?.get(id)?.clone();
     if meta.computed_hash.is_some() {
+        // 先撤 global 桥接（~/.agents/skills/ + ~/.claude/skills/）再删 canonical，
+        // 否则池子删掉后桥接残留成 dangling。与 ensure_global_claude 对称（install 时建）；
+        // unmanaged 无桥接语义（目录本就属用户），不走此分支。
+        crate::symlink::remove_global_claude(paths, &meta)?;
         let target = PathBuf::from(&meta.canonical_path);
         if target.exists() {
             std::fs::remove_dir_all(&target)
@@ -70,10 +75,7 @@ pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
     }
     // 摘记录：物理删除/npx 在锁外（秒级），锁内重读再 remove，
     // 防基于删除前快照的 save 把并发写方（rescope/import）的写入覆盖回滚。
-    let _lock = crate::lock::FileLock::acquire(paths, "registry")?;
-    let mut reg = Registry::load(paths)?;
-    reg.remove(id)?;
-    reg.save_raw(paths)?; // 已持锁，不重取（同进程 flock 自死锁）
+    crate::registry::with_registry(paths, |reg| reg.remove(id).map(|_| ()))?;
     Ok(())
 }
 
@@ -120,6 +122,46 @@ mod tests {
             .unwrap()
             .get("unmanaged/foo")
             .is_err());
+    }
+
+    /// managed + global：uninstall 时撤两层 global 桥接（~/.agents/skills/ + ~/.claude/skills/），
+    /// 不留 dangling symlink。
+    #[test]
+    fn uninstall_global_managed_removes_bridge_links() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let canon = paths.skillkit_skills_dir().join("pdf");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+
+        let meta = SkillMeta {
+            id: "skills.sh/pdf".into(),
+            name: "pdf".into(),
+            source: "skills.sh".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: Some("abc".into()),
+            installed_at: "2026-08-21T00:00:00Z".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        };
+        let mut reg = Registry::load(&paths).unwrap();
+        reg.upsert(meta.clone());
+        reg.save(&paths).unwrap();
+        crate::symlink::ensure_global_claude(&paths, &meta).unwrap();
+        let agents_link = paths.agents_skills_dir().join("pdf");
+        let claude_link = paths.claude_skills_dir().join("pdf");
+        assert!(agents_link.is_symlink() && claude_link.is_symlink());
+
+        uninstall(&paths, "skills.sh/pdf").unwrap();
+        assert!(!canon.exists(), "canonical 应被删");
+        assert!(
+            !agents_link.exists() && !agents_link.is_symlink(),
+            "~/.agents/skills/ 落地不应残留 dangling"
+        );
+        assert!(
+            !claude_link.exists() && !claude_link.is_symlink(),
+            "~/.claude/skills/ 桥接不应残留 dangling"
+        );
     }
 
     /// managed skill（computed_hash=Some）uninstall 仍删 canonical 目录（行为不变）。

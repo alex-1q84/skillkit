@@ -5,8 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use serde::Deserialize;
-use skillkit_core::source::Source;
-use skillkit_core::SourcesStore;
+use skillkit_core::{SkillkitError, Source, SourcesStore};
 
 use crate::routes::FragmentQuery;
 use crate::AppState;
@@ -80,38 +79,23 @@ pub async fn add(
         )
             .into_response();
     };
-    let Some(name) = f
-        .name
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| skillkit_core::derive_source_name(&package))
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            "无法从 package 推导源名称（可用 name 字段覆盖）",
-        )
-            .into_response();
-    };
-    let mut store = match SourcesStore::load(&state.paths) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = ?e, "加载 sources 失败");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    // 撞名是用户可预期的错误（400 + 引导），save 失败才是内部错误（500）
-    if store.get(&name).is_ok() {
-        return (StatusCode::BAD_REQUEST, format!("该名称已被源 {name} 占用")).into_response();
-    }
-    if store
-        .add(Source {
-            name,
-            package: Some(package),
-        })
-        .is_err()
-        || store.save(&state.paths).is_err()
-    {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    // 名称推导回退 / 撞名是用户可预期的错误（400 + 引导），持久化失败才是内部错误（500）。
+    // 推导与撞名判定在 core 的 SourcesStore::register 单点（与 CLI source add 共用）。
+    if let Err(e) = SourcesStore::register(&state.paths, &package, f.name.as_deref()) {
+        return match e {
+            SkillkitError::SourceNameUnderived { .. } => (
+                StatusCode::BAD_REQUEST,
+                "无法从 package 推导源名称（可用 name 字段覆盖）",
+            )
+                .into_response(),
+            SkillkitError::SourceNameTaken { name } => {
+                (StatusCode::BAD_REQUEST, format!("该名称已被源 {name} 占用")).into_response()
+            }
+            e => {
+                tracing::error!(error = ?e, "注册源失败");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        };
     }
     render_sources(state, token, false)
 }

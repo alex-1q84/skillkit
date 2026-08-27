@@ -58,19 +58,9 @@ pub fn set_scope(paths: &Paths, id: &str, target: Scope) -> Result<RescopeReport
                         .is_ok_and(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
                 });
             if let Some(src) = real_canon {
-                // unmanaged：迁移真实 canonical 到池子（managed-local）
-                let target = paths.skillkit_skills_dir().join(name);
-                if target.exists() {
-                    // 池子已有同名 canonical（旧 managed 残留/历史迁移）；src（全局位置）是重复，删它，canonical 用池子。
-                    // 风险：若 src 与 target 内容不一致会丢 src 独有数据——rescope 语义是 canonical 进池子，
-                    // 池子已有即视为权威 canonical，全局位置副本冗余。
-                    std::fs::remove_dir_all(src)?;
-                } else {
-                    if let Some(parent) = target.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::rename(src, &target)?;
-                }
+                // unmanaged：迁移真实 canonical 到池子（managed-local）。
+                // 池子已有同名时池子权威、删全局位置副本（与 import 存量归槽同规则，单点在 adopt_into_pool）。
+                let target = crate::import::adopt_into_pool(paths, name, src)?;
                 meta.canonical_path = target.to_string_lossy().into_owned();
             }
             // 撤全局 symlink：managed 撤 agents+claude symlink；unmanaged 迁移后原位置已不存在（跳过）。

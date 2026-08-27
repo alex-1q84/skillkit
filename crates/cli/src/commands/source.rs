@@ -1,6 +1,6 @@
 //! source 子命令：调 core 的 SourcesStore。Source 极简成 {name, package}。
 use clap::{Args, Subcommand};
-use skillkit_core::{paths::Paths, source::SourcesStore, Source};
+use skillkit_core::{paths::Paths, source::SourcesStore};
 
 #[derive(Args)]
 pub struct SourceCmd {
@@ -30,23 +30,8 @@ pub fn run(cmd: SourceCmd) -> anyhow::Result<()> {
     let paths = Paths::production();
     match cmd.cmd {
         SourceSub::Add { package, name } => {
-            let name = match name {
-                Some(n) if !n.trim().is_empty() => n.trim().to_string(),
-                _ => match skillkit_core::derive_source_name(&package) {
-                    Some(n) => n,
-                    None => anyhow::bail!("package 不能为空（缺少可推导的名称，可用 --name 指定）"),
-                },
-            };
-            let mut store = SourcesStore::load(&paths)?;
-            if store.get(&name).is_ok() {
-                anyhow::bail!("该名称已被源 {name} 占用（可用 --name 指定别名）");
-            }
-            store.add(Source {
-                name,
-                package: Some(package),
-            })?;
-            store.save(&paths)?;
-            println!("✓ 已添加源");
+            let name = SourcesStore::register(&paths, &package, name.as_deref())?;
+            println!("✓ 已添加源 {name}");
         }
         SourceSub::List => {
             let store = SourcesStore::load(&paths)?;

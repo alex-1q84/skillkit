@@ -8,8 +8,7 @@ use axum::Form;
 use form_urlencoded::parse;
 use serde::Deserialize;
 use skillkit_core::{
-    build_status, compute_diff, detect_agents, run_apply, scan_shared, ApplyDiff, ApplyReport,
-    Project, Registry, Scope, StatusView,
+    detect_agents, run_apply, scan_shared, ApplyReport, Project, Registry, Scope, StatusView,
 };
 use std::path::{Path as StdPath, PathBuf};
 
@@ -113,14 +112,7 @@ pub async fn add(
     let abs = resolve_dir(Some(&f.path));
     let abs_str = abs.to_string_lossy().into_owned();
     // load 现有 + 查重（canonical 全路径精确匹配）
-    let mut projects = Vec::new();
-    if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
-        for id in ids {
-            if let Ok(p) = Project::load(&state.paths, &id) {
-                projects.push(p);
-            }
-        }
-    }
+    let mut projects = skillkit_core::load_all_projects(&state.paths);
     if projects.iter().any(|p| p.path == abs_str) {
         return render_list(
             &state,
@@ -166,14 +158,10 @@ pub async fn scan(
     match skillkit_core::scan_projects(&resolve_dir(Some(&f.dir)), 3) {
         Ok(dirs) => {
             let registered: std::collections::HashSet<String> =
-                skillkit_core::list_project_ids(&state.paths)
-                    .map(|ids| {
-                        ids.iter()
-                            .filter_map(|id| Project::load(&state.paths, id).ok())
-                            .map(|p| p.path)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                skillkit_core::load_all_projects(&state.paths)
+                    .into_iter()
+                    .map(|p| p.path)
+                    .collect();
             let candidates = dirs
                 .into_iter()
                 .map(|p| {
@@ -225,13 +213,9 @@ pub async fn toggle(
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&f.path));
     let abs_str = abs.to_string_lossy().into_owned();
-    let existing = skillkit_core::list_project_ids(&state.paths)
-        .ok()
-        .and_then(|ids| {
-            ids.iter()
-                .filter_map(|id| Project::load(&state.paths, id).ok())
-                .find(|p| p.path == abs_str)
-        });
+    let existing = skillkit_core::load_all_projects(&state.paths)
+        .into_iter()
+        .find(|p| p.path == abs_str);
     let registered = if let Some(proj) = existing {
         if let Err(e) = skillkit_core::Project::remove(&state.paths, &proj.id) {
             tracing::error!(error = ?e, "toggle 注销失败：{}", proj.id);
@@ -349,14 +333,7 @@ pub async fn remove(
     if skillkit_core::Project::remove(&state.paths, &id).is_err() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let mut projects = Vec::new();
-    if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
-        for pid in ids {
-            if let Ok(p) = Project::load(&state.paths, &pid) {
-                projects.push(p);
-            }
-        }
-    }
+    let projects = skillkit_core::load_all_projects(&state.paths);
     render_list(&state, token, projects, false, None)
 }
 
@@ -365,14 +342,7 @@ pub async fn list(
     Path(token): Path<String>,
     Query(q): Query<FragmentQuery>,
 ) -> Response {
-    let mut projects = Vec::new();
-    if let Ok(ids) = skillkit_core::list_project_ids(&state.paths) {
-        for id in ids {
-            if let Ok(p) = Project::load(&state.paths, &id) {
-                projects.push(p);
-            }
-        }
-    }
+    let projects = skillkit_core::load_all_projects(&state.paths);
     render_list(&state, token, projects, q.is_fragment(), None)
 }
 
@@ -406,17 +376,8 @@ fn render_workspace(
     report: Option<ApplyReport>,
 ) -> Response {
     let reg = Registry::load(&state.paths).unwrap_or_default();
-    let config = skillkit_core::config::Config::load(&state.paths).unwrap_or_default();
-    let diff = compute_diff(&proj, &reg, &config).unwrap_or_else(|_| ApplyDiff {
-        expected: vec![],
-        conflicts: vec![],
-    });
-    let status = build_status(&state.paths, &proj, &diff).unwrap_or(StatusView {
-        expected: vec![],
-        missing: vec![],
-        extra: vec![],
-        conflicts: vec![],
-    });
+    // 管线组装在 core::compute_status；这里只做 GUI 容错降级（空视图防白屏）
+    let status = skillkit_core::compute_status(&state.paths, &proj).unwrap_or_default();
     let shared = scan_shared(StdPath::new(&proj.path), &proj.agents);
     let local_skills: Vec<String> = proj
         .installed_skills
@@ -466,18 +427,8 @@ fn render_workspace(
 
 /// 计算 status 并渲染 fragments/status.html（供 set_skills 返回 + SSE hx-get 刷新）。
 fn status_fragment(state: AppState, proj: Project) -> Response {
-    let reg = Registry::load(&state.paths).unwrap_or_default();
-    let config = skillkit_core::config::Config::load(&state.paths).unwrap_or_default();
-    let diff = compute_diff(&proj, &reg, &config).unwrap_or_else(|_| ApplyDiff {
-        expected: vec![],
-        conflicts: vec![],
-    });
-    let status = build_status(&state.paths, &proj, &diff).unwrap_or(StatusView {
-        expected: vec![],
-        missing: vec![],
-        extra: vec![],
-        conflicts: vec![],
-    });
+    // 管线组装在 core::compute_status；GUI 容错降级（空视图防白屏）
+    let status = skillkit_core::compute_status(&state.paths, &proj).unwrap_or_default();
     let rendered = StatusTpl { status }.render();
     render_str(rendered)
 }

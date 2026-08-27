@@ -20,7 +20,11 @@ impl FileLock {
     }
 
     /// 带自定义超时（测试用短超时）。轮询 try_lock_exclusive，超时报 LockTimeout。
-    pub fn acquire_with_timeout(paths: &Paths, key: &str, timeout: Duration) -> Result<Self> {
+    pub(crate) fn acquire_with_timeout(
+        paths: &Paths,
+        key: &str,
+        timeout: Duration,
+    ) -> Result<Self> {
         let lock_dir = paths.skillkit_dir().join(".lock");
         std::fs::create_dir_all(&lock_dir)?;
         let lock_path = lock_dir.join(format!("{key}.lock"));
