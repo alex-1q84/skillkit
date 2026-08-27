@@ -176,17 +176,20 @@ pub fn list_ids(paths: &Paths) -> Result<Vec<String>> {
 }
 
 /// 加载全部已注册项目：list_ids → 逐个 load。单个项目文件损坏/缺失跳过（warn），
-/// 不让一个坏文件拖垮整个列表视图；ids 列举失败返回空。CLI project list 与
-/// server 各项目路由共用（跳过语义单点）。
+/// 不让一个坏文件拖垮整个列表视图；ids 列举失败也 warn（不静默）后按空处理。
+/// CLI project list 与 server 各项目路由共用（跳过语义单点）。
 pub fn load_all(paths: &Paths) -> Vec<Project> {
     let mut out = Vec::new();
-    if let Ok(ids) = list_ids(paths) {
-        for id in ids {
-            match Project::load(paths, &id) {
-                Ok(p) => out.push(p),
-                Err(e) => tracing::warn!(error = ?e, "跳过项目 {id}：加载失败"),
+    match list_ids(paths) {
+        Ok(ids) => {
+            for id in ids {
+                match Project::load(paths, &id) {
+                    Ok(p) => out.push(p),
+                    Err(e) => tracing::warn!(error = ?e, "跳过项目 {id}：加载失败"),
+                }
             }
         }
+        Err(e) => tracing::warn!(error = ?e, "列举项目目录失败，按空列表处理"),
     }
     out
 }
