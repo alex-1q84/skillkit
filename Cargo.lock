@@ -1427,7 +1427,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "skillkit-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "skillkit-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "dirs",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "skillkit-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "askama",
