@@ -2,7 +2,7 @@
 
 > 用途：新会话读 §1（结果概要）+ §3（行为变更注意）+ §5（未做项）三段够用。本次是纯重构 + 一个遗留 fix 的补提交，无功能新增。
 >
-> **分支**：`refactor/code-cleanup`（自 main 32ce498 切出），7 个 commit，未合并、未 push。合并决策留给主人。
+> **分支**：`refactor/code-cleanup`（自 main 32ce498 切出），11 个 commit（核心 8 个 + 评审轮修补 3 个，见 §7），未合并、未 push。合并决策留给主人。
 
 ## 1. 结果概要
 
@@ -20,7 +20,9 @@ commit 列表（按序，每个独立可 review）：
 | 07308a2 | SourcesStore::register 收敛两壳 source add | refactor，TDD 红绿（4 新测试） |
 | c7acdc5 | project::load_all + apply::compute_status 收敛加载/组装管线 | refactor，2 新测试 |
 
-总量：18 文件，+511/-300。测试从 228 增至 234（净增 6，另有删 1 个死代码专属测试）。
+总量（至 78d4bb3）：18 文件，+511/-300。测试函数新增 12、删 1（净增 11，`#[test]` 172→183；208fd58 的 4 个 + register 4 + with_registry 2 + load_all/compute_status 2）。`make check` 当前全绿（235 tests，含评审轮新增文案测试）。
+
+> 更正（08-26 评审轮）：原文误写「测试从 228 增至 234（净增 6）」——228 是分支中途的 cargo 计数误当 main 基线，实测以测试函数计为净增 11。
 
 ## 2. 分析结论（全局盘点）
 
@@ -45,16 +47,19 @@ commit 列表（按序，每个独立可 review）：
 
 ## 3. 行为变更注意（review 重点）
 
-两处非纯重构的行为变化，均在 c7acdc5：
+> 更正（08-26 评审轮）：原文称「两处行为变化均在 c7acdc5」，归因有误——server source add 的变化在 07308a2（c7acdc5 未触碰 sources.rs）。以下为修正后的完整清单。
 
-1. **CLI `project list` 容错语义**：原单个坏 toml 使整个命令报错退出；现统一为跳过该文件 + tracing warn（与 server 行为一致）。理由：列表视图不应因一个坏文件全挂。若要 CLI 保持严格报错，把 `load_all_projects` 换回手动循环即可。
-2. **server source add 错误分类**：撞名/推导失败仍 400（文案不变），但 load 失败从「500 加载 sources 失败」变为走 register 内部报错路径（仍 500）。行为等价，实现路径变化。
+非纯重构的行为变化（208fd58 是 fix，行为变更即其目的，不列）：
 
-其余 5 个 commit 行为不变（表征测试 + 全量回归守护）。
+1. **CLI `project list` 容错语义**（c7acdc5）：原单个坏 toml 使整个命令报错退出；现统一为跳过该文件 + tracing warn（与 server 行为一致）。理由：列表视图不应因一个坏文件全挂。若要 CLI 保持严格报错，把 `load_all_projects` 换回手动循环即可。
+2. **server source add 错误路径**（07308a2）：撞名/推导失败仍 400，load 失败从「500 加载 sources 失败」变为走 register 内部报错路径（仍 500）。行为等价，实现路径变化。
+3. **CLI source add 文案**（07308a2，原文未披露）：成功输出「✓ 已添加源」→「✓ 已添加源 {name}」；撞名/推导失败文案改走 SkillkitError Display（非 `--json` 契约，GUI 400 文案不变；Display 文案后在评审轮 a839852 补了参数指引）。
+
+其余 4 个 refactor commit（3f7cec3/56e48cd/dcaa684/8385638）行为不变（表征测试 + 全量回归守护）。
 
 ## 4. TDD 执行情况（如实记录）
 
-- **严格红绿**：SourcesStore::register（4 测试先行见编译红 → 实现绿）；with_registry（3 测试先行：落盘可见/锁释放可再事务/闭包报错不落盘）。
+- **严格红绿**：SourcesStore::register（4 测试先行见编译红 → 实现绿）；with_registry（2 个测试函数先行，覆盖三要素——落盘可见+锁释放可再事务合一测、闭包报错不落盘一测。原文误写「3 测试先行」，08-26 评审轮更正）。
 - **表征测试先行（重构的正确形态）**：scan_extras（先在既有 alias 回归测试补 `status.extra` 不误报断言再提取）；adopt_into_pool（复用 scope.rs 两个既有分支测试）。
 - **红绿倒置（实施顺序偏差，如实记录）**：load_all 与 compute_status 实现先于测试编写，测试为事后行为锁定（坏文件跳过用例、与手工组装等价用例）。
 - **删除型改动**：死代码/可见性收窄无新行为可测，验证手段为 clippy -D warnings（dead_code lint）+ 全量测试 + 模板 grep（Askama .html 不进 rustc 视野，需单独确认 `is_global` 无模板引用）。
@@ -75,9 +80,20 @@ commit 列表（按序，每个独立可 review）：
 
 ```bash
 cd /Users/mywo/lab/skillkit && git checkout refactor/code-cleanup
-make check          # 已验证：format + clippy -D warnings + 234 tests 全绿
+make check          # 已验证：format + clippy -D warnings + 235 tests 全绿
 # 如需手动走查 GUI：
 make run ARGS="serve --port 7317"   # 重点走查：sources 添加（撞名/推导失败 400）、projects 列表、workspace status
 ```
 
-合并建议：7 个 commit 各自独立可 cherry-pick；若只想要部分，最低限度建议全收（前 6 个互相独立，c7acdc5 依赖前面无——实际全部无相互依赖，均基于 main 线性叠加，任意前缀可停）。注意 208fd58 是 bug 修复（TODO.md 四、新发现项有记录），优先级最高。
+合并建议：核心 7 个 commit（至 78d4bb3）各自独立可 cherry-pick，均基于 main 线性叠加，任意前缀可停。208fd58 是 bug 修复（TODO.md 四、新发现项有记录），优先级最高。评审轮 3 个修补 commit 建议随核心一同合入。
+
+## 7. 评审轮（08-26 二轮，commit a839852 / 73129b6 / 6ecca5f）
+
+本分支经两轴 code review（Standards 轴对照 CLAUDE.md + Fowler smell 基线；Spec 轴对照任务指令 + TODO 登记）。结论：0 硬违规，4 判断类发现 + 4 项文档失实，全部处理：
+
+- a839852：`SourceNameTaken` 文案补「--name / name 字段指定别名」参数指引（红绿：先加文案断言测试）。附带修复 Spec 轴发现的 CLI 文案退化。
+- 73129b6：`load_all` 的 `list_ids` 失败从静默吞空改 warn（「不静默跳过」原则）。
+- 6ecca5f：`StatusView` derive Default，server 两处 5 行降级样板改 `unwrap_or_default()`（收敛后残留的重复，比提 helper 更简）。
+- 本 commit：文档三处失实修正（测试计数、with_registry 测试数、§3 行为变更归因）+ 补记本节。
+
+评审遗留未处理（判断类，低价值，留主人裁量）：`compute_status_pipeline_matches_manual_assembly` 测试前半的「管线==手工组装」等价断言偏实现细节（后半业务断言有价值），可择机精简。
