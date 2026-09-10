@@ -20,8 +20,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: make check（format + lint + test）
-        run: make check
+      - name: make check（format + toolchain + lint + test）
+        shell: bash
+        # 失败时把错误行写进 ::error 注解（annotations API 匿名可读），无 logs 权限也能取证
+        run: |
+          if ! make check > /tmp/check.log 2>&1; then
+            grep -E "error(\[|:)|FAILED|failures:|panicked|Update available" /tmp/check.log | head -15 | tr '\n' '|' > /tmp/err.txt || true
+            echo "::error title=make check 失败::$(< /tmp/err.txt)"
+            tail -30 /tmp/check.log
+            exit 1
+          fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
