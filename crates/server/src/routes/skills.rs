@@ -289,16 +289,19 @@ pub async fn install_candidate(
     headers: HeaderMap,
     Form(f): Form<InstallCandidateForm>,
 ) -> Response {
+    // skill 名取 spec 里 @ 后的真实名（如 grill-with-docs），而非 find query——
+    // npx 写入 skills-lock.json 的键和落盘目录都用真实名，query 可能含 `/` 对不上。
+    let skill_name = f.spec.rsplit('@').next().unwrap_or(&f.skill).to_string();
     let scope = if matches!(f.scope.as_deref(), Some("global")) {
         Scope::Global
     } else {
         Scope::Local
     };
-    match skillkit_core::install(&state.paths, "skills.sh", &f.skill, &f.spec, scope) {
+    match skillkit_core::install(&state.paths, "skills.sh", &skill_name, &f.spec, scope) {
         Ok(_) => render_skills(
             state,
             token,
-            Some(&format!("✓ 已安装 skills.sh/{}", f.skill)),
+            Some(&format!("✓ 已安装 skills.sh/{skill_name}")),
             &page_query(&headers),
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
@@ -861,6 +864,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: format!(
                 "~/.skillkit/.agents/skills/{}",
@@ -949,6 +953,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: format!(
                 "~/.skillkit/.agents/skills/{}",

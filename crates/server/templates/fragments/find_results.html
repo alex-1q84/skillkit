@@ -14,8 +14,8 @@
               hx-target="body" hx-swap="outerHTML">
           <input type="hidden" name="spec" value="{{ c.spec }}">
           <input type="hidden" name="skill" value="{{ query }}">
-          <select name="scope"><option value="local">local</option><option value="global">global</option></select>
-          <button>install</button>
+          <button name="scope" value="local">local</button>
+          <button name="scope" value="global">global</button>
         </form>
       </td>
     </tr>
