@@ -11,21 +11,27 @@ use std::path::PathBuf;
 /// 安装：调 npx skills add 下载到池子，记 computed_hash，登记 registry。
 /// `package` 由调用方解析（固定源用 source.package；registry 源由 CLI 层 find 选）。
 /// scope=global 时额外 symlink 池子→~/.agents/skills/ + Claude 桥接，立即可用。
+/// force=true 时覆盖同名占用：registry 有记录走 uninstall 清场，unmanaged 目录 /
+/// 孤儿目录补删（覆盖即用户明确要求替换），然后正常安装。
 pub fn install(
     paths: &Paths,
     source_name: &str,
     skill_name: &str,
     package: &str,
     scope: Scope,
+    force: bool,
 ) -> Result<SkillMeta> {
     let store = SourcesStore::load(paths)?;
     let source = store.get(source_name)?.clone();
 
     let target = paths.skillkit_skills_dir().join(skill_name);
     if target.exists() {
-        return Err(SkillkitError::SkillAlreadyInstalled {
-            id: skill_name.to_string(),
-        });
+        if !force {
+            return Err(SkillkitError::SkillAlreadyInstalled {
+                id: skill_name.to_string(),
+            });
+        }
+        clear_occupied(paths, skill_name)?;
     }
 
     npx::add(paths, package, skill_name)?;
@@ -61,6 +67,28 @@ pub fn install(
         crate::symlink::ensure_global_claude(paths, &meta)?;
     }
     Ok(meta)
+}
+
+/// 覆盖安装的清场：按短名摘掉 registry 里全部同名记录（复用 uninstall：managed
+/// 撤桥接/删目录/同步 lock，unmanaged 只摘记录），unmanaged 目录与孤儿目录在此补删
+/// （uninstall 对 unmanaged 不删目录是防误删；覆盖是用户明确要求替换，语义不同）。
+fn clear_occupied(paths: &Paths, skill_name: &str) -> Result<()> {
+    let reg = Registry::load(paths)?;
+    let ids: Vec<String> = reg
+        .skills
+        .values()
+        .filter(|m| m.name == skill_name)
+        .map(|m| m.id.clone())
+        .collect();
+    for id in ids {
+        uninstall(paths, &id)?;
+    }
+    let target = paths.skillkit_skills_dir().join(skill_name);
+    if target.exists() {
+        std::fs::remove_dir_all(&target)
+            .map_err(|_| SkillkitError::RemoveFailed(target.clone()))?;
+    }
+    Ok(())
 }
 
 /// 卸载：managed 撤 global 桥接 + 删 canonical 池子 + 同步 npx skills lock；unmanaged
@@ -198,5 +226,111 @@ mod tests {
 
         uninstall(&paths, "skills.sh/foo").unwrap();
         assert!(!canon.exists(), "managed 的 canonical 目录应被删");
+    }
+
+    /// force 覆盖：unmanaged 同名记录被摘、目录被替换，skillkit 正常登记。
+    /// WHY：unmanaged 的 uninstall 不删目录（防误删），只有覆盖语义才允许删——
+    /// 若 clear_occupied 漏删，install 会因目录仍存在而失败或漏装。
+    #[test]
+    fn install_force_replaces_unmanaged_occupant() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        // 种 skills.sh 源 + 假 npx（add 写 lock，免真实网络）
+        SourcesStore::ensure_default(&paths).unwrap();
+        let _guard = fake_npx_add(&paths);
+
+        let canon = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "old").unwrap();
+        let mut reg = Registry::load(&paths).unwrap();
+        reg.upsert(SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            spec: None,
+            installed_at: "2026-07-31T00:00:00Z".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        });
+        reg.save(&paths).unwrap();
+
+        // 非 force 仍拒绝
+        assert!(install(&paths, "skills.sh", "foo", "o/r@foo", Scope::Local, false).is_err());
+        let meta = install(&paths, "skills.sh", "foo", "o/r@foo", Scope::Local, true).unwrap();
+        assert_eq!(meta.computed_hash.as_deref(), Some("hashnew"));
+        assert!(canon.join("SKILL.md").exists(), "目录应被新安装内容替换");
+        assert!(Registry::load(&paths)
+            .unwrap()
+            .get("unmanaged/foo")
+            .is_err());
+        assert!(Registry::load(&paths).unwrap().get("skills.sh/foo").is_ok());
+    }
+
+    /// force 覆盖孤儿目录（registry 无记录）：目录被清掉后正常安装登记。
+    #[test]
+    fn install_force_clears_orphan_directory() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        SourcesStore::ensure_default(&paths).unwrap();
+        let _guard = fake_npx_add(&paths);
+
+        let canon = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "orphan").unwrap();
+
+        let meta = install(&paths, "skills.sh", "foo", "o/r@foo", Scope::Local, true).unwrap();
+        assert_eq!(meta.computed_hash.as_deref(), Some("hashnew"));
+        assert!(Registry::load(&paths).unwrap().get("skills.sh/foo").is_ok());
+    }
+
+    /// 测试用假 npx：响应 `skills@latest add <pkg> -s <skill> ...`，建 skill 目录 +
+    /// 写 lock（computedHash=hashnew），模拟 npx 成功安装；其余调用退出码 1。
+    /// RAII 守卫包 PATH 变更，drop 时还原，避免污染并行测试。
+    fn fake_npx_add(paths: &Paths) -> PathGuard {
+        let bin = paths.skillkit_dir().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let sh = bin.join("npx");
+        std::fs::write(
+            &sh,
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"skills@latest\" ] && [ \"$2\" = \"add\" ]; then\n\
+             \x20 for i in 3 4 5 6 7 8; do\n\
+             \x20   if [ \"$(eval echo \\$$i)\" = \"-s\" ]; then\n\
+             \x20     skill=$(eval echo \\$$((i+1)))\n\
+             \x20     mkdir -p \".agents/skills/$skill\"\n\
+             \x20     printf 'new' > \".agents/skills/$skill/SKILL.md\"\n\
+             \x20     printf '{\"skills\": {\"%s\": {\"computedHash\": \"hashnew\"}}}' \"$skill\" > skills-lock.json\n\
+             \x20     exit 0\n\
+             \x20   fi\n\
+             \x20 done\n\
+             \x20 exit 1\n\
+             fi\n\
+             exit 1\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), old));
+        PathGuard { old }
+    }
+
+    /// RAII 守卫：构造时备份 PATH，drop 时还原，避免污染并行测试。
+    struct PathGuard {
+        old: String,
+    }
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            if self.old.is_empty() {
+                std::env::remove_var("PATH");
+            } else {
+                std::env::set_var("PATH", &self.old);
+            }
+        }
     }
 }

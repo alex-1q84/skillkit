@@ -186,13 +186,41 @@ pub struct FindQuery {
     pub q: String,
 }
 
+/// find 结果行：候选 + 本地占用信息（同短名的 registry 记录 / 孤儿目录）。
+/// 占用时按钮切「覆盖」，并标出占用者让用户知道在替换什么。
+pub struct CandidateRow {
+    pub candidate: Candidate,
+    /// None = 未占用；Some(描述) = 已占用（占用者 id 列表或「未登记目录」）。
+    pub occupied: Option<String>,
+}
+
 #[derive(Template)]
 #[template(path = "fragments/find_results.html")]
 pub struct FindResultsTpl<'a> {
     pub token: &'a str,
     pub query: &'a str,
-    /// 候选列表，每条带 install 表单。
-    pub candidates: Vec<Candidate>,
+    /// 候选列表，每条带 install 表单与占用状态。
+    pub candidates: Vec<CandidateRow>,
+}
+
+/// 算候选的本地占用：短名（spec @ 后缀）在 registry 的记录 id 列表；无记录但
+/// 池子目录存在 → 「未登记」。查 registry 失败按空表处理（只影响高亮，不挡安装）。
+fn occupied_of(paths: &skillkit_core::Paths, spec: &str) -> Option<String> {
+    let short = spec.rsplit('@').next().unwrap_or(spec);
+    let reg = skillkit_core::Registry::load(paths).unwrap_or_default();
+    let owners: Vec<String> = reg
+        .skills
+        .values()
+        .filter(|m| m.name == short)
+        .map(|m| m.id.clone())
+        .collect();
+    if !owners.is_empty() {
+        return Some(owners.join("、"));
+    }
+    if paths.skillkit_skills_dir().join(short).exists() {
+        return Some("未登记目录".to_string());
+    }
+    None
 }
 
 /// find：搜 skills.sh registry，渲染候选片段（每条带 install 按钮）。
@@ -204,14 +232,24 @@ pub async fn find(
     // npx::find 同步阻塞（Command::output），用 spawn_blocking 卸到 blocking 线程池，
     // 避免占用 tokio 工作线程（默认 = CPU 核数）；闭包 move state、clone query。
     let qstr = q.q.clone();
-    let result =
-        tokio::task::spawn_blocking(move || skillkit_core::npx::find(&state.paths, &qstr)).await;
+    let paths = state.paths.clone();
+    let result = tokio::task::spawn_blocking(move || skillkit_core::npx::find(&paths, &qstr)).await;
     match result {
         Ok(Ok(cs)) => {
+            let candidates = cs
+                .into_iter()
+                .map(|c| {
+                    let occupied = occupied_of(&state.paths, &c.spec);
+                    CandidateRow {
+                        candidate: c,
+                        occupied,
+                    }
+                })
+                .collect();
             let rendered = FindResultsTpl {
                 token: &token,
                 query: &q.q,
-                candidates: cs,
+                candidates,
             }
             .render();
             render_str(rendered)
@@ -264,7 +302,7 @@ pub async fn install(
         );
         return StatusCode::BAD_REQUEST.into_response();
     };
-    match skillkit_core::install(&state.paths, source, skill, &package, scope) {
+    match skillkit_core::install(&state.paths, source, skill, &package, scope, false) {
         Ok(_) => render_skills(state, token, None, &page_query(&headers)),
         Err(e) => {
             tracing::error!(error = ?e, "install 失败：{id}");
@@ -280,6 +318,8 @@ pub struct InstallCandidateForm {
     /// skill 名（=find 时的 query），作 canonical 目录名 + registry id 后缀。
     pub skill: String,
     pub scope: Option<String>,
+    /// 有值（force=1）时覆盖同名占用（registry 记录 / 本地目录）。
+    pub force: Option<String>,
 }
 
 /// registry 源（skills.sh）install：find 候选选中后装。source 固定 skills.sh，package 用 spec。
@@ -297,7 +337,15 @@ pub async fn install_candidate(
     } else {
         Scope::Local
     };
-    match skillkit_core::install(&state.paths, "skills.sh", &skill_name, &f.spec, scope) {
+    let force = f.force.is_some();
+    match skillkit_core::install(
+        &state.paths,
+        "skills.sh",
+        &skill_name,
+        &f.spec,
+        scope,
+        force,
+    ) {
         Ok(_) => render_skills(
             state,
             token,
@@ -305,11 +353,16 @@ pub async fn install_candidate(
             &page_query(&headers),
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
-            error_response("该 skill 已安装，可在列表中 upgrade 或 remove")
+            // 占用者可能是 unmanaged（无 upgrade 按钮），引导用候选行的覆盖安装
+            error_response(format!(
+                "{skill_name} 已被现有 skill 占用，可在候选行点「覆盖」安装"
+            ))
         }
         Err(e) => {
             tracing::error!(error = ?e, "install-candidate 失败：{}", f.spec);
-            error_response("安装失败，检查网络/Node 后重试")
+            // 具体原因透传到界面（如「lock 找不到 skill：xxx」＝候选已从源仓库失效），
+            // 不再笼统归为网络问题——npx 对「仓库中无匹配 skill」静默返回 0，只有 lock 能暴露
+            error_response(format!("安装失败：{e}"))
         }
     }
 }

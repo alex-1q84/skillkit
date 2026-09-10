@@ -751,6 +751,101 @@ async fn skills_install_candidate_registers_skill() {
     assert_eq!(m.spec.as_deref(), Some("owner/repo@pdf"));
 }
 
+/// find 候选行高亮本地占用：短名已登记（unmanaged）时渲染占用标记与「覆盖」按钮。
+#[tokio::test]
+async fn skills_find_marks_occupied_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    let _g = common::fake_npx(&state.paths);
+    // 种 unmanaged/pdf：与候选 owner/repo@pdf 短名相同
+    let canon = state.paths.skillkit_skills_dir().join("pdf");
+    std::fs::create_dir_all(&canon).unwrap();
+    let mut reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    reg.upsert(skillkit_core::SkillMeta {
+        id: "unmanaged/pdf".into(),
+        name: "pdf".into(),
+        source: "unmanaged".into(),
+        scope: skillkit_core::Scope::Local,
+        version: None,
+        computed_hash: None,
+        spec: None,
+        installed_at: "2026-08-01T00:00:00Z".into(),
+        canonical_path: canon.to_string_lossy().into_owned(),
+    });
+    reg.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills/find?q=pdf")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = common::body_string(resp).await;
+    assert!(body.contains("已装：unmanaged/pdf"), "应渲染占用者 id");
+    assert!(body.contains("覆盖 local"), "占用行应出覆盖按钮");
+    assert!(body.contains("force"), "覆盖按钮表单应带 force");
+}
+
+/// install-candidate 带 force=1：覆盖 unmanaged 同名占用，登记 skills.sh 新记录。
+#[tokio::test]
+async fn skills_install_candidate_force_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = skillkit_server::AppState {
+        paths: skillkit_core::Paths::new(dir.path().to_path_buf()),
+        token: "test-token".into(),
+    };
+    skillkit_core::SourcesStore::ensure_default(&state.paths).unwrap();
+    let _g = common::fake_npx(&state.paths);
+    // 占用：unmanaged/pdf 目录 + 记录
+    let canon = state.paths.skillkit_skills_dir().join("pdf");
+    std::fs::create_dir_all(&canon).unwrap();
+    std::fs::write(canon.join("SKILL.md"), "old").unwrap();
+    let mut reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    reg.upsert(skillkit_core::SkillMeta {
+        id: "unmanaged/pdf".into(),
+        name: "pdf".into(),
+        source: "unmanaged".into(),
+        scope: skillkit_core::Scope::Local,
+        version: None,
+        computed_hash: None,
+        spec: None,
+        installed_at: "2026-08-01T00:00:00Z".into(),
+        canonical_path: canon.to_string_lossy().into_owned(),
+    });
+    reg.save(&state.paths).unwrap();
+
+    let app = skillkit_server::app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/test-token/skills/install-candidate")
+                .header(
+                    axum::http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(Body::from(
+                    "spec=owner%2Frepo%40pdf&skill=pdf&scope=local&force=1",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let reg = skillkit_core::Registry::load(&state.paths).unwrap();
+    assert!(reg.get("unmanaged/pdf").is_err(), "占用记录应被摘除");
+    let m = reg.get("skills.sh/pdf").expect("覆盖后应登记新记录");
+    assert_eq!(m.spec.as_deref(), Some("owner/repo@pdf"));
+    assert!(canon.join("SKILL.md").exists(), "目录应被新安装内容替换");
+}
+
 #[tokio::test]
 async fn skills_import_registers_existing() {
     let dir = tempfile::tempdir().unwrap();

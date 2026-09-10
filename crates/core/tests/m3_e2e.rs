@@ -66,7 +66,7 @@ fn upgrade_updates_registry_hash() {
         .unwrap();
     store.save(&paths).unwrap();
 
-    let meta = install(&paths, "m3-src", "m3-demo", &pkg, Scope::Local).unwrap();
+    let meta = install(&paths, "m3-src", "m3-demo", &pkg, Scope::Local, false).unwrap();
     let old = meta.computed_hash.unwrap();
 
     let report = upgrade_skill(&paths, "m3-src/m3-demo", true).unwrap();

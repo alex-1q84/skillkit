@@ -85,7 +85,7 @@ pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
             let src = store.get(&source)?.clone();
             match src.package {
                 Some(p) => {
-                    let meta = install(&paths, &source, &skill, &p, scope)?;
+                    let meta = install(&paths, &source, &skill, &p, scope, false)?;
                     if json {
                         println!("{}", serde_json::to_string_pretty(&meta)?);
                     } else {
@@ -101,7 +101,7 @@ pub fn run_install(cmd: InstallCmd) -> anyhow::Result<()> {
                         crate::commands::skill::print_candidates(&paths, &skill, true)?;
                     } else {
                         let package = resolve_registry_package(&paths, &skill)?;
-                        let meta = install(&paths, &source, &skill, &package, scope)?;
+                        let meta = install(&paths, &source, &skill, &package, scope, false)?;
                         println!(
                             "✓ 已安装 {}（hash: {}）",
                             meta.id,

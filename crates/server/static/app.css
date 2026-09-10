@@ -435,6 +435,9 @@ a.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); 
 .tag.local { background: var(--accent-soft); color: var(--accent); }
 .tag.src { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
 .tag.unmanaged { background: #fee2e2; color: #b91c1c; }
+/* find 候选行的本地占用标记 + 整行淡黄底（覆盖安装提示） */
+.tag.occupied { background: #fef3c7; color: var(--warn); text-transform: none; }
+tr.occupied-row td { background: #fffbeb; }
 
 /* pill-btn：ops 列细按钮 */
 .pill-btn {

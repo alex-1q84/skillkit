@@ -65,7 +65,15 @@ fn m0_install_local_to_pool_and_global_symlink() {
         .unwrap();
     store.save(&paths).unwrap();
 
-    let meta = install(&paths, "local-src", "demo-skill", &pkg, Scope::Global).unwrap();
+    let meta = install(
+        &paths,
+        "local-src",
+        "demo-skill",
+        &pkg,
+        Scope::Global,
+        false,
+    )
+    .unwrap();
     assert_eq!(meta.scope, Scope::Global);
 
     // canonical 池子落地（~/.skillkit/.agents/skills/demo-skill）
@@ -106,6 +114,6 @@ fn reinstall_same_skill_fails() {
         .unwrap();
     store.save(&paths).unwrap();
 
-    install(&paths, "t", "dup", &pkg, Scope::Global).unwrap();
-    assert!(install(&paths, "t", "dup", &pkg, Scope::Global).is_err());
+    install(&paths, "t", "dup", &pkg, Scope::Global, false).unwrap();
+    assert!(install(&paths, "t", "dup", &pkg, Scope::Global, false).is_err());
 }

@@ -309,7 +309,7 @@ fn try_reinstall(paths: &Paths, name: &str, package: &str) -> Result<()> {
         })?;
         store.save(paths)?;
     }
-    crate::install::install(paths, &source_name, name, package, Scope::Global)?;
+    crate::install::install(paths, &source_name, name, package, Scope::Global, false)?;
     Ok(())
 }
 

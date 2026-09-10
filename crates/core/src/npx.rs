@@ -128,7 +128,9 @@ pub fn read_computed_hash(paths: &Paths, skill: &str) -> Result<String> {
         .get(skill)
         .map(|s| s.computed_hash.clone())
         .ok_or_else(|| SkillkitError::Tool {
-            message: format!("skills-lock.json 找不到 skill：{skill}"),
+            message: format!(
+                "skills-lock.json 找不到 skill：{skill}（源仓库可能已移除该 skill，或下载未成功）"
+            ),
         })
 }
 
