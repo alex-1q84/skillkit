@@ -322,11 +322,17 @@ pub struct InstallCandidateForm {
     pub force: Option<String>,
 }
 
+/// 安装成功后的行内反馈：该候选行替换为「✓ 已装」，结果区保留（手动 X 关闭）。
+/// skills 列表本身由 SSE（registry.json 落盘触发 changed）自动刷新，无需整页替换。
+#[derive(Template)]
+#[template(path = "fragments/find_row_installed.html")]
+pub struct FindRowInstalledTpl {
+    pub spec: String,
+}
+
 /// registry 源（skills.sh）install：find 候选选中后装。source 固定 skills.sh，package 用 spec。
 pub async fn install_candidate(
     State(state): State<AppState>,
-    Path(token): Path<String>,
-    headers: HeaderMap,
     Form(f): Form<InstallCandidateForm>,
 ) -> Response {
     // skill 名取 spec 里 @ 后的真实名（如 grill-with-docs），而非 find query——
@@ -346,11 +352,11 @@ pub async fn install_candidate(
         scope,
         force,
     ) {
-        Ok(_) => render_skills(
-            state,
-            token,
-            Some(&format!("✓ 已安装 skills.sh/{skill_name}")),
-            &page_query(&headers),
+        Ok(_) => render_str(
+            FindRowInstalledTpl {
+                spec: f.spec.clone(),
+            }
+            .render(),
         ),
         Err(skillkit_core::SkillkitError::SkillAlreadyInstalled { .. }) => {
             // 占用者可能是 unmanaged（无 upgrade 按钮），引导用候选行的覆盖安装

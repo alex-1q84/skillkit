@@ -749,6 +749,9 @@ async fn skills_install_candidate_registers_skill() {
     assert_eq!(m.computed_hash.as_deref(), Some("hashnew"));
     // spec 记原始安装名（owner/repo@skill），是同名 skill 的来源依据
     assert_eq!(m.spec.as_deref(), Some("owner/repo@pdf"));
+    // 成功返回行内片段（✓ 已装），不整页替换——结果区保留由用户手动关闭
+    let body = common::body_string(resp).await;
+    assert!(body.contains("✓ 已装"), "成功应返回行内已装片段：{body}");
 }
 
 /// find 候选行高亮本地占用：短名已登记（unmanaged）时渲染占用标记与「覆盖」按钮。
@@ -791,6 +794,10 @@ async fn skills_find_marks_occupied_candidates() {
     assert!(body.contains("已装：unmanaged/pdf"), "应渲染占用者 id");
     assert!(body.contains("覆盖 local"), "占用行应出覆盖按钮");
     assert!(body.contains("force"), "覆盖按钮表单应带 force");
+    assert!(
+        body.contains("关闭搜索结果"),
+        "结果区应有手动关闭 X：{body}"
+    );
 }
 
 /// install-candidate 带 force=1：覆盖 unmanaged 同名占用，登记 skills.sh 新记录。

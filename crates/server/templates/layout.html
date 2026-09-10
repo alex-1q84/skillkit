@@ -50,8 +50,16 @@
         // 保留当前 query（Skills 页 selected/profiles），只追加/覆盖 fragment=1。
         var params = new URLSearchParams(location.search);
         params.set('fragment', '1');
+        // main 替换会重置搜索结果区（find-results）：刷新前暂存、settle 后恢复，
+        // 结果区只经用户 X 手动关闭（安装等行内反馈不因 SSE 丢失）。
+        var fr = document.getElementById('find-results');
+        var savedFind = fr && fr.firstChild ? fr.innerHTML : null;
         htmx.ajax('GET', location.pathname + '?' + params.toString(), {
           target: 'main', swap: 'innerHTML'
+        }).then(function () {
+          if (!savedFind) return;
+          var fresh = document.getElementById('find-results');
+          if (fresh && !fresh.firstChild) fresh.innerHTML = savedFind;
         });
       }, 300);
     }

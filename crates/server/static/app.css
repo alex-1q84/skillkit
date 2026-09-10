@@ -438,6 +438,12 @@ a.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); 
 /* find 候选行的本地占用标记 + 整行淡黄底（覆盖安装提示） */
 .tag.occupied { background: #fef3c7; color: var(--warn); text-transform: none; }
 tr.occupied-row td { background: #fffbeb; }
+/* 搜索结果区：头部栏（标题 + 手动关闭 X）与安装成功行 */
+.find-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 8px; }
+.find-head .find-title { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.find-head .x { font-size: 16px; line-height: 1; padding: 2px 8px; }
+.tag.installed { background: var(--teal-soft); color: var(--teal); text-transform: none; }
+tr.installed-row td { color: var(--ink-3); }
 
 /* pill-btn：ops 列细按钮 */
 .pill-btn {
