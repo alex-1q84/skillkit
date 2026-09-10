@@ -1,6 +1,6 @@
 # skillkit Makefile（对标 Java monorepo Makefile：setup/format/lint/test/build 统一入口）
 # CI 与本地走同一套规则，避免「本地过 CI 不过」。
-.PHONY: setup format lint test build check run e2e e2e-cli
+.PHONY: setup toolchain format lint test build check run e2e e2e-cli
 
 ## 安装/拉取依赖
 setup:
@@ -23,8 +23,18 @@ test:
 build:
 	cargo build --all
 
-## 提交前一站式检查：先格式化，再 lint，再测试
-check: format lint test
+## 工具链一致性：本地 stable 落后于最新 stable 时，CI（每次拉最新 stable）会爆
+## 新 pedantic lint，出现「本地全绿 CI 红」（2026-09 v0.1.6 实际发生）。
+## 离线时 rustup check 失败则放行（降级：检查做不了不阻塞本地开发）。
+toolchain:
+	@rustup check 2>/dev/null | grep -q "Update available" && { \
+	  echo "error: 本地 stable 工具链落后于最新版，CI 会用新 lint 拦截"; \
+	  echo "  先跑 rustup update stable，再重试 make check"; \
+	  exit 1; \
+	} || :
+
+## 提交前一站式检查：先工具链检查，再格式化，再 lint，再测试
+check: toolchain format lint test
 
 ## 运行 CLI（最新源码，避免 make check 后拿到旧 bin）：make run ARGS="source list"
 run:

@@ -5,7 +5,7 @@
 
 ## 步骤
 
-1. 本地 `make check` 全绿；工具链与 CI 同为最新 stable（`rustup update stable`），旧工具链会漏新 clippy lint。
+1. 本地 `make check` 全绿。check 首步已内置工具链检查（`make toolchain`：`rustup check` 发现本地 stable 落后即拦截），被拦时跑 `rustup update stable` 后重试。
 2. commit 并 push main。
 3. 打 tag 并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。CI 自动构建、创建 Release 并附 tarball 与 sha256.txt（约 2 分钟，进度看 Actions）。
 4. 回填 formula：从 Release 附件 `sha256.txt` 取值，更新 mac-config 仓库 `Formula/skillkit.rb` 的 `url` 与 `sha256`，commit（本地 tap 是 git clone 语义，不 commit 则 brew 看不到新版）。
@@ -18,7 +18,7 @@ pre-1.0 阶段（0.x.y）：`--json` 输出结构或 CLI 参数语义变更 bump
 
 ## 坑位备忘
 
-- CI runner 每次全新拉最新 stable 工具链，pedantic lint 随版本增长，本地长期不 `rustup update` 会在 CI 上爆出新 error（2026-08 v0.1.0 首发即因此挂过，11 处 map_unwrap_or 等）。
+- CI runner 每次全新拉最新 stable 工具链，pedantic lint 随版本增长，本地长期不 `rustup update` 会在 CI 上爆出新 error（2026-08 v0.1.0 首发即因此挂过，11 处 map_unwrap_or 等；2026-09 v0.1.6 复发一次——本地 1.97 全绿、CI 1.98 爆 `Result::ok().is_some_and` 新 lint，tag 已推只能删 tag 重打。现已由 `make check` 的 toolchain 步前置拦截）。
 - Homebrew 4.x 拒绝路径 formula（必须进 tap），第三方 tap 需 `brew trust`——两者都已在 just recipe 内处理，勿手装。
 - formula sha256 回填前是全零占位，install 会被校验拦下（防误装旧版）。
 
