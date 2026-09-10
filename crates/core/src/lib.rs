@@ -7,6 +7,7 @@ pub mod import;
 pub mod install;
 pub mod install_local;
 pub mod lock;
+pub mod migrate;
 pub mod npx;
 pub mod paths;
 pub mod profile;
@@ -27,6 +28,7 @@ pub use import::{import_existing, ImportReport};
 pub use install::{install, uninstall};
 pub use install_local::install_local;
 pub use lock::FileLock;
+pub use migrate::migrate;
 pub use npx::Candidate;
 pub use paths::Paths;
 pub use profile::{

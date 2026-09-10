@@ -369,6 +369,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: format!(
                 "~/.skillkit/.agents/skills/{}",

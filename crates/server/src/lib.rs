@@ -116,6 +116,10 @@ async fn require_token(State(state): State<AppState>, req: Request, next: Next) 
 pub async fn serve(port: u16, open: bool, token: Option<String>) -> anyhow::Result<()> {
     let paths = Paths::production();
     skillkit_core::SourcesStore::ensure_default(&paths)?;
+    // registry schema 迁移（补 spec 等）：失败只 warn，旧 schema 仍可读，不阻塞启动
+    if let Err(e) = skillkit_core::migrate(&paths) {
+        tracing::warn!(error = ?e, "registry 迁移失败，继续以旧 schema 运行");
+    }
     let token = token.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let state = AppState {
         paths,

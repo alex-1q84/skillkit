@@ -26,6 +26,11 @@ pub struct SkillMeta {
     pub id: String,
     pub name: String,
     pub source: String,
+    /// registry 源（skills.sh）的原始安装名（owner/repo@skill），来源记录用；
+    /// npx skills update 只认短名（实测 spec 形式会被拒），此字段不参与升级调用。
+    /// 固定源 / 本地导入 / unmanaged 无此概念，为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<String>,
     pub scope: Scope,
     pub version: Option<String>,
     pub computed_hash: Option<String>,
@@ -42,6 +47,9 @@ impl SkillMeta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Registry {
+    /// schema 版本。0 = 未标注（初版文件，缺 spec 等字段），由 crate::migrate 升到 CURRENT。
+    #[serde(default)]
+    pub version: u32,
     pub skills: BTreeMap<String, SkillMeta>,
 }
 
@@ -132,6 +140,7 @@ mod tests {
             scope,
             version: Some("1.0.0".into()),
             computed_hash: Some("abc123".into()),
+            spec: None,
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: format!("~/.agents/skills/{}", id.split('/').nth(1).unwrap_or(id)),
         }

@@ -215,6 +215,7 @@ async fn skills_page_lists_registry() {
             scope: skillkit_core::Scope::Local,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "2026-07-31".into(),
             canonical_path: "/x".into(),
         },
@@ -310,6 +311,7 @@ async fn project_workspace_renders_status() {
             scope: skillkit_core::Scope::Local,
             version: None,
             computed_hash: Some("s".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         },
@@ -480,6 +482,7 @@ async fn skill_uninstall_removes_from_registry() {
             scope: skillkit_core::Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "2026-07-31".into(),
             canonical_path: dir
                 .path()
@@ -526,6 +529,7 @@ async fn skill_write_op_restores_filter_from_hx_current_url() {
                 scope: skillkit_core::Scope::Global,
                 version: None,
                 computed_hash: None,
+                spec: None,
                 installed_at: "2026-07-31".into(),
                 canonical_path: dir
                     .path()
@@ -640,6 +644,7 @@ async fn skill_upgrade_endpoint_returns_500_on_unmanaged() {
             scope: skillkit_core::Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "2026-07-31".into(),
             canonical_path: dir
                 .path()
@@ -742,6 +747,8 @@ async fn skills_install_candidate_registers_skill() {
     let reg = skillkit_core::Registry::load(&state.paths).unwrap();
     let m = reg.get("skills.sh/pdf").expect("应登记 skills.sh/pdf");
     assert_eq!(m.computed_hash.as_deref(), Some("hashnew"));
+    // spec 记原始安装名（owner/repo@skill），是同名 skill 的来源依据
+    assert_eq!(m.spec.as_deref(), Some("owner/repo@pdf"));
 }
 
 #[tokio::test]
@@ -795,6 +802,7 @@ async fn skills_upgrade_all_batch_upgrades() {
                 scope: skillkit_core::Scope::Local,
                 version: None,
                 computed_hash: Some("oldhash".into()),
+                spec: None,
                 installed_at: "2026-07-31".into(),
                 canonical_path: canon.to_string_lossy().into_owned(),
             },
@@ -1225,6 +1233,7 @@ async fn workspace_renders_status_badge_profile_cards_and_local_only() {
             scope: skillkit_core::Scope::Local,
             version: None,
             computed_hash: Some("s1".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: dir
                 .path()
@@ -1242,6 +1251,7 @@ async fn workspace_renders_status_badge_profile_cards_and_local_only() {
             scope: skillkit_core::Scope::Global,
             version: None,
             computed_hash: Some("s2".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: dir.path().join("canon/glob").to_string_lossy().into_owned(),
         },
@@ -1322,6 +1332,7 @@ async fn project_set_profiles_binds_lands_and_reports() {
             scope: skillkit_core::Scope::Local,
             version: None,
             computed_hash: Some("sha1".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         },
@@ -1488,6 +1499,7 @@ async fn projects_list_renders_section_cards_delete_and_local_count() {
             scope: skillkit_core::Scope::Local,
             version: None,
             computed_hash: Some("s".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: "/canon/local".into(),
         },
@@ -1501,6 +1513,7 @@ async fn projects_list_renders_section_cards_delete_and_local_count() {
             scope: skillkit_core::Scope::Global,
             version: None,
             computed_hash: Some("s".into()),
+            spec: None,
             installed_at: "2026-08-01".into(),
             canonical_path: "/canon/glob".into(),
         },
@@ -1716,6 +1729,7 @@ fn seed_skill(paths: &skillkit_core::Paths, id: &str, scope: skillkit_core::Scop
         scope,
         version: None,
         computed_hash: Some("abc".into()),
+        spec: None,
         installed_at: "t".into(),
         canonical_path: canon.to_string_lossy().into_owned(),
     });
@@ -1978,6 +1992,7 @@ async fn skills_install_local_conflict_returns_error_json() {
         scope: skillkit_core::Scope::Local,
         version: None,
         computed_hash: Some("a".into()),
+        spec: None,
         installed_at: "x".into(),
         canonical_path: canon.display().to_string(),
     });

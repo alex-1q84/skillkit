@@ -130,6 +130,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         };
@@ -231,6 +232,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "t".into(),
             canonical_path: agents_canon.to_string_lossy().into_owned(),
         };
@@ -271,6 +273,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "t".into(),
             canonical_path: p
                 .agents_skills_dir()
@@ -318,6 +321,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "t".into(),
             canonical_path: claude.to_string_lossy().into_owned(),
         };

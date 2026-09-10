@@ -86,6 +86,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: canonical.into(),
         }

@@ -144,6 +144,7 @@ fn adopt_unmanaged(
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: crate::install::now_iso(),
             canonical_path: target.to_string_lossy().into_owned(),
         };
@@ -384,6 +385,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "t".into(),
             canonical_path: canonical.to_string_lossy().into_owned(),
         });

@@ -63,15 +63,21 @@ fn render_list_table(skills: &[SkillMeta]) -> String {
         } else {
             ""
         };
+        // spec（owner/repo@skill）只有 skills.sh 源才有，有则附注原始安装名
+        let spec = match s.spec.as_deref() {
+            Some(sp) => format!("  {sp}"),
+            None => String::new(),
+        };
         writeln!(
             out,
-            "{id}  [{scope}]  {source}  {ver}  {hash}{unm}",
+            "{id}  [{scope}]  {source}  {ver}  {hash}{unm}{spec}",
             id = s.id,
             scope = scope_str(s.scope),
             source = s.source,
             ver = s.version.as_deref().unwrap_or("-"),
             hash = hash,
             unm = unm,
+            spec = spec,
         )
         .unwrap();
     }
@@ -188,6 +194,7 @@ mod tests {
             scope,
             version: Some("1.0.0".into()),
             computed_hash: hash.map(str::to_string),
+            spec: None,
             installed_at: "2026-08-01T00:00:00Z".into(),
             canonical_path: format!(
                 "~/.skillkit/.agents/skills/{}",

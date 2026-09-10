@@ -461,6 +461,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some(sha.into()),
+            spec: None,
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: format!("/canon/{}", id.split('/').next_back().unwrap_or(id)),
         }
@@ -655,6 +656,7 @@ mod tests {
             scope: Scope::Local,
             version: None,
             computed_hash: Some(sha.into()),
+            spec: None,
             installed_at: "2026-07-29T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });

@@ -193,6 +193,7 @@ mod tests {
             scope,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: format!(
                 "~/.skillkit/.agents/skills/{}",
@@ -345,6 +346,7 @@ mod tests {
             scope: Scope::Local,
             version: None,
             computed_hash: Some("sha1".into()),
+            spec: None,
             installed_at: "2026-08-04T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });

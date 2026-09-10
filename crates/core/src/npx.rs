@@ -100,7 +100,7 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// skills-lock.json 结构（只取 computedHash）。
+/// skills-lock.json 结构（只取 computedHash、source）。
 #[derive(Deserialize)]
 struct LockFile {
     skills: std::collections::BTreeMap<String, LockSkill>,
@@ -110,6 +110,8 @@ struct LockFile {
 struct LockSkill {
     #[serde(rename = "computedHash")]
     computed_hash: String,
+    /// owner/repo（npx 记录的来源仓库），spec 回填用。
+    source: Option<String>,
 }
 
 /// 读 ~/.skillkit/skills-lock.json 拿指定 skill 的 computedHash。
@@ -128,6 +130,22 @@ pub fn read_computed_hash(paths: &Paths, skill: &str) -> Result<String> {
         .ok_or_else(|| SkillkitError::Tool {
             message: format!("skills-lock.json 找不到 skill：{skill}"),
         })
+}
+
+/// 读 ~/.skillkit/skills-lock.json，返回 skill 短名 → owner/repo 的映射。
+/// lock 缺失或条目无 source 的 skill 不进 map（调用方按「查不到不猜」处理）。
+pub fn read_lock_sources(paths: &Paths) -> Result<std::collections::BTreeMap<String, String>> {
+    let path = paths.skillkit_dir().join("skills-lock.json");
+    // lock 缺失只是来源未知，不阻塞迁移
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(std::collections::BTreeMap::default());
+    };
+    let lock: LockFile = serde_json::from_str(&content)?;
+    Ok(lock
+        .skills
+        .into_iter()
+        .filter_map(|(name, s)| s.source.map(|src| (name, src)))
+        .collect())
 }
 
 /// 卸载同步：npx skills remove <skill>。失败不阻塞——lock 只是缓存，registry 是事实源。

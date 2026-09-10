@@ -24,6 +24,7 @@ fn install_local_bare(paths: &Paths, id: &str) {
         scope: Scope::Local,
         version: None,
         computed_hash: Some("sha1".into()),
+        spec: None,
         installed_at: "2026-07-29T00:00:00Z".into(),
         canonical_path: canon.to_string_lossy().into_owned(),
     });
@@ -109,6 +110,7 @@ fn m1_global_skill_not_per_project() {
         scope: Scope::Global,
         version: None,
         computed_hash: Some("sha".into()),
+        spec: None,
         installed_at: "2026-07-29T00:00:00Z".into(),
         canonical_path: canon.to_string_lossy().into_owned(),
     });

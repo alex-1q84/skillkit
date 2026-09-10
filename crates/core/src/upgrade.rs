@@ -122,6 +122,7 @@ mod tests {
             scope: Scope::Local,
             version: None,
             computed_hash: Some(hash.into()),
+            spec: None,
             installed_at: "2026-07-31T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });
@@ -140,6 +141,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "2026-07-31T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });

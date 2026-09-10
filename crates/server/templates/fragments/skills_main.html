@@ -77,6 +77,7 @@
     <td class="cell-id">
       <span class="src">{{ s.source }}/</span><span class="nm">{{ s.name }}</span>
       {% if s.computed_hash.is_none() %}<span class="tag unmanaged">unmanaged</span>{% endif %}
+      {% if let Some(sp) = s.spec %}<div class="spec" title="原始安装名">{{ sp }}</div>{% endif %}
     </td>
     <td>{% if s.is_local() %}<span class="tag local">local</span>{% else %}<span class="tag global">global</span>{% endif %}</td>
     <td><span class="tag src">{{ s.source }}</span></td>

@@ -352,6 +352,7 @@ pub fn install_local(
         scope,
         version: None,
         computed_hash: Some(hash),
+        spec: None,
         installed_at: crate::install::now_iso(),
         canonical_path: target.display().to_string(),
     };
@@ -669,6 +670,7 @@ mod tests {
             scope: Scope::Local,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "x".into(),
             canonical_path: canon.display().to_string(),
         });
@@ -720,6 +722,7 @@ mod tests {
             scope: Scope::Local,
             version: None,
             computed_hash: Some("x".into()),
+            spec: None,
             installed_at: "x".into(),
             canonical_path: p.skillkit_skills_dir().join("bar").display().to_string(),
         });

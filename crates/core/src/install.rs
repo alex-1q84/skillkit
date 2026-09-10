@@ -32,10 +32,17 @@ pub fn install(
     let hash = npx::read_computed_hash(paths, skill_name)?;
 
     let id = Registry::skill_id(&source.name, skill_name);
+    // registry 源（sources.toml package=None）的 package 参数即 spec，记原始安装名；固定源无此概念。
+    let spec = if source.package.is_none() {
+        Some(package.to_string())
+    } else {
+        None
+    };
     let meta = SkillMeta {
         id: id.clone(),
         name: skill_name.to_string(),
         source: source.name,
+        spec,
         scope,
         version: None,
         computed_hash: Some(hash),
@@ -110,6 +117,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: None,
+            spec: None,
             installed_at: "2026-07-31T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });
@@ -141,6 +149,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: Some("abc".into()),
+            spec: None,
             installed_at: "2026-08-21T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         };
@@ -181,6 +190,7 @@ mod tests {
             scope: Scope::Global,
             version: None,
             computed_hash: Some("abc123".into()),
+            spec: None,
             installed_at: "2026-07-31T00:00:00Z".into(),
             canonical_path: canon.to_string_lossy().into_owned(),
         });

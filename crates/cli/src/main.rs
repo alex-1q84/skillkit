@@ -46,8 +46,13 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
+    let paths = skillkit_core::Paths::production();
     // 启动确保默认源种子（sources.toml 不存在则写入 skills.sh registry 入口）
-    skillkit_core::SourcesStore::ensure_default(&skillkit_core::Paths::production())?;
+    skillkit_core::SourcesStore::ensure_default(&paths)?;
+    // registry schema 迁移（补 spec 等）：失败只 warn，旧 schema 仍可读，不阻塞命令
+    if let Err(e) = skillkit_core::migrate(&paths) {
+        eprintln!("warn: registry 迁移失败，继续以旧 schema 运行：{e}");
+    }
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Source(cmd) => commands::source::run(cmd)?,
