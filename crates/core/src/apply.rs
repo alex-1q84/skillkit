@@ -265,8 +265,7 @@ fn scan_extras(
             let p = landed_path(project_root, &agent, &name);
             let is_expected_alias = p
                 .canonicalize()
-                .ok()
-                .is_some_and(|physical| expected_physical.contains(&physical));
+                .is_ok_and(|physical| expected_physical.contains(&physical));
             if !expected_keys.contains(&key) && !is_expected_alias {
                 extras.push((key, p));
             }
