@@ -25,9 +25,10 @@ build:
 
 ## 工具链一致性：本地 stable 落后于最新 stable 时，CI（每次拉最新 stable）会爆
 ## 新 pedantic lint，出现「本地全绿 CI 红」（2026-09 v0.1.6 实际发生）。
+## 只看 stable 工具链行：rustup 自身的更新不拦（CI 镜像 rustup 常落后，拦了必红）。
 ## 离线时 rustup check 失败则放行（降级：检查做不了不阻塞本地开发）。
 toolchain:
-	@rustup check 2>/dev/null | grep -q "Update available" && { \
+	@rustup check 2>/dev/null | grep -Eq "^stable\b.*Update available" && { \
 	  echo "error: 本地 stable 工具链落后于最新版，CI 会用新 lint 拦截"; \
 	  echo "  先跑 rustup update stable，再重试 make check"; \
 	  exit 1; \
