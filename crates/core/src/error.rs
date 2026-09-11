@@ -65,7 +65,7 @@ pub enum SkillkitError {
     AmbiguousSkillArchive { reason: String },
 
     #[error(
-        "目录 {name} 已被占用：{owner}（先 skillkit skill remove <owner> 再装，或手动删除该目录）",
+        "skill {name} 已被占用：{owner}（先 `skillkit skill remove <占用方id>` 清记录；孤儿目录直接手动删除；或 --force 覆盖）",
         owner = owner_id.as_deref().unwrap_or("无 registry 记录的孤儿目录")
     )]
     SkillPoolOccupied {

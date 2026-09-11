@@ -16,7 +16,8 @@ pub struct ImportReport {
     pub unmanaged: Vec<String>,
     /// 可溯源并重装入池的 skill 名称。
     pub reinstalled: Vec<String>,
-    /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装失败 / 桥接撞占位）。
+    /// 跳过的 skill 名称（重复 / 无效 / symlink / 无 SKILL.md / 重装失败 / 桥接撞占位 /
+    /// 同名重复登记待处理）。
     pub skipped: Vec<String>,
     /// 新发现并迁入池子的 skill（主循环 unmanaged 分支 adopt）。
     pub relocated: Vec<String>,
@@ -26,6 +27,7 @@ pub struct ImportReport {
 
 pub fn import_existing(paths: &Paths, dry_run: bool) -> Result<ImportReport> {
     let mut report = ImportReport::default();
+    dedupe_same_name(paths, &mut report, dry_run)?;
     relink_unmanaged(paths, &mut report, dry_run)?;
     let reg = Registry::load(paths)?;
     let mut registered: std::collections::HashSet<String> =
@@ -236,6 +238,80 @@ pub(crate) fn adopt_into_pool(paths: &Paths, name: &str, src: &Path) -> Result<P
     Ok(target)
 }
 
+/// 同名重复登记收敛（先于 relink）：install 曾只查池子目录占用、不查 registry 同名记录，
+/// stale 记录（canonical 目录被外部删）+ 重装会造出同 name 双登记（如 skills.sh/x +
+/// unmanaged/x 同指池子同一路径，同一桥接位两条记录互抢）。收敛规则保守：全组 canonical
+/// 同在池子且同一路径、恰一条 managed（computed_hash=Some）→ 摘多余 unmanaged 记录
+/// （unmanaged 语义即只摘记录不删目录，零物理风险）。canonical 不一致 / 多条 managed
+/// 有物理歧义，不自动裁决，skipped 点名留人工。dry_run 只报告不落盘。
+fn dedupe_same_name(paths: &Paths, report: &mut ImportReport, dry_run: bool) -> Result<()> {
+    let reg = Registry::load(paths)?;
+    let pool = paths.skillkit_skills_dir();
+    let mut by_name: std::collections::BTreeMap<&str, Vec<&SkillMeta>> =
+        std::collections::BTreeMap::default();
+    for m in reg.skills.values() {
+        by_name.entry(m.name.as_str()).or_default().push(m);
+    }
+    let mut to_remove: Vec<String> = Vec::new();
+    for (name, metas) in by_name {
+        if metas.len() < 2 {
+            continue;
+        }
+        let same_pool_path = metas
+            .iter()
+            .all(|m| Path::new(&m.canonical_path).starts_with(&pool))
+            && metas
+                .iter()
+                .all(|m| m.canonical_path == metas[0].canonical_path);
+        let managed_count = metas.iter().filter(|m| m.computed_hash.is_some()).count();
+        if same_pool_path && managed_count == 1 {
+            let dups: Vec<String> = metas
+                .iter()
+                .filter(|m| m.computed_hash.is_none())
+                .map(|m| m.id.clone())
+                .collect();
+            if dry_run {
+                report.skipped.push(format!(
+                    "{name}（同名重复登记待收敛：dry-run 不摘 {}）",
+                    dups.join("、")
+                ));
+            } else {
+                tracing::info!("同名重复登记收敛：{name} 摘除 {}", dups.join("、"));
+                to_remove.extend(dups);
+            }
+        } else {
+            let ids = metas
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>()
+                .join("、");
+            tracing::warn!(
+                "同名重复登记无法自动收敛（canonical 不一致或多条 managed），留人工：{ids}"
+            );
+            report
+                .skipped
+                .push(format!("{name}（同名重复登记待人工处理：{ids}）"));
+        }
+    }
+    if to_remove.is_empty() {
+        return Ok(());
+    }
+    // 摘记录持锁写事务：与并发写方（rescope/install）串行化
+    crate::registry::with_registry(paths, |reg| {
+        for id in &to_remove {
+            reg.remove(id)?;
+        }
+        Ok(())
+    })?;
+    for id in &to_remove {
+        let name = id.rsplit('/').next().unwrap_or(id);
+        report
+            .skipped
+            .push(format!("{name}（同名重复登记已收敛：摘除 {id}）"));
+    }
+    Ok(())
+}
+
 /// 遍历 registry 的 unmanaged global skill：
 /// - canonical 不在池且是真实目录 → adopt 入池 + 更新 canonical_path + 立即 save（对齐 §3.2 顺序）
 /// - canonical 不在池但 dangling/symlink → warn 跳过，**不**补桥接（防自指环，spec §3.3）
@@ -390,6 +466,114 @@ mod tests {
             canonical_path: canonical.to_string_lossy().into_owned(),
         });
         reg.save(paths).unwrap();
+    }
+
+    fn seed_managed_global(paths: &Paths, source: &str, name: &str, canonical: &Path) {
+        let mut reg = Registry::load(paths).unwrap();
+        reg.upsert(SkillMeta {
+            id: Registry::skill_id(source, name),
+            name: name.into(),
+            source: source.into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: Some("hash1".into()),
+            spec: None,
+            installed_at: "t".into(),
+            canonical_path: canonical.to_string_lossy().into_owned(),
+        });
+        reg.save(paths).unwrap();
+    }
+
+    #[test]
+    fn import_dedupes_same_name_pool_dup() {
+        // 事故场景：install 只查目录占用的时代留下同 name 双登记（skills.sh/foo +
+        // unmanaged/foo），canonical 同指池子同一路径，同一桥接位两条记录互抢
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let pool = paths.skillkit_skills_dir().join("foo");
+        make_skill(&paths.skillkit_skills_dir(), "foo");
+        seed_managed_global(&paths, "skills.sh", "foo", &pool);
+        seed_unmanaged_global(&paths, "foo", &pool);
+
+        let report = import_existing(&paths, false).unwrap();
+        let reg = Registry::load(&paths).unwrap();
+        assert!(reg.get("skills.sh/foo").is_ok(), "managed 记录保留");
+        assert!(
+            reg.get("unmanaged/foo").is_err(),
+            "重复的 unmanaged 记录被摘"
+        );
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|s| s.contains("foo") && s.contains("已收敛：摘除 unmanaged/foo")),
+            "收敛动作进 skipped 点名：{:?}",
+            report.skipped
+        );
+        assert!(pool.join("SKILL.md").exists(), "池子目录不动");
+    }
+
+    #[test]
+    fn import_same_name_divergent_canonical_converges_on_second_run() {
+        // canonical 不一致的重复有物理歧义：第一轮只点名，relink 把 unmanaged 入池
+        // （池子权威，冗余副本删）后 canonical 同路，第二轮收敛
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let pool = paths.skillkit_skills_dir().join("foo");
+        make_skill(&paths.skillkit_skills_dir(), "foo");
+        make_skill(&paths.agents_skills_dir(), "foo");
+        seed_managed_global(&paths, "skills.sh", "foo", &pool);
+        seed_unmanaged_global(&paths, "foo", &paths.agents_skills_dir().join("foo"));
+
+        let r1 = import_existing(&paths, false).unwrap();
+        assert!(
+            Registry::load(&paths).unwrap().get("unmanaged/foo").is_ok(),
+            "canonical 不一致第一轮不摘"
+        );
+        assert!(
+            r1.skipped
+                .iter()
+                .any(|s| s.contains("待人工处理") || s.contains("待收敛")),
+            "第一轮 skipped 点名：{:?}",
+            r1.skipped
+        );
+
+        let r2 = import_existing(&paths, false).unwrap();
+        let reg = Registry::load(&paths).unwrap();
+        assert!(reg.get("skills.sh/foo").is_ok());
+        assert!(
+            reg.get("unmanaged/foo").is_err(),
+            "第二轮 canonical 已同路，收敛"
+        );
+        assert!(
+            r2.skipped
+                .iter()
+                .any(|s| s.contains("已收敛：摘除 unmanaged/foo")),
+            "{:?}",
+            r2.skipped
+        );
+        assert!(pool.join("SKILL.md").exists(), "池子权威保留");
+    }
+
+    #[test]
+    fn import_dry_run_reports_dup_without_removal() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let pool = paths.skillkit_skills_dir().join("foo");
+        make_skill(&paths.skillkit_skills_dir(), "foo");
+        seed_managed_global(&paths, "skills.sh", "foo", &pool);
+        seed_unmanaged_global(&paths, "foo", &pool);
+
+        let report = import_existing(&paths, true).unwrap();
+        assert!(
+            Registry::load(&paths).unwrap().get("unmanaged/foo").is_ok(),
+            "dry-run 不摘记录"
+        );
+        assert!(
+            report.skipped.iter().any(|s| s.contains("dry-run 不摘")),
+            "dry-run 报告待收敛：{:?}",
+            report.skipped
+        );
     }
 
     #[test]

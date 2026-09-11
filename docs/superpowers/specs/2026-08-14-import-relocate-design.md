@@ -145,6 +145,7 @@ imported N（入池迁址 M，含存量补迁 K），reinstalled ...，skipped .
 | rename / FS 失败（权限 / 跨文件系统 EXDEV） | `SkillkitError::Io`（`error.rs:25-26` `#[from]`，adopt 裸 `?` 自动映射），canonical 未动、registry 不落盘；保留原始 io 信息（如 EXDEV「Cross-device link」） |
 | 主循环扫到 `~/.agents/skills/<name>` 是 symlink（agents 分支 `skip_symlink=false`） | skipped，不 adopt（`rename` symlink 只移链接、池中 canonical 变悬空 symlink 破坏模型），对齐 `import.rs:129`「只迁真实目录」 |
 | 跨目录同名副本（同名 skill 散落多个目录） | import dedup 只登记首个（`import.rs:64-70`），relink 只迁 registry 记录的 canonical 那份。codex/cursor 副本留原地成优雅 orphan（桥接不碰这两个目录）；但 agents+claude 同时有同名真实目录副本时，首个 adopt 入池后建 claude 桥接会撞 claude 真实目录占位 → 降级 skipped 点名（归入上面桥接占位行同等待遇），用户手动删 claude 副本后重跑收敛 |
+| registry 同名重复登记（同 name 两条记录，如 install 只查目录占用时代：stale unmanaged 记录 + 重装 → `skills.sh/x` 与 `unmanaged/x` 同指池子一路径，桥接位互抢） | 双向收敛（2026-09-11）：**堵源**——install 的 with_registry upsert 前查「同名且 canonical 在池」的他人记录，撞即 `SkillPoolOccupied` 点名占用方（stale 记录绕得过 `target.exists()`）；**收敛**——import 步骤 -1 `dedupe_same_name`：全组 canonical 同池同路径且恰一条 managed → 摘多余 unmanaged 记录（只摘记录零物理风险），skipped 点名「已收敛」；canonical 不一致 / 多条 managed 有物理歧义 → skipped 点名留人工（canonical 不一致时 relink 先归槽，下一轮 import 即满足同路条件，幂等收敛） |
 
 uninstall 连带影响（行为不变，仅位置变）：unmanaged 的 `computed_hash=None`，`uninstall`（`install.rs:61`）本就不删 canonical。改后 canonical 在池子，uninstall 仍只摘 registry 记录 → 池子留孤儿目录 + 桥接 symlink 变 dangling。下次 `import-existing` 的 relink 不会重新登记孤儿（canonical 已在池，跳过归池），需用户手动 `rm` 池子目录 + 残留 symlink，或在 GUI remove。本 spec 不改 uninstall 范围（YAGNI），仅声明该连带影响。
 

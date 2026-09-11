@@ -6,7 +6,7 @@ use crate::npx;
 use crate::paths::Paths;
 use crate::registry::{Registry, Scope, SkillMeta};
 use crate::source::SourcesStore;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 安装：调 npx skills add 下载到池子，记 computed_hash，登记 registry。
 /// `package` 由调用方解析（固定源用 source.package；registry 源由 CLI 层 find 选）。
@@ -58,6 +58,19 @@ pub fn install(
     // 登记 registry：持锁写事务（npx 下载在锁外，网络操作不占锁），
     // 与并发写方（import/rescope）串行化，防旧快照 save 互相覆盖。
     crate::registry::with_registry(paths, |reg| {
+        // 同名已有登记且 canonical 在池子 → 物理上共用一份目录，拒绝静默造出第二条
+        // 同名登记（上方 target.exists() 只拦得住目录还在的情形，拦不住 stale 记录）。
+        let pool = paths.skillkit_skills_dir();
+        if let Some(owner) = reg.skills.values().find(|m| {
+            m.id != meta.id
+                && m.name == skill_name
+                && Path::new(&m.canonical_path).starts_with(&pool)
+        }) {
+            return Err(SkillkitError::SkillPoolOccupied {
+                name: skill_name.to_string(),
+                owner_id: Some(owner.id.clone()),
+            });
+        }
         reg.upsert(meta.clone());
         Ok(())
     })?;
@@ -266,6 +279,42 @@ mod tests {
             .get("unmanaged/foo")
             .is_err());
         assert!(Registry::load(&paths).unwrap().get("skills.sh/foo").is_ok());
+    }
+
+    /// 非 force 安装撞 stale 同名登记（registry 有记录、canonical 目录已被外部删）：
+    /// 报 SkillPoolOccupied 并引导清理，不静默造出同 name 双登记。
+    /// WHY：target.exists() 只拦得住目录还在的情形，stale 记录会绕过它直达 upsert。
+    #[test]
+    fn install_rejects_stale_same_name_registration() {
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        SourcesStore::ensure_default(&paths).unwrap();
+        let _guard = fake_npx_add(&paths);
+
+        // stale 记录：canonical 在池子路径，但目录不存在
+        let stale = paths.skillkit_skills_dir().join("foo");
+        let mut reg = Registry::load(&paths).unwrap();
+        reg.upsert(SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            spec: None,
+            installed_at: "2026-07-31T00:00:00Z".into(),
+            canonical_path: stale.to_string_lossy().into_owned(),
+        });
+        reg.save(&paths).unwrap();
+
+        let err = install(&paths, "skills.sh", "foo", "o/r@foo", Scope::Local, false).unwrap_err();
+        assert!(
+            matches!(err, SkillkitError::SkillPoolOccupied { .. }),
+            "stale 同名登记应报占用：{err:?}"
+        );
+        let reg = Registry::load(&paths).unwrap();
+        assert_eq!(reg.skills.len(), 1, "不产生第二条同名登记");
+        assert!(reg.get("unmanaged/foo").is_ok(), "stale 记录原样保留待人工");
     }
 
     /// force 覆盖孤儿目录（registry 无记录）：目录被清掉后正常安装登记。
