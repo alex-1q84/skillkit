@@ -87,7 +87,18 @@ pub fn list_duplicates(paths: &Paths) -> Result<DupesReport> {
 
 /// 生产用回收站实现（macOS 走 NSWorkspace，删入 Finder 可见的废纸篓）。
 /// 壳层把它作为 `discard` 传入 trash/adopt；测试传临时目录重定向的假实现。
+/// core 内部调用方（uninstall）不可注入——单测与 e2e（跑真二进制）都靠
+/// SKILLKIT_TEST_TRASH_DIR 运行时重定向到临时目录；该变量名为测试基建专用，
+/// 生产环境不会设置。
 pub fn system_trash(p: &Path) -> Result<()> {
+    if let Ok(dir) = std::env::var("SKILLKIT_TEST_TRASH_DIR") {
+        let dest = Path::new(&dir).join(p.file_name().ok_or_else(|| SkillkitError::Tool {
+            message: format!("回收站重定向：{} 缺文件名", p.display()),
+        })?);
+        return std::fs::rename(p, &dest).map_err(|e| SkillkitError::Tool {
+            message: e.to_string(),
+        });
+    }
     trash::delete(p).map_err(|e| SkillkitError::Tool {
         message: format!("移入回收站失败：{e}"),
     })

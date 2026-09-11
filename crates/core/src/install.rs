@@ -94,7 +94,7 @@ fn clear_occupied(paths: &Paths, skill_name: &str) -> Result<()> {
         .map(|m| m.id.clone())
         .collect();
     for id in ids {
-        uninstall(paths, &id)?;
+        uninstall_inner(paths, &id, false)?;
     }
     let target = paths.skillkit_skills_dir().join(skill_name);
     if target.exists() {
@@ -104,10 +104,19 @@ fn clear_occupied(paths: &Paths, skill_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// 卸载：managed 撤 global 桥接 + 删 canonical 池子 + 同步 npx skills lock；unmanaged
-/// （computed_hash=None）只摘 registry 记录，不删目录（不是 skillkit 装的，避免误删用户
-/// 手工放置的 skill）。
+/// 卸载：managed 撤 global 桥接 + canonical 目录送系统回收站（可逆）+ 同步 npx skills lock；
+/// unmanaged（computed_hash=None）撤 global 桥接（skillkit 建的，尽力撤，占位守卫
+/// 报错降级 warn 不阻塞）+ canonical 在池子内的目录送系统回收站（可逆）+ 摘记录——
+/// adopt 入池后 unmanaged 的 canonical 已是管理库存货，只摘记录会留下无人认领的
+/// 池子目录和桥接（用户感知为「删除按钮删不干净」）。canonical 在池外的真实目录
+/// 仍保留（防误删用户手工放置的 skill，保留时 warn 点名路径）。
 pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
+    uninstall_inner(paths, id, true)
+}
+
+/// `trash_pool_canonical=false` 供 clear_occupied（force 覆盖清场）用：canonical 直接
+/// 硬删（覆盖语义本就紧跟替换，无需回收站，也避免测试期误触真实系统废纸篓）。
+fn uninstall_inner(paths: &Paths, id: &str, trash_pool_canonical: bool) -> Result<()> {
     let meta = Registry::load(paths)?.get(id)?.clone();
     if meta.computed_hash.is_some() {
         // 先撤 global 桥接（~/.agents/skills/ + ~/.claude/skills/）再删 canonical，
@@ -116,10 +125,38 @@ pub fn uninstall(paths: &Paths, id: &str) -> Result<()> {
         crate::symlink::remove_global_claude(paths, &meta)?;
         let target = PathBuf::from(&meta.canonical_path);
         if target.exists() {
-            std::fs::remove_dir_all(&target)
-                .map_err(|_| SkillkitError::RemoveFailed(target.clone()))?;
+            if trash_pool_canonical {
+                // 用户交互卸载：canonical 进回收站，误删可从废纸篓找回
+                crate::dupes::system_trash(&target)?;
+            } else {
+                std::fs::remove_dir_all(&target)
+                    .map_err(|_| SkillkitError::RemoveFailed(target.clone()))?;
+            }
         }
         let _ = npx::remove(paths, &meta.name); // 同步 lock，失败不阻塞（registry 是事实源）
+    } else {
+        // 桥接尽力撤：agents 位被第三方重建为真实目录时守卫报错，降级 warn，
+        // 不阻塞摘记录（否则用户删不掉这条登记）
+        if meta.scope == Scope::Global {
+            if let Err(e) = crate::symlink::remove_global_claude(paths, &meta) {
+                tracing::warn!(error = ?e, "unmanaged {} 桥接撤除失败，继续摘记录", meta.id);
+            }
+        }
+        let canon = PathBuf::from(&meta.canonical_path);
+        if canon.starts_with(paths.skillkit_skills_dir()) && canon.is_dir() {
+            if trash_pool_canonical {
+                crate::dupes::system_trash(&canon)?;
+            } else {
+                std::fs::remove_dir_all(&canon)
+                    .map_err(|_| SkillkitError::RemoveFailed(canon.clone()))?;
+            }
+        } else if canon.is_dir() {
+            tracing::warn!(
+                "unmanaged {} 的 canonical {} 在池外，按防误删约定保留目录，仅摘记录",
+                meta.id,
+                canon.display()
+            );
+        }
     }
     // 摘记录：物理删除/npx 在锁外（秒级），锁内重读再 remove，
     // 防基于删除前快照的 save 把并发写方（rescope/import）的写入覆盖回滚。
@@ -139,7 +176,12 @@ mod tests {
     use crate::registry::{Registry, Scope, SkillMeta};
     use tempfile::tempdir;
 
-    /// unmanaged skill（computed_hash=None）uninstall 时：只摘 registry 记录，不删 canonical 目录。
+    /// unmanaged 的 canonical 在池外（用户手工放置的目录）→ 只摘 registry 记录，
+    /// 目录保留（防误删约定不变）。池内 canonical 的「撤桥接 + 回收站 + 摘记录」
+    /// 行为由 e2e remove_unmanaged_default_confirm_with_stdin_y 覆盖——e2e 是独立
+    /// 进程，可安全用 SKILLKIT_TEST_TRASH_DIR 重定向回收站；本进程内 set_var 与
+    /// 并行测试的 fake_npx_add set PATH 存在竞态（macOS 并发 setenv 不安全），
+    /// 故不在单测覆盖。
     #[test]
     fn uninstall_unmanaged_keeps_directory() {
         let tmp = tempdir().unwrap();
@@ -212,6 +254,104 @@ mod tests {
             !claude_link.exists() && !claude_link.is_symlink(),
             "~/.claude/skills/ 桥接不应残留 dangling"
         );
+    }
+
+    /// unmanaged 的 canonical 在池内（import adopt 入池后的正常形态）：
+    /// 撤 global 桥接 + 池内目录送回收站（SKILLKIT_TEST_TRASH_DIR 重定向）+ 摘记录。
+    /// 环境变量操作持 ENV_LOCK，与 fake_npx_add 系测试串行。
+    #[test]
+    fn uninstall_unmanaged_pool_canonical_trashes_and_unlinks() {
+        let _env = env_lock();
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let trash_dir = tmp.path().join(".Trash");
+        std::fs::create_dir_all(&trash_dir).unwrap();
+        std::env::set_var("SKILLKIT_TEST_TRASH_DIR", &trash_dir);
+
+        let canon = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        let mut reg = Registry::load(&paths).unwrap();
+        reg.upsert(SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: None,
+            spec: None,
+            installed_at: "2026-07-31T00:00:00Z".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        });
+        reg.save(&paths).unwrap();
+        let meta = Registry::load(&paths)
+            .unwrap()
+            .get("unmanaged/foo")
+            .unwrap()
+            .clone();
+        crate::symlink::ensure_global_claude(&paths, &meta).unwrap();
+
+        uninstall(&paths, "unmanaged/foo").unwrap();
+
+        assert!(
+            !paths.agents_skills_dir().join("foo").exists()
+                && !paths.claude_skills_dir().join("foo").exists(),
+            "桥接应撤除不留 dangling"
+        );
+        assert!(!canon.exists(), "池内目录原位消失");
+        assert!(
+            trash_dir.join("foo").join("SKILL.md").exists(),
+            "池内目录进回收站可捞回"
+        );
+        assert!(Registry::load(&paths)
+            .unwrap()
+            .get("unmanaged/foo")
+            .is_err());
+        std::env::remove_var("SKILLKIT_TEST_TRASH_DIR");
+    }
+
+    /// managed 卸载同样走回收站（用户交互路径）：canonical 进回收站可捞回，
+    /// registry 与 lock 同步摘除；force 覆盖的清场路径（uninstall_inner false）仍硬删。
+    #[test]
+    fn uninstall_managed_pool_canonical_trashes() {
+        let _env = env_lock();
+        let tmp = tempdir().unwrap();
+        let paths = Paths::new(tmp.path().to_path_buf());
+        let trash_dir = tmp.path().join(".Trash");
+        std::fs::create_dir_all(&trash_dir).unwrap();
+        std::env::set_var("SKILLKIT_TEST_TRASH_DIR", &trash_dir);
+
+        let canon = paths.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        let meta = SkillMeta {
+            id: "skills.sh/foo".into(),
+            name: "foo".into(),
+            source: "skills.sh".into(),
+            scope: Scope::Global,
+            version: None,
+            computed_hash: Some("abc".into()),
+            spec: None,
+            installed_at: "2026-08-21T00:00:00Z".into(),
+            canonical_path: canon.to_string_lossy().into_owned(),
+        };
+        let mut reg = Registry::load(&paths).unwrap();
+        reg.upsert(meta.clone());
+        reg.save(&paths).unwrap();
+        crate::symlink::ensure_global_claude(&paths, &meta).unwrap();
+
+        uninstall(&paths, "skills.sh/foo").unwrap();
+
+        assert!(!canon.exists(), "池内目录原位消失");
+        assert!(
+            trash_dir.join("foo").join("SKILL.md").exists(),
+            "managed 目录进回收站可捞回"
+        );
+        assert!(Registry::load(&paths)
+            .unwrap()
+            .get("skills.sh/foo")
+            .is_err());
+        std::env::remove_var("SKILLKIT_TEST_TRASH_DIR");
     }
 
     /// managed skill（computed_hash=Some）uninstall 仍删 canonical 目录（行为不变）。
@@ -334,10 +474,21 @@ mod tests {
         assert!(Registry::load(&paths).unwrap().get("skills.sh/foo").is_ok());
     }
 
+    /// 环境变量操作互斥锁：set_var/getenv 在 macOS 并发不安全（进程级环境表），
+    /// 凡测试中改环境变量（PATH 注入 / 回收站重定向）都持此锁，把相关测试串行化。
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// 测试用假 npx：响应 `skills@latest add <pkg> -s <skill> ...`，建 skill 目录 +
     /// 写 lock（computedHash=hashnew），模拟 npx 成功安装；其余调用退出码 1。
-    /// RAII 守卫包 PATH 变更，drop 时还原，避免污染并行测试。
+    /// RAII 守卫包 PATH 变更，drop 时还原；持 ENV_LOCK 防与其他环境变量测试竞态。
     fn fake_npx_add(paths: &Paths) -> PathGuard {
+        let guard = env_lock();
         let bin = paths.skillkit_dir().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let sh = bin.join("npx");
@@ -366,12 +517,13 @@ mod tests {
         }
         let old = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", format!("{}:{}", bin.display(), old));
-        PathGuard { old }
+        PathGuard { old, _env: guard }
     }
 
-    /// RAII 守卫：构造时备份 PATH，drop 时还原，避免污染并行测试。
+    /// RAII 守卫：构造时备份 PATH，drop 时还原；持 ENV_LOCK 到 drop，串行化环境变量测试。
     struct PathGuard {
         old: String,
+        _env: std::sync::MutexGuard<'static, ()>,
     }
     impl Drop for PathGuard {
         fn drop(&mut self) {

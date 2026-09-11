@@ -116,7 +116,7 @@ skillkit remove <id> --yes                       # 跳过确认
 skillkit remove <id> --json                      # 输出 {id,removed_canonical}（隐含 --yes）
 ```
 
-unmanaged skill（无源存量）只删登记不删 canonical 目录（迁池后 canonical 在 ~/.skillkit/.agents/skills/）。
+卸载一律进系统回收站（可从废纸篓找回）：managed 撤 global 桥接 + canonical 目录移入回收站 + 删登记 + 同步 npx lock；unmanaged（无源存量）撤 global 桥接 + 池内 canonical 目录移入回收站 + 删登记；canonical 在池外的手工目录仍保留（防误删），仅删登记。force 覆盖安装的清场不走回收站（覆盖语义直接替换）。
 
 ### serve — Web GUI
 

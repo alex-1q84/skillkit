@@ -26,6 +26,14 @@ impl Env {
         self.home.path()
     }
 
+    /// 假回收站目录（unmanaged 卸载的池内目录经 SKILLKIT_TEST_TRASH_DIR 重定向到此，
+    /// 防止 e2e 真删进系统废纸篓）。
+    fn trash_dir(&self) -> PathBuf {
+        let d = self.home_path().join(".trash");
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     /// 建一个 SKILL.md 存量目录（模拟用户手工放置）。
     fn make_skill(&self, dir: &str, name: &str) -> PathBuf {
         let p = self.home_path().join(dir).join(name);
@@ -242,22 +250,39 @@ fn list_marks_unmanaged_skill() {
 
 #[test]
 fn remove_unmanaged_default_confirm_with_stdin_y() {
-    // Given：import 登记 unmanaged
+    // Given：import 登记 unmanaged（adopt 入池，原位 symlink 桥接）
     let env = Env::new();
     env.make_skill(".agents/skills", "legacy-c");
     env.skillkit().args(["import-existing"]).assert().success();
+    assert!(
+        env.home_path()
+            .join(".skillkit/.agents/skills/legacy-c/SKILL.md")
+            .exists(),
+        "import 后 canonical 已入池"
+    );
 
     // When：默认确认，stdin 给 y
     env.skillkit()
         .args(["remove", "unmanaged/legacy-c"])
+        .env("SKILLKIT_TEST_TRASH_DIR", env.trash_dir())
         .write_stdin("y\n")
         .assert()
         .success();
 
-    // Then：目录保留（unmanaged 保护），registry 移除
+    // Then：桥接撤除、池内目录进回收站（可捞回）、registry 移除——从管理库彻底消失
     assert!(
-        env.home_path().join(".agents/skills/legacy-c").exists(),
-        "unmanaged 目录不能被删"
+        !env.home_path().join(".agents/skills/legacy-c").exists(),
+        "原位 symlink 桥接应撤除"
+    );
+    assert!(
+        !env.home_path()
+            .join(".skillkit/.agents/skills/legacy-c")
+            .exists(),
+        "池内 canonical 不再残留"
+    );
+    assert!(
+        env.trash_dir().join("legacy-c/SKILL.md").exists(),
+        "池内目录进回收站可捞回"
     );
     assert!(registry_ids(&env).is_empty(), "registry 记录应移除");
 }
