@@ -20,6 +20,10 @@
       <button>导入存量 skill</button>
       <span id="import-indicator" class="htmx-indicator">导入中…</span>
     </form>
+    <button hx-get="/{{ token }}/skills/dupes"
+            hx-target="#dupes-results" hx-swap="outerHTML"
+            hx-indicator="#dupes-indicator">同名副本</button>
+    <span id="dupes-indicator" class="htmx-indicator">扫描中…</span>
     <form class="inline" hx-post="/{{ token }}/skills/upgrade-all"
           hx-target="body" hx-swap="outerHTML" hx-indicator="#upgrade-all-indicator">
       <button>全部升级</button>
@@ -27,6 +31,8 @@
     </form>
   </div>
 </div>
+
+<div id="dupes-results"></div>
 
 {# scope「全部」：无任何过滤才亮。selected 不进 chip URL——layout JS 在请求前以 DOM 实时选中注入 #}
 <div class="filter-chips" id="skill-scope-filter">

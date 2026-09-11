@@ -2,6 +2,7 @@
 pub mod apply;
 pub mod config;
 pub mod detect;
+pub mod dupes;
 pub mod error;
 pub mod import;
 pub mod install;
@@ -23,6 +24,9 @@ pub use apply::{
     LocalTarget, StatusView,
 };
 pub use detect::detect_agents;
+pub use dupes::{
+    adopt_duplicate, list_duplicates, system_trash, trash_duplicate, DupesReport, DuplicateEntry,
+};
 pub use error::{Result, SkillkitError};
 pub use import::{import_existing, ImportReport};
 pub use install::{install, uninstall};

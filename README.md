@@ -98,6 +98,16 @@ skillkit import-existing --json                  # JSON 输出
 
 无源（unmanaged）skill 物理迁入 canonical 池，原位置（`~/.agents/skills/`、`~/.claude/skills/`）用 symlink 桥接取代；已登记的存量 unmanaged 也会被补迁入池（幂等）。
 
+### dupes — 同名副本处理
+
+`~/.agents/skills/` 下与 registry 同名、但不被任何登记认领的冗余目录（外部工具写回 / 手工拷贝的产物，import 按名去重会跳过它们）：
+
+```bash
+skillkit dupes list                    # 列出同名副本 + 与池子正主的内容对比
+skillkit dupes trash <name>...         # 副本移入系统回收站（可从废纸篓找回），global 登记自动补建桥接
+skillkit dupes adopt <name>            # 以副本覆盖池子正主（正主移入回收站；仅 unmanaged 登记）
+```
+
 ### remove — 卸载 skill
 
 ```bash

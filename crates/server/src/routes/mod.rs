@@ -102,6 +102,15 @@ pub fn protected() -> Router<AppState> {
             post(skills::install_candidate),
         )
         .route("/{token}/skills/import", post(skills::import))
+        .route("/{token}/skills/dupes", get(skills::dupes_list))
+        .route(
+            "/{token}/skills/dupes/{name}/trash",
+            post(skills::dupes_trash),
+        )
+        .route(
+            "/{token}/skills/dupes/{name}/adopt",
+            post(skills::dupes_adopt),
+        )
         .route(
             "/{token}/skills/install-local",
             get(skills::install_local_form).post(skills::install_local),

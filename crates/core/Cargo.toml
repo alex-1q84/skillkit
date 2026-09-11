@@ -19,6 +19,7 @@ fs2 = "0.4"
 zip = "2"
 sha2 = "0.10"
 tempfile = "3"
+trash = "5"
 
 [lints]
 workspace = true

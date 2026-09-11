@@ -904,6 +904,77 @@ fn render_str(rendered: askama::Result<String>) -> Response {
     }
 }
 
+/// 同名副本面板（fragments/dupes_results.html）：~/.agents/skills/ 下与 registry
+/// 同名、不被任何记录认领的冗余目录。note 承载 trash/adopt 的操作反馈（含失败原因，
+/// 面板内直接可见，不跳错误页）。
+#[derive(Template)]
+#[template(path = "fragments/dupes_results.html")]
+pub struct DupesTpl<'a> {
+    pub token: &'a str,
+    pub entries: Vec<skillkit_core::DuplicateEntry>,
+    pub note: Option<&'a str>,
+}
+
+fn render_dupes(token: &str, paths: &skillkit_core::Paths, note: Option<String>) -> Response {
+    let entries = match skillkit_core::list_duplicates(paths) {
+        Ok(report) => report.entries,
+        Err(e) => return error_response(format!("同名副本列表失败：{e}")),
+    };
+    let tpl = DupesTpl {
+        token,
+        entries,
+        note: note.as_deref(),
+    };
+    match tpl.render() {
+        Ok(body) => Html(body).into_response(),
+        Err(e) => error_response(format!("同名副本面板渲染失败：{e}")),
+    }
+}
+
+/// GET /skills/dupes：同名副本面板。list 与渲染都在 blocking 线程（对齐 import）。
+pub async fn dupes_list(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || render_dupes(&token, &paths, None))
+        .await
+        .unwrap_or_else(|_| error_response("同名副本列表失败，请重试"))
+}
+
+/// POST /skills/dupes/{name}/trash：副本移入系统回收站（可逆），操作+重列面板一次完成。
+pub async fn dupes_trash(
+    State(state): State<AppState>,
+    Path((token, name)): Path<(String, String)>,
+) -> Response {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || {
+        let note = match skillkit_core::trash_duplicate(&paths, &name, &skillkit_core::system_trash)
+        {
+            Ok(n) => n,
+            Err(e) => format!("删除失败：{e}"),
+        };
+        render_dupes(&token, &paths, Some(note))
+    })
+    .await
+    .unwrap_or_else(|_| error_response("删除失败，请重试"))
+}
+
+/// POST /skills/dupes/{name}/adopt：以副本覆盖池子正主（正主移入回收站）。
+pub async fn dupes_adopt(
+    State(state): State<AppState>,
+    Path((token, name)): Path<(String, String)>,
+) -> Response {
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || {
+        let note = match skillkit_core::adopt_duplicate(&paths, &name, &skillkit_core::system_trash)
+        {
+            Ok(n) => n,
+            Err(e) => format!("覆盖失败：{e}"),
+        };
+        render_dupes(&token, &paths, Some(note))
+    })
+    .await
+    .unwrap_or_else(|_| error_response("覆盖失败，请重试"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

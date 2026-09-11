@@ -1,0 +1,52 @@
+{# 同名副本面板：~/.agents/skills/ 下不被 registry 认领的冗余目录，供人工裁决删除/覆盖 #}
+<div id="dupes-results">
+  <div class="find-head">
+    <span class="find-title">同名副本：~/.agents/skills/ 下不被 registry 认领的目录</span>
+    <button class="x" title="收起" onclick="this.closest('#dupes-results').remove()">×</button>
+  </div>
+  {% if let Some(n) = note %}<p class="summary">{{ n }}</p>{% endif %}
+  {% if entries.is_empty() %}
+  <p>{% if note.is_some() %}同名副本已清空，~/.agents/skills/ 与 registry 收敛。{% else %}无同名副本，无需处理。{% endif %}</p>
+  {% else %}
+  <table class="data">
+    <thead><tr>
+      <th>副本（~/.agents/skills/）</th><th>与池子正主对比</th><th>registry 占用方</th><th>ops</th>
+    </tr></thead>
+    <tbody>
+    {% for e in entries %}
+    <tr>
+      <td class="mono">{{ e.name }}
+        <div class="spec" title="{{ e.path }}">{{ e.path }}</div>
+      </td>
+      <td>
+        {% if let Some(true) = e.identical_with_canonical %}一致
+        {% else if let Some(false) = e.identical_with_canonical %}<span class="tag local">有差异</span>
+        {% else %}<span class="tag unmanaged">无法对比</span>{% endif %}
+      </td>
+      <td>
+        {% for id in &e.owner_ids %}<span class="tag src">{{ id }}</span> {% endfor %}
+        {% if e.owner_managed %}<div class="spec">含 managed 登记：覆盖入库被拒绝，只可删至回收站</div>{% endif %}
+      </td>
+      <td class="ops">
+        <form class="inline"
+              hx-post="/{{ token }}/skills/dupes/{{ e.name }}/trash"
+              hx-target="#dupes-results" hx-swap="outerHTML"
+              hx-confirm="将 {{ e.name }} 移入系统回收站？（可在废纸篓找回）">
+          <button class="pill-btn x">删至回收站</button>
+        </form>
+        {% if !e.owner_managed %}
+        <form class="inline"
+              hx-post="/{{ token }}/skills/dupes/{{ e.name }}/adopt"
+              hx-target="#dupes-results" hx-swap="outerHTML"
+              hx-confirm="用 {{ e.name }} 副本覆盖池子正主？（正主移入回收站，可找回）">
+          <button class="pill-btn u">覆盖入库</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="spec">删至回收站：副本进废纸篓，global 登记自动补建桥接。覆盖入库：以副本替换池子正主（正主进废纸篓），registry 不动。</p>
+  {% endif %}
+</div>

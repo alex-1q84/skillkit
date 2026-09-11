@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod commands;
 
+use commands::dupes::DupesCmd;
 use commands::import::{run as run_import, ImportExistingCmd};
 use commands::install::InstallCmd;
 use commands::profile::ProfileCmd;
@@ -35,6 +36,8 @@ enum Cmd {
     Rescope(RescopeCmd),
     /// 扫描导入现有 skill（存量目录登记进 registry）
     ImportExisting(ImportExistingCmd),
+    /// 处理 ~/.agents/skills/ 同名冗余副本（列出/删至回收站/覆盖入库）
+    Dupes(DupesCmd),
     /// profile 候选集管理
     Profile(ProfileCmd),
     /// project 精确管理
@@ -62,6 +65,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Remove(cmd) => commands::skill::run_remove(cmd)?,
         Cmd::Rescope(cmd) => commands::rescope::run_rescope(cmd)?,
         Cmd::ImportExisting(cmd) => run_import(cmd)?,
+        Cmd::Dupes(cmd) => commands::dupes::run(cmd)?,
         Cmd::Profile(cmd) => commands::profile::run(cmd)?,
         Cmd::Project(cmd) => commands::project::run(cmd)?,
         Cmd::Upgrade(cmd) => run_upgrade(cmd)?,
