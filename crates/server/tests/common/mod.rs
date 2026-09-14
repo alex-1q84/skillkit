@@ -26,12 +26,18 @@ pub async fn body_string(resp: Response<Body>) -> String {
 
 /// 前置一个假 npx 到 PATH，响应 skills@latest 的 find/add/update。
 /// RAII guard：drop 还原 PATH，避免污染其他测试。
+/// 持 ENV_LOCK 全程互斥：set_var/get_var 在 macOS 并发不安全（进程级环境表），
+/// 多个 fake_npx 测试并行时 PATH 注入/还原会互相覆盖，handler 随机找不到 npx。
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub struct NpxGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
     old_path: String,
 }
 
 impl Drop for NpxGuard {
     fn drop(&mut self) {
+        // _lock 在此 drop，PATH 还原与注入同锁串行
         if self.old_path.is_empty() {
             std::env::remove_var("PATH");
         } else {
@@ -43,6 +49,9 @@ impl Drop for NpxGuard {
 /// 在 paths.skillkit_dir()/bin 放假 npx，前置 PATH。cwd（skillkit_dir）由 core 的 npx() 设置，
 /// 假 npx 在 cwd 写 skills-lock.json / .agents/skills，与真实 npx skills 行为同构。
 pub fn fake_npx(paths: &Paths) -> NpxGuard {
+    let lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let bin = paths.skillkit_dir().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let sh = bin.join("npx");
@@ -74,5 +83,8 @@ pub fn fake_npx(paths: &Paths) -> NpxGuard {
     }
     let old = std::env::var("PATH").unwrap_or_default();
     std::env::set_var("PATH", format!("{}:{}", bin.display(), old));
-    NpxGuard { old_path: old }
+    NpxGuard {
+        _lock: lock,
+        old_path: old,
+    }
 }
