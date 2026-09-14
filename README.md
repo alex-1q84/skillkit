@@ -7,6 +7,10 @@ Rust 单二进制，CLI（供 AI agent 高频调用）+ 本地 web GUI（供人�
 ## 安装
 
 ```bash
+# Homebrew（Apple Silicon macOS）
+brew install alex-1q84/tap/skillkit
+
+# 或从源码编译
 cargo install --path crates/cli
 ```
 

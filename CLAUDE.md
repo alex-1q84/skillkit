@@ -11,7 +11,7 @@ skillkit 是 AI agent skill 的统一管理工具：设定安装源、记录并�
 - Rust（edition 2021）+ Axum，单二进制。
 - 前端 htmx + Askama（服务端渲染片段）+ SortableJS（拖拽），静态资源经 `rust-embed` 嵌入二进制，无独立前端工程。
 - **前端不强制零 JS**：可用轻量原生 JS / htmx 增强交互（如实时预览、事件互斥）；但**禁止 React / Vue 等重型前端框架**，不引入 node 构建链，保持单二进制零运行时依赖。
-- 分发：GitHub Release 预编译二进制（aarch64）+ mac-config 本地 tap formula，不走 crates.io（缓行）。发版流程见 `docs/release.md`（§11）。
+- 分发：GitHub Release 预编译二进制（aarch64）+ 公开 tap `alex-1q84/homebrew-tap`（release workflow 自动更新 formula），不走 crates.io（缓行）。发版流程见 `docs/release.md`。
 
 ## 3. 架构（三层共享 core）
 
@@ -129,4 +129,4 @@ make e2e-cli         # CLI 全链路端到端（assert_cmd 驱动真实二进制
 
 ## 11. 发版流程
 
-打 tag → CI 自动出 Release（tarball + sha256.txt）→ 回填 mac-config `Formula/skillkit.rb` → `just install_skillkit`。完整步骤、版本号约定与坑位备忘见 `docs/release.md`。
+打 tag → CI 自动出 Release（tarball + sha256.txt）并自动更新公开 tap `alex-1q84/homebrew-tap` 的 formula → 本机 `brew upgrade skillkit` 验证。完整步骤、版本号约定与坑位备忘见 `docs/release.md`。

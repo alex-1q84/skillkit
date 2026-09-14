@@ -52,3 +52,46 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*.tar.gz dist/sha256.txt
+      # 把新版本 + sha256 写入 alex-1q84/homebrew-tap，用户 brew upgrade 即可拿到新版。
+      # TAP_TOKEN 是对 homebrew-tap 有写权限的 PAT（gh secret set TAP_TOKEN 配置），未配置时跳过本步。
+      - name: 更新 Homebrew tap
+        if: ${{ secrets.TAP_TOKEN != '' }}
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(awk '{print $1}' dist/sha256.txt)
+          git clone -q https://x-access-token:${TAP_TOKEN}@github.com/alex-1q84/homebrew-tap.git tap-repo
+          mkdir -p tap-repo/Formula
+          cat > tap-repo/Formula/skillkit.rb <<EOF
+          class Skillkit < Formula
+            desc "AI agent skill 统一管理工具"
+            homepage "https://github.com/alex-1q84/skillkit"
+            version "${VERSION}"
+            license "MIT"
+
+            # CI 只产出 aarch64-apple-darwin 二进制，其余平台暂不提供
+            depends_on :macos
+            depends_on arch: :arm64
+
+            url "https://github.com/alex-1q84/skillkit/releases/download/v${VERSION}/skillkit-${VERSION}-aarch64-apple-darwin.tar.gz"
+            sha256 "${SHA}"
+
+            def install
+              bin.install "skillkit"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/skillkit --version")
+            end
+          end
+          EOF
+          cd tap-repo
+          git add Formula/skillkit.rb
+          if git diff --cached --quiet; then
+            echo "formula 无变化，跳过"
+          else
+            git -c user.name=github-actions[bot] -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit -q -m "skillkit ${GITHUB_REF_NAME}"
+            git push -q origin main
+          fi
