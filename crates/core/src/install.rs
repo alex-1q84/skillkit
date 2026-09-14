@@ -219,8 +219,14 @@ mod tests {
     /// 不留 dangling symlink。
     #[test]
     fn uninstall_global_managed_removes_bridge_links() {
+        // managed 卸载走 system_trash：必须持锁并重定向回收站，
+        // 否则并发测试改进程 environ 时 var 读取失灵会 fallback 到真系统废纸篓（CI 无 GUI 会话必炸）
+        let _env = env_lock();
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
+        let trash_dir = tmp.path().join(".Trash");
+        std::fs::create_dir_all(&trash_dir).unwrap();
+        std::env::set_var("SKILLKIT_TEST_TRASH_DIR", &trash_dir);
         let canon = paths.skillkit_skills_dir().join("pdf");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
@@ -254,6 +260,7 @@ mod tests {
             !claude_link.exists() && !claude_link.is_symlink(),
             "~/.claude/skills/ 桥接不应残留 dangling"
         );
+        std::env::remove_var("SKILLKIT_TEST_TRASH_DIR");
     }
 
     /// unmanaged 的 canonical 在池内（import adopt 入池后的正常形态）：
@@ -357,8 +364,13 @@ mod tests {
     /// managed skill（computed_hash=Some）uninstall 仍删 canonical 目录（行为不变）。
     #[test]
     fn uninstall_managed_still_removes_directory() {
+        // 同上：持锁 + 回收站重定向，防并发 environ 竞态把删除打到真系统废纸篓
+        let _env = env_lock();
         let tmp = tempdir().unwrap();
         let paths = Paths::new(tmp.path().to_path_buf());
+        let trash_dir = tmp.path().join(".Trash");
+        std::fs::create_dir_all(&trash_dir).unwrap();
+        std::env::set_var("SKILLKIT_TEST_TRASH_DIR", &trash_dir);
         let canon = paths.skillkit_skills_dir().join("foo");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
@@ -379,6 +391,7 @@ mod tests {
 
         uninstall(&paths, "skills.sh/foo").unwrap();
         assert!(!canon.exists(), "managed 的 canonical 目录应被删");
+        std::env::remove_var("SKILLKIT_TEST_TRASH_DIR");
     }
 
     /// force 覆盖：unmanaged 同名记录被摘、目录被替换，skillkit 正常登记。
