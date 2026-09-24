@@ -1,6 +1,6 @@
 # skillkit Makefile（对标 Java monorepo Makefile：setup/format/lint/test/build 统一入口）
 # CI 与本地走同一套规则，避免「本地过 CI 不过」。
-.PHONY: setup toolchain format lint test build check run e2e e2e-cli
+.PHONY: setup toolchain format lint test build clean check run e2e e2e-cli
 
 ## 安装/拉取依赖
 setup:
@@ -22,6 +22,13 @@ test:
 ## 编译（release 之外的日常构建）
 build:
 	cargo build --all
+
+## 清理构建产物与临时文件（对应 .gitignore 清单）
+clean:
+	cargo clean
+	find . -name '*.rs.bk' -delete
+	rm -rf e2e/__pycache__
+	find . -name '.DS_Store' -delete
 
 ## 工具链一致性：本地 stable 落后于最新 stable 时，CI（每次拉最新 stable）会爆
 ## 新 pedantic lint，出现「本地全绿 CI 红」（2026-09 v0.1.6 实际发生）。
