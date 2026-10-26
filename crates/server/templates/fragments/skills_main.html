@@ -81,7 +81,9 @@
   {% for (s, enc) in skills %}
   <tr {% if selected.contains(&s.id) && s.is_local() %}class="selected" {% endif %}data-id="{{ s.id }}"{% if s.is_local() %} onclick="toggleSkill(event,this)"{% endif %}>
     <td class="cell-id">
-      <span class="src">{{ s.source }}/</span><span class="nm">{{ s.name }}</span>
+      <span class="src">{{ s.source }}/</span><a class="nm md-link" title="查看 SKILL.md"
+        hx-get="/{{ token }}/skills/{{ enc }}/skill-md"
+        hx-target="#modal-mount" hx-swap="innerHTML">{{ s.name }}</a>
       {% if s.computed_hash.is_none() %}<span class="tag unmanaged">unmanaged</span>{% endif %}
       {% if let Some(sp) = s.spec %}<div class="spec" title="原始安装名">{{ sp }}</div>{% endif %}
     </td>

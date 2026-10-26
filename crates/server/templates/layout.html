@@ -215,8 +215,8 @@
       });
     }
     function toggleSkill(e, tr) {
-      // 忽略按钮点击（→global/→local/upgrade/× 不触发行 toggle）
-      if (e.target.tagName === 'BUTTON') return;
+      // 忽略按钮与 skill 名链接点击（→global/→local/upgrade/×/查看 SKILL.md 不触发行 toggle）
+      if (e.target.tagName === 'BUTTON' || e.target.closest('.md-link')) return;
       tr.classList.toggle('selected');
       syncSelectedUrl();
       refreshSkillBatch();

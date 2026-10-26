@@ -2513,3 +2513,47 @@ async fn profile_delete_missing_returns_404() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn skill_md_endpoint_serves_pool_file_and_errors_when_missing() {
+    // 契约：GET /skills/{id}/skill-md 读池子 canonical 目录 SKILL.md 渲染查看浮层；
+    // 文件缺失返回 422（toast），不弹空浮层。
+    let dir = tempfile::tempdir().unwrap();
+    let state = mk_state(&dir);
+    let pool = state.paths.skillkit_skills_dir();
+    std::fs::create_dir_all(pool.join("fe")).unwrap();
+    std::fs::write(pool.join("fe/SKILL.md"), "---\nname: fe\n---\n# fe body").unwrap();
+
+    let app = skillkit_server::app(state);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills/dc%2Ffe/skill-md")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = common::body_string(resp).await;
+    assert!(
+        body.contains("dc/fe/SKILL.md"),
+        "浮层标题含 id 路径：{body}"
+    );
+    assert!(body.contains("# fe body"), "SKILL.md 原文呈现：{body}");
+    assert!(body.contains("skill-md-body"), "等宽内容区：{body}");
+
+    // 池子无该目录：422 + error JSON（layout JS 弹 toast）
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/test-token/skills/dc%2Fnope/skill-md")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(common::body_string(resp).await.contains("SKILL.md"));
+}

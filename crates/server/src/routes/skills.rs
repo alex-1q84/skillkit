@@ -402,6 +402,42 @@ pub async fn upgrade(
     }
 }
 
+/// SKILL.md 查看浮层（fragments/skill_md_modal.html）：点 skill 名弹浮层，读池子
+/// canonical 目录下 SKILL.md 原文，等宽字体呈现。文件缺失走 toast（不弹空浮层）。
+#[derive(Template)]
+#[template(path = "fragments/skill_md_modal.html")]
+pub struct SkillMdTpl<'a> {
+    pub id: &'a str,
+    pub content: String,
+}
+
+/// GET /skills/{id}/skill-md：id 的 path 编码还原后，name 即池子目录名。
+/// 不查 registry——有目录就能看（孤儿/unmanaged 同样可查），少一次读盘。
+pub async fn skill_md(
+    State(state): State<AppState>,
+    Path((_token, id)): Path<(String, String)>,
+) -> Response {
+    let id = id.replace("%2F", "/");
+    let Some((_, name)) = id.split_once('/') else {
+        return error_response(format!("id 格式错误（应为 source/skill）：{id}"));
+    };
+    let path = state
+        .paths
+        .skillkit_skills_dir()
+        .join(name)
+        .join("SKILL.md");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => render_str(SkillMdTpl { id: &id, content }.render()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            error_response(format!("{id} 的 SKILL.md 不存在（未落池子或目录已移除）"))
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "读取 SKILL.md 失败：{id}");
+            error_response(format!("读取 SKILL.md 失败：{e}"))
+        }
+    }
+}
+
 /// 导入存量 skill 目录，登记进 registry（无源 → unmanaged）。
 /// import_existing 同步阻塞且耗时（扫描+迁池），spawn_blocking 卸到 blocking 线程池，
 /// 避免占用 tokio 工作线程拉长其他请求（含 rescope）的响应窗口（对齐 find 的处理）。
@@ -1111,6 +1147,10 @@ mod tests {
         .render()
         .unwrap();
         assert!(html.contains("dc/fe"), "id 渲染");
+        assert!(
+            html.contains("hx-get=\"/tok/skills/dc%2Ffe/skill-md\""),
+            "skill 名可点开 SKILL.md 浮层：{html}"
+        );
         assert!(html.contains("selected"), "选中行有 selected 标记");
         assert!(html.contains("fe"), "所属 profile chip");
         assert!(html.contains("assign"), "归入端点");
@@ -1163,6 +1203,25 @@ mod tests {
             html.contains("rescope?to=global&amp;id=dc%2Fbe\""),
             "rescope 按钮 URL 只带 to/id：{html}"
         );
+    }
+
+    /// SKILL.md 浮层渲染：内容按原文进 pre（等宽），HTML 必须转义（SKILL.md 是
+    /// 任意来源的文件，含 <script> 也不能注入页面）。
+    #[test]
+    fn skill_md_modal_escapes_content() {
+        let html = SkillMdTpl {
+            id: "dc/fe",
+            content: "---\nname: fe\n---\n# <script>alert(1)</script>".into(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("dc/fe/SKILL.md"), "标题含 id 路径：{html}");
+        assert!(
+            html.contains("&#60;script&#62;"),
+            "HTML 标签转义（防注入）：{html}"
+        );
+        assert!(!html.contains("<script>"), "原文标签不可存活：{html}");
+        assert!(html.contains("browse-modal"), "复用浮层关闭交互");
     }
 
     /// HX-Current-URL → SkillsQuery：过滤四参（scope/profiles/unassigned/selected）全还原，

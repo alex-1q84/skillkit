@@ -129,6 +129,7 @@ pub fn protected() -> Router<AppState> {
         .route("/{token}/skills/{id}/install", post(skills::install))
         .route("/{token}/skills/{id}", delete(skills::uninstall))
         .route("/{token}/skills/{id}/upgrade", post(skills::upgrade))
+        .route("/{token}/skills/{id}/skill-md", get(skills::skill_md))
         .route(
             "/{token}/skills/{id}/profile/{name}",
             delete(skills::delete_profile),
