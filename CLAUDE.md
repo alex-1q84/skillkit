@@ -1,6 +1,6 @@
 # SkillKit — 项目规范
 
-> 本文件是**代码层规范**（怎么写代码）。设计意图与决策推理的唯一权威是 `docs/2026-07-29-skillkit-design.md`（spec）和 `docs/design-decisions-2026-07-29.md`（决策纪要）。规范与设计冲突时先改文档、再改实践，不要反过来。
+> 本文件是**代码层规范**（怎么写代码）。架构全貌见 `docs/architecture.md`；设计意图与决策推理的唯一权威是 `docs/2026-07-29-skillkit-design.md`（spec）和 `docs/design-decisions-2026-07-29.md`（决策纪要）。规范与设计冲突时先改文档、再改实践，不要反过来。
 
 ## 1. 项目定位
 
@@ -27,12 +27,10 @@ skillkit/
   crates/
     core/                 # package: skillkit-core（lib）—— 全部业务逻辑
     cli/                  # package: skillkit-cli，binary name: skillkit —— 薄壳调 core
-    server/               # package: skillkit-server（M2 才创建）—— Axum + Askama 模板 + rust-embed 静态
-  docs/                   # 设计文档 + TODO.md（全项目待办跟踪）+ sessions/ 交接材料
+    server/               # package: skillkit-server —— Axum + Askama 模板 + rust-embed 静态
+  docs/                   # 主 spec + 决策纪要 + architecture.md + TODO.md + frontend-rules.md + release.md
   CLAUDE.md
 ```
-
-M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目录。
 
 ## 5. 不可违反的约束（代码层硬约束）
 
@@ -43,17 +41,17 @@ M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目�
 - **单版本模型**：canonical 物理存储只有一份，版本信息记在 registry 的 `computed_hash` 和 project 的 `locked_shas` 里（源自 npx skills 的 skills-lock.json）。不为多版本预先分目录（YAGNI，spec §16 预留升级路径）。
 - **项目 shared skill 只读发现**：扫描展示即可，不安装/升级/卸载——它由项目 git 自己管。
 - **跨实体用 id 引用**：id = `<source-name>/<skill-name>`，source/scope/version 等信息只在 registry 存一份，profile/project 只存 id 列表（DRY）。
-- **agent 能力配置驱动**：是否支持 symlink、是否直读 `~/.agents/skills/` 声明在 `config.toml`，新增 agent 只改配置不改代码。`Config::default()` 默认声明 claude-code/cursor/codex 三大主流 agent，其余 agent 按需追加。**项目 agents 精确探测**：注册/绑定/同步时按配置目录（`.claude`/`.codex`/`.cursor`/`.agents`）→ 指令文件（`CLAUDE.md`/`AGENTS.md`）判定实际使用的 agent，全部未命中回退开源标准 `.agents/`，绝不默认给全 agent 建目录；旧项目用 `sync-agents` 一键校正（决策 19）。**落地目标与探测解耦**（决策 20）：项目 local skill 总是落 `.agents/skills/`（copy，`agents = []` 也保底，杜绝「有绑定记录无落地」）；探测到的 agent 中 `reads_agents_dir=false` 的（默认配置即 claude-code）额外落私有目录 symlink 桥接，其余 agent 直读 `.agents/skills/` 不落私有目录。`scan_shared` 在 `proj.agents` 各 agent 目录之外，额外只读发现项目级 `.agents/skills/` 共享池（归属 `agents/<name>`）。
+- **agent 能力配置驱动**：是否支持 symlink、是否直读 `~/.agents/skills/` 声明在 `config.toml`，新增 agent 只改配置不改代码。`Config::default()` 默认声明 claude-code/cursor/codex 三大主流 agent，其余 agent 按需追加。项目 agents 的探测顺序与回退、local skill 落地规则（探测与落地解耦、`reads_agents_dir` 桥接、`scan_shared` 共享池归属）见决策纪要 19/20。
 - **不管 Claude 原生插件**（`~/.claude/plugins/`）**和 `~/.claude/commands/`**：碰会冲突。
 - **项目 local skill 平铺落地**：与 shared 同级落在 `<agent>/skills/<skill>/`，绝不建 `local/` 子目录（Claude Code 只发现一层目录下的 skill，子目录会被跳过）；git 忽略写 `<project>/.git/info/exclude`，不改项目 `.gitignore`。详见 spec §6.3、决策 12。
-- **改完源码必跑 `make format && make lint`**：`format` 应用 rustfmt（会改源码）、`lint` 只检查（fmt --check + clippy `-D warnings`）。提交前确保双绿，否则 CI 会拦。详见 §9。`make check` 另含 toolchain 首步（rustup check 拦截本地 stable 落后，防 CI 新 lint 拦截），离线时自动放行。
+- **改完源码必跑 `make format && make lint`**：`format` 应用 rustfmt（会改源码）、`lint` 只检查（fmt --check + clippy `-D warnings`）。提交前确保双绿，否则 CI 会拦。`make check` 另含 toolchain 首步，其拦截逻辑与降级行为见 Makefile 的 toolchain 目标注释与 `docs/release.md`。
 
 ## 6. CLI 约定
 
 - git-style 分组（`source` / `install` / `profile` / `project` / `serve`）。
 - **全命令支持 `--json`**，且 `--json` 输出 schema 视为公开契约，AI agent 依赖其稳定，变更需谨慎。
 - **幂等可重入**：重复 `apply` 零副作用，agent 可放心重试。
-- 危险操作（uninstall / remove / apply 的删除项）默认交互确认，`--yes` 跳过以适配 CI/agent。
+- 危险操作（remove / apply 的删除项）默认交互确认，`--yes` 跳过以适配 CI/agent。
 - `project status` 是感知接口、`project apply` 是执行接口，二者闭环。
 
 ## 7. 代码约定
@@ -69,20 +67,7 @@ M0 只建 `crates/core` + `crates/cli`。`server` 到 M2 再加，避免空目�
 
 ## 7.5 前端约定（server crate）
 
-前端规则细化见 `docs/frontend-rules.md`（类比 project-initialization 按语言给 AI 约束）。核心强规则：
-
-| 必须 | 禁止 |
-|------|------|
-| 前端交互优先 htmx 服务端渲染 + 片段 | React / Vue 等重型框架；node 构建链；npm 依赖 |
-| 业务逻辑只在 core，server handler 是薄壳 | 在 handler/template 复制 core 的推导/计算逻辑 |
-| SSE 刷新请求 `?fragment=1` 纯片段（响应不含 nav） | SSE 刷新返回完整页再 select 提取（曾致导航重复） |
-| 写操作（POST/DELETE）返回完整页面 `hx-target="body" hx-swap="outerHTML"` | 写操作返回片段却用 body outerHTML |
-| 片段外层固定 id（局部替换后 id 不丢） | 片段外层 id 随内容变化 |
-| 页面模板薄壳 + include fragment（main 内容只在 fragment） | 页面模板重复 main 内容 |
-| 前端推导规则只在 core（htmx 调服务端点） | 前端复制一份推导逻辑 |
-| 改模板/静态资源后跑 `make check` | 只改不验（Askama 模板错只有 check 能暴露） |
-
-Askama/htmx 具体坑（match 头花括号歧义、include 不传变量、重复 key 表单、`%2F` 编码、尾斜杠 404、原生 EventSource 等）见 `docs/frontend-rules.md` §4。
+红线两条：禁止 React/Vue 等重型框架与 node 构建链；业务逻辑只在 core，server handler/template 是薄壳。验证命令与其余全部细则（强规则表、片段组织、Askama/htmx 踩坑、测试策略）见 `docs/frontend-rules.md`——前端规则唯一权威，本文件不复制。
 
 ## 8. 测试约定
 
@@ -96,30 +81,16 @@ Askama/htmx 具体坑（match 头花括号歧义、include 不传变量、重复
 - `--json` schema 锁定测试：防 agent 依赖的结构被无意改动。
 - git 操作用本地 bare repo 真跑，不 mock。
 - **集成测试放对应 crate 的 `tests/`**（如 `crates/core/tests/`），不放 workspace 根——纯 workspace 根（无 `[package]`）的 `tests/` 被 cargo test 静默忽略。
+- **死代码/可见性收窄判定须查 `crates/*/tests/` 引用**，不只看 src 与两壳——集成测试在用就得保持 pub（案例：`ensure_global_claude` 因 m0 集成测试在用而未收窄）。
 - **测试里跑 `git commit` 必须带 `-c user.email -c user.name`**，不依赖机器全局 git config（换环境稳定，避免 commit 静默失败）。
 
 ## 9. 常用命令
 
-```bash
-cargo build                          # 编译
-cargo test                           # 全量测试
-cargo test -p skillkit-core          # 只测 core
-cargo run -p skillkit-cli -- <cmd>   # 跑 CLI（M0 起可用）
-cargo run -p skillkit-server         # 起 web server（M2）
-```
-
-日常走 Makefile 统一入口（CI 与本地同规则）：
+日常统一入口走 Makefile（CI 与本地同规则），目标清单以 Makefile 为准——提交前 `make check` 一站式（toolchain + format + lint + test），改动 GUI 后另跑 `make e2e`。Makefile 未覆盖粒度的直跑命令：
 
 ```bash
-make setup        # 拉取依赖
-make format       # 应用 rustfmt（会改源码）
-make lint         # 格式校验 + clippy -D warnings（read-only）
-make test         # 全量测试
-make build        # 编译
-make check        # 提交前一站式：format && lint && test
-make run ARGS="..."  # 跑最新 CLI（check 只 clippy check + test，不产出独立 bin；直接跑 target/debug/skillkit 会拿到旧 bin）
-make e2e             # GUI 端到端（python playwright + chromium，真实浏览器；需空闲端口，不进 check）
-make e2e-cli         # CLI 全链路端到端（assert_cmd 驱动真实二进制 + 真跑 npx skills；不进 check）
+cargo test -p skillkit-core          # 只测 core（make test 是全量）
+cargo run -p skillkit-cli -- serve   # 起 web GUI（server crate 是 lib，无独立 bin）
 ```
 
 ## 10. Commit 规范

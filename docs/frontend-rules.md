@@ -15,7 +15,8 @@
 | 片段外层固定 id（如 `id="status-panel"`）保证局部替换后 id 不丢 | 片段外层 id 随内容变化（替换后 id 丢失） |
 | 新增模板字段/struct 补 `lib.rs` 或 routes 的 re-export | 混用短路径 re-export 与全模块路径（漏 re-export 温床） |
 | 注释中文，与文档/commit 一致；Askama 模板同 layout 语言 | 中英混排注释 |
-| 动前端源码后跑 `make format && make lint`（rustfmt 管 .rs，模板不动 fmt） | 只改不改验，或跳过 clippy `-D warnings` |
+| 模板/静态资源改动生效须**重建二进制**再重启 serve（rust-embed 嵌入）；起 GUI 一律 `skillkit serve` | 只重启 serve 不重建（改动不生效）；`cargo run -p skillkit-server`（server crate 是 lib，无此 bin target） |
+| 验证按改动对象各行其是：动 `.rs` 源码跑 `make format && make lint`（rustfmt 管 .rs，模板不动 fmt）；改模板/静态资源跑 `make check`（Askama 模板编译错只有 check/test 能暴露） | 只改不验；或改了模板只跑 format/lint 就当验证过（模板错它们测不出） |
 
 ## 2. 前端组织
 
@@ -27,7 +28,9 @@ crates/server/
     {home,sources,skills,profiles,projects,project_workspace}.html  # 页面薄壳
     fragments/
       {home,sources,skills,profiles,projects,workspace}_main.html   # 各视图 main 内容（?fragment=1 用）
-      {status,apply_result,profile_skills,source_name_input}.html   # 局部片段（写操作返回）
+      {status,profile_skills,source_name_input}.html                # 通用局部片段（写操作返回）
+      {find_results,find_row_installed,dupes_results,install_local_modal,skill_md_modal}.html  # Skills 页局部：find 结果区/行内已装/同名副本面板/装本地弹层/SKILL.md 浮层
+      {browse,browse_select,scan_results,scan_toggle,complete}.html # Projects 页局部：目录浏览选择/扫描结果/扫描开关/完成
   static/{htmx.min.js, sortable.min.js, app.css}   # rust-embed 嵌入，不走 CDN
 ```
 
@@ -41,11 +44,15 @@ crates/server/
 
 **局部片段（status/profile_skills 等）**：写操作返回对应 `fragments/*.html`，`hx-target="#xxx-panel" hx-swap="outerHTML"`，片段外层固定 id。
 
-**SSE 跨进程刷新**：`layout.html` 里 `EventSource` 收到 `changed` → `htmx.ajax('GET', location.pathname + '?fragment=1', { target: 'main', swap: 'innerHTML' })`。**响应必须是纯片段**（不含 nav），从根上杜绝导航重复。
+**SSE 跨进程刷新**：`layout.html` 里 `EventSource` 收到 `changed` → 用 `URLSearchParams` 保留当前 query（Skills 页 selected/profiles 等），只追加/覆盖 `fragment=1`，再 `htmx.ajax('GET', location.pathname + '?' + params, { target: 'main', swap: 'innerHTML' })`。**响应必须是纯片段**（不含 nav），从根上杜绝导航重复。这与 §4 的 pushState + `HX-Current-URL` 规则同一口径：query 是过滤/选中状态的唯一载体，谁发起刷新谁负责带上当前 query。
 
 **实时预览**：输入框 `hx-get` + `hx-trigger="input changed delay:300ms"` + `hx-include="this"` + `hx-target="#wrapper" hx-swap="innerHTML"`，服务端推导返回预填 value 的 input 片段（如 `source_name_input.html`）。**推导规则只在 core**，前端不得复制一份。
 
 **拖拽**：SortableJS 已引入（`layout.html` 的 `htmx:afterSettle` 幂等初始化）。列表项重排提交用 `hx-post` + body 手动解析重复 key（`form_urlencoded::parse`），serde_urlencoded 不支持重复 key→Vec。
+
+**hx-swap 从最近祖先继承**：`<form hx-swap="outerHTML">` 内的触发按钮不显式写 `hx-swap` 时继承 form 的 outerHTML——整个挂载点被浮层内容替换、id 丢失，后续 `hx-target="#挂载点"` 永远找不到目标（表现为「再点无反应」）。嵌套触发按钮一律显式 `hx-swap="innerHTML"`。
+
+**body 整页替换后的 JS 重绑**：写操作 body outerHTML 替换后，`layout.html` 的 inline script 会被 htmx 重新执行、监听器自动重绑——新增全局 JS 必须放同一 inline script 块，放别的文件/位置会丢监听。
 
 ## 4. Askama 约定（踩坑即规则）
 
@@ -56,6 +63,7 @@ crates/server/
 - **私有 async fn**：clippy `unused_async` 对无 await 的私有 async fn 报错。`render_xxx` 改同步 fn（pub handler 保持 async）。
 - **路径参数编码**：id 含 `/`（`source/skill`）须 `%2F` 编码（handler 预编码），单段 `{id}` 接受解码后 `/`。
 - **尾斜杠 404**：axum 0.8 `/{token}` 严格匹配，`/TOKEN/` 需额外注册。
+- **上传 body 上限**：`Multipart` 提取器受 `DefaultBodyLimit` 约束，axum 0.8 默认 2MB——上传端点必须显式设 `DefaultBodyLimit::max`（现 `routes/mod.rs:120`），否则大 body 在到达 core 校验前被 413（测试绿但大文件装不进的盲区）。
 - **scope serde**：`#[serde(rename_all = "lowercase")]`，json 里 `"global"`/`"local"`。
 - **htmx 2.x SSE 扩展独立包**：不用 htmx 的 sse 扩展，用浏览器原生 `EventSource` + `htmx.ajax`。
 - **视图过滤状态进 URL，写操作经 HX-Current-URL 还原**：过滤 chip 点击在 `htmx:configRequest` 里 `pushState` 把过滤参数写进地址栏（去掉 `fragment=1`；不能放 afterRequest——chip 已被 innerHTML 替换出 DOM，事件不冒泡到 body）；selected 等易变状态也以 DOM 实时值经 `parameters.set` 注入请求，不信模板渲染的快照。写操作 handler 一律传 `page_query(&headers)`（解析 htmx 自动携带的 `HX-Current-URL` 头）渲染返回页，禁止逐按钮拼 `filter_qs`（每个操作都要手工维护，漏一个就重置过滤）或 `SkillsQuery::default()`（必然重置）。非 htmx 的 fetch 提交须手动带 `HX-Current-URL: location.href` 头。
