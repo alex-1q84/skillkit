@@ -82,10 +82,11 @@ pub fn install(
     Ok(meta)
 }
 
-/// 覆盖安装的清场：按短名摘掉 registry 里全部同名记录（复用 uninstall：managed
-/// 撤桥接/删目录/同步 lock，unmanaged 只摘记录），unmanaged 目录与孤儿目录在此补删
-/// （uninstall 对 unmanaged 不删目录是防误删；覆盖是用户明确要求替换，语义不同）。
-fn clear_occupied(paths: &Paths, skill_name: &str) -> Result<()> {
+/// 覆盖安装的清场（install 与 install_local 共用）：按短名摘掉 registry 里全部
+/// 同名记录并删池内 target——managed 撤桥接/硬删/同步 lock，unmanaged 撤桥接/
+/// 池内 canonical 硬删（池外手工目录保留仅摘记录），孤儿目录兜底补删。内部经
+/// with_registry 持短锁，调用方不得已持 registry 锁（同进程 flock 不重入）。
+pub(crate) fn clear_occupied(paths: &Paths, skill_name: &str) -> Result<()> {
     let reg = Registry::load(paths)?;
     let ids: Vec<String> = reg
         .skills

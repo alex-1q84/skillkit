@@ -114,14 +114,14 @@ git-style 分组（`crates/cli/src/main.rs`）：`source` / `install add|local` 
 ## 9. 并发模型
 
 - fs2 advisory flock（`try_lock_exclusive` 轮询，50ms 间隔），**per-key** 锁文件 `~/.skillkit/.lock/<key>.lock`（key：`registry` / `sources` / `config` / `profile-<name>` / `project-<id>`），写锁 5s 超时报 `LockTimeout`，读不锁（决策 25，`crates/core/src/lock.rs`）。guard drop 自动释放。
-- `with_registry` 是 registry 写事务单点：acquire → load → 闭包 → `save_raw`（不重取锁，防同进程 flock 自死锁；`crates/core/src/registry.rs:114`）。`install_local` 与 `set_scope` 有意全程直接持锁（三段原子落地/物理迁移窗口完整）。同进程 flock 不可重入是所有「save_raw / 先 drop 再取下一把锁」写法的根因（决策 46）。
+- `with_registry` 是 registry 写事务单点：acquire → load → 闭包 → `save_raw`（不重取锁，防同进程 flock 自死锁；`crates/core/src/registry.rs:114`）。`set_scope` 有意全程直接持锁（物理迁移窗口完整）；`install_local` 的 force 清场在锁外调 `clear_occupied`（内部各自持短锁），就位与 registry 写持同一把锁（决策 52）。同进程 flock 不可重入是所有「save_raw / 先 drop 再取下一把锁」写法的根因（决策 46）。
 - **声明缺口**（`docs/TODO.md` §二，9ffd194 后现状）：registry 写回段已全部持锁、覆盖回滚根治；但**物理段**（npx 写池、删目录/回收站、rename 迁池）有意留在锁外（防 5s 锁超时），物理并发互踩仍是非目标取舍；池级共享锁未建。不要引用主 spec §3.7「不持任何锁」旧表述。
 - 测试基建同款互斥：凡测试改进程环境变量（PATH 注入 fake npx、回收站重定向 `SKILLKIT_TEST_TRASH_DIR`）都持进程级 `ENV_LOCK` 串行，堵 macOS 并发 setenv 竞态（core 与 server 测试各自实现）。
 
 ## 10. 安全与信任边界
 
 - serve 本机单用户模型：只绑回环地址 + 随机 token 路径前缀，无多用户/鉴权体系；静态资源 `/static/*` 与 `/ping` 公开（localhost 无泄露风险）。
-- `install local` 对不可信输入（GitHub zip、外部目录）五件套（决策 38，`crates/core/src/install_local.rs`）：① name 校验防路径逃逸（拒 `..`/分隔符/非法字符）；② zip 逐条目 `enclosed_name` 拒穿越 + 拒 symlink 条目；③ 复制/哈希跳过 symlink（防池外内容混入）；④ 体积 100MiB / 条目 10000 上限防 zip bomb；⑤ tempdir → 校验 → 落池三段原子（全程持锁，失败回滚）。
+- `install local` 对不可信输入（GitHub zip、外部目录）五件套（决策 38，`crates/core/src/install_local.rs`）：① name 校验防路径逃逸（拒 `..`/分隔符/非法字符）；② zip 逐条目 `enclosed_name` 拒穿越 + 拒 symlink 条目；③ 复制/哈希跳过 symlink（防池外内容混入）；④ 体积 100MiB / 条目 10000 上限防 zip bomb；⑤ tempdir → 校验 → staging 单段 rename 落池（持锁，registry 写失败回滚删 target；force 清场语义见决策 52）。
 - 删除可逆原则（决策 50）：用户交互路径的删除一律送系统回收站；仅 force 覆盖清场硬删。
 
 ## 11. agent 适配模型

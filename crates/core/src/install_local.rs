@@ -233,8 +233,10 @@ fn expand_tilde(p: &str) -> String {
     p.into()
 }
 
-/// 安装本地 skill（目录/zip）到 canonical 池，managed + scope。全程持 "registry" 锁。
-#[allow(clippy::too_many_lines)] // 原子就位 + 回滚 + 冲突判定固有长，拆分会破坏三段原子性
+/// 安装本地 skill（目录/zip）到 canonical 池，managed + scope。force=true 时先
+/// 锁外 clear_occupied 清场（同名全部记录 + 池内 target，含跨 source 占用与孤儿
+/// 目录），再持 "registry" 锁做冲突判定（清场后仍命中即并发抢先，拒绝）与就位。
+#[allow(clippy::too_many_lines)] // 清场 + 冲突判定 + 就位回滚固有长，拆分会破坏锁序推理
 pub fn install_local(
     paths: &Paths,
     src_path: &str,
@@ -242,8 +244,6 @@ pub fn install_local(
     scope: Scope,
     force: bool,
 ) -> Result<SkillMeta> {
-    let _lock = FileLock::acquire(paths, "registry")?;
-
     let expanded = expand_tilde(src_path);
     let src = Path::new(&expanded);
     if !src.exists() {
@@ -293,6 +293,15 @@ pub fn install_local(
     }
 
     let local_id = Registry::skill_id("local", &resolved_name);
+
+    // force 清场（锁外：clear_occupied 内部经 with_registry 持短锁，锁内调用会
+    // 同进程 flock 自死锁）。摘全部同名记录 + 删池内 target（跨 source 占用 /
+    // 自身重复 / 孤儿目录一并处理），与源安装 force 语义（决策 49）对齐。
+    if force {
+        crate::install::clear_occupied(paths, &resolved_name)?;
+    }
+
+    let _lock = FileLock::acquire(paths, "registry")?;
     let reg = Registry::load(paths)?;
     let existing_local = reg.get(&local_id).ok().cloned();
     let other_owner = reg
@@ -301,17 +310,17 @@ pub fn install_local(
         .find(|m| m.id != local_id && m.canonical_path == target)
         .cloned();
 
-    // 冲突判定（键 = registry id；防跨 source 误删）
+    // 冲突判定（键 = registry id；force 清场后仍命中即并发写入抢先，拒绝不二次清场）
     if let Some(owner) = &other_owner {
         return Err(SkillkitError::SkillPoolOccupied {
             name: resolved_name.clone(),
             owner_id: Some(owner.id.clone()),
         });
     }
-    if existing_local.is_some() && !force {
+    if existing_local.is_some() {
         return Err(SkillkitError::SkillAlreadyInstalled { id: local_id });
     }
-    if existing_local.is_none() && target.exists() {
+    if target.exists() {
         return Err(SkillkitError::SkillPoolOccupied {
             name: resolved_name.clone(),
             owner_id: None,
@@ -321,25 +330,15 @@ pub fn install_local(
     // 复制到暂存 + hash（rename 前算，缩小就位后失败面）
     let pid = std::process::id();
     let staging = pool.join(format!(".{resolved_name}.staging-{pid}"));
-    let old = pool.join(format!(".{resolved_name}.old-{pid}"));
     if staging.exists() {
         let _ = std::fs::remove_dir_all(&staging);
     }
     copy_skill_dir(&skill_dir, &staging)?;
     let hash = hash_skill_dir(&staging)?;
 
-    // 原子就位：force 三段（target→.old → staging→target），非 force 单段 rename。
-    let force_mode = existing_local.is_some();
-    if force_mode {
-        std::fs::rename(&target, &old).map_err(|e| {
-            let _ = std::fs::remove_dir_all(&staging);
-            SkillkitError::Io(e)
-        })?;
-        if let Err(e) = std::fs::rename(&staging, &target) {
-            let _ = std::fs::rename(&old, &target); // 还原旧内容
-            return Err(SkillkitError::Io(e));
-        }
-    } else if let Err(e) = std::fs::rename(&staging, &target) {
+    // 单段 rename 就位（force 路径 target 已被 clear_occupied 删除，非 force 路径
+    // 上方冲突判定保证 target 不存在）
+    if let Err(e) = std::fs::rename(&staging, &target) {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(SkillkitError::Io(e));
     }
@@ -359,15 +358,9 @@ pub fn install_local(
     let mut reg = reg;
     reg.upsert(meta.clone());
     if let Err(e) = reg.save_raw(paths) {
-        // 回滚：非 force 删 target；force 还原 old
+        // 回滚：删已就位的 target（registry 未写入，不留孤儿）
         let _ = std::fs::remove_dir_all(&target);
-        if force_mode {
-            let _ = std::fs::rename(&old, &target);
-        }
         return Err(e);
-    }
-    if force_mode {
-        let _ = std::fs::remove_dir_all(&old); // 清旧（best-effort）
     }
 
     if scope == Scope::Global {
@@ -656,9 +649,82 @@ mod tests {
     }
 
     #[test]
-    fn install_local_refuses_cross_source_occupant() {
+    fn install_local_refuses_unmanaged_occupant_without_force() {
         let p = paths();
-        // 模拟 skills.sh/foo 已占池 skills/foo
+        // unmanaged/foo 占池 skills/foo（import 扫描登记形态）
+        let canon = p.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "x").unwrap();
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: Scope::Local,
+            version: None,
+            computed_hash: None,
+            spec: None,
+            installed_at: "x".into(),
+            canonical_path: canon.display().to_string(),
+        });
+        reg.save(&p).unwrap();
+
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        let err =
+            install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap_err();
+        match err {
+            SkillkitError::SkillPoolOccupied { owner_id, .. } => {
+                assert_eq!(owner_id.as_deref(), Some("unmanaged/foo"), "点名占用方");
+            }
+            other => panic!("应为 SkillPoolOccupied：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_local_force_takes_over_unmanaged_occupant() {
+        let p = paths();
+        // unmanaged/foo 占池 skills/foo → force 清场接管（GUI「覆盖已存在」场景）
+        let canon = p.skillkit_skills_dir().join("foo");
+        std::fs::create_dir_all(&canon).unwrap();
+        std::fs::write(canon.join("SKILL.md"), "old").unwrap();
+        let mut reg = Registry::load(&p).unwrap();
+        reg.upsert(SkillMeta {
+            id: "unmanaged/foo".into(),
+            name: "foo".into(),
+            source: "unmanaged".into(),
+            scope: Scope::Local,
+            version: None,
+            computed_hash: None,
+            spec: None,
+            installed_at: "x".into(),
+            canonical_path: canon.display().to_string(),
+        });
+        reg.save(&p).unwrap();
+
+        let src = tempdir().unwrap();
+        let d = make_skill_dir(src.path(), "foo");
+        std::fs::write(d.join("new.md"), "v2").unwrap();
+        let m = install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap();
+        assert_eq!(m.id, "local/foo");
+        // 池目录已是新内容（旧文件清掉、新文件就位）
+        assert!(canon.join("new.md").exists(), "新内容就位");
+        assert!(
+            std::fs::read_to_string(canon.join("SKILL.md"))
+                .unwrap()
+                .contains("name: foo"),
+            "旧 SKILL.md 被替换"
+        );
+        // 记录收敛：unmanaged 摘除，local 接管且 managed（有 hash）
+        let after = Registry::load(&p).unwrap();
+        assert!(after.get("unmanaged/foo").is_err(), "unmanaged 记录已摘");
+        assert!(after.get("local/foo").unwrap().computed_hash.is_some());
+    }
+
+    #[test]
+    fn install_local_force_takes_over_managed_occupant() {
+        let p = paths();
+        // skills.sh/foo（managed）占池 skills/foo → force 清场接管
         let canon = p.skillkit_skills_dir().join("foo");
         std::fs::create_dir_all(&canon).unwrap();
         std::fs::write(canon.join("SKILL.md"), "x").unwrap();
@@ -678,17 +744,11 @@ mod tests {
 
         let src = tempdir().unwrap();
         let d = make_skill_dir(src.path(), "foo");
-        let err =
-            install_local(&p, &d.display().to_string(), None, Scope::Local, false).unwrap_err();
-        assert!(matches!(err, SkillkitError::SkillPoolOccupied { .. }));
-        // force 也不跨 source 删
-        let err2 =
-            install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap_err();
-        assert!(matches!(err2, SkillkitError::SkillPoolOccupied { .. }));
-        assert!(
-            canon.join("SKILL.md").exists(),
-            "skills.sh/foo 的 canonical 未被删"
-        );
+        install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap();
+        let after = Registry::load(&p).unwrap();
+        assert!(after.get("skills.sh/foo").is_err(), "旧源记录已摘");
+        assert!(after.get("local/foo").is_ok(), "local 记录接管");
+        assert!(canon.join("SKILL.md").exists(), "目录为新内容");
     }
 
     #[test]
@@ -708,6 +768,15 @@ mod tests {
             }
             other => panic!("应为 SkillPoolOccupied(None)：{other:?}"),
         }
+        // force：孤儿目录补删，正常装上
+        let m = install_local(&p, &d.display().to_string(), None, Scope::Local, true).unwrap();
+        assert_eq!(m.id, "local/foo");
+        assert!(
+            std::fs::read_to_string(canon.join("SKILL.md"))
+                .unwrap()
+                .contains("name: foo"),
+            "孤儿目录被替换为新内容"
+        );
     }
 
     #[test]

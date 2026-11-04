@@ -31,7 +31,7 @@
 
 ## 四、已知行为限制（spec 声明的取舍，做不做需决策）
 
-- [x] uninstall 对 unmanaged 只摘登记不删 canonical；迁池后留孤儿目录 + dangling 桥接，需手动 `rm` 或 GUI remove。来源：import-relocate spec §6 连带影响。已被 `cb458a3`（2026-09-11「卸载一律进系统回收站，unmanaged 不再只摘记录」）推翻：现行行为 = 撤桥接 + 池内 canonical 送系统回收站 + 摘记录，池外目录按防误删约定保留（install.rs:141-158）。残留瑕疵可顺带修：install.rs:85-87 `clear_occupied` 注释仍写「unmanaged 只摘记录」，未随 cb458a3 同步。
+- [x] uninstall 对 unmanaged 只摘登记不删 canonical；迁池后留孤儿目录 + dangling 桥接，需手动 `rm` 或 GUI remove。来源：import-relocate spec §6 连带影响。已被 `cb458a3`（2026-09-11「卸载一律进系统回收站，unmanaged 不再只摘记录」）推翻：现行行为 = 撤桥接 + 池内 canonical 送系统回收站 + 摘记录，池外目录按防误删约定保留（install.rs:141-158）。曾残留的注释不同步（install.rs `clear_occupied` 仍写「unmanaged 只摘记录」）已随 2026-11-03 决策 52 改造同步修正。
 - [ ] GUI 绑 profile 是全量替换 `installed_skills`，CLI `project apply` 仍是追加，两者语义未统一，暂不统一。来源：projects-ui-redesign spec §7。2026-10-31 核实现状：`set_profiles`（project.rs:122-141，替换语义）与 `apply_profile`（project.rs:109-115，追加语义）并存，cli/commands/project.rs:91 仍调追加版。
 - [ ] legacy `installed_skills` 里的 global 在 apply 时幂等忽略、不落地、不报错。来源：scope-profile spec §8 已知限制。
 - [ ] browse 路径含空格/中文/`&` 时 query 不 percent-encode。来源：projects-ui-redesign spec §7。

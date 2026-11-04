@@ -585,3 +585,15 @@
 **否定的备选**：
 - import 按名自动去重。
 - 自动 adopt。
+
+## 决策 52：install_local force 对齐源安装清场语义（clear_occupied 共用）
+
+（2026-11-03 ｜ 来源：GUI「覆盖已存在」装本地 skill 被 `unmanaged/<name>` 占用拒绝的实机反馈；局部修订决策 39）
+
+**决策**：install_local 的 force=true 在取 registry 锁**之前**调 clear_occupied 清场（摘全部同名记录 + 删池内 target，跨 source 占用与孤儿目录一并处理），再持锁做冲突判定（清场后仍命中即并发写入抢先，拒绝不二次清场）与单段 rename 就位。局部修订决策 39：撤销「force 也不跨 source 删」与三段原子 move-aside（清场后 target 必不存在，三段退化为死代码删除）；「全程持锁」收窄为「就位与 registry 写持锁」，src 解析与清场在锁外（clear_occupied 内部经 with_registry 持短锁，锁内调用会同进程 flock 自死锁）。
+
+**理由**：决策 49 只给源安装做了 force 清场，本地安装的 force 仅绕过同 id 重复检查，跨 source 占用仍无条件拒绝——GUI「覆盖已存在」与错误文案「或 --force 覆盖」的承诺双双落空，用户被迫去 CLI 清记录，体验断层；错误文案对本地路径不成立属文案与行为不一致缺陷。
+
+**否定的备选**：
+- 维持拒绝 + 文案改为引导 remove——保留两条路径 force 语义分裂。
+- 锁内调 clear_occupied——flock 同进程不重入，必然 LockTimeout。
