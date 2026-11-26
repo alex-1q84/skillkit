@@ -84,6 +84,20 @@ skillkit/
 - **死代码/可见性收窄判定须查 `crates/*/tests/` 引用**，不只看 src 与两壳——集成测试在用就得保持 pub（案例：`ensure_global_claude` 因 m0 集成测试在用而未收窄）。
 - **测试里跑 `git commit` 必须带 `-c user.email -c user.name`**，不依赖机器全局 git config（换环境稳定，避免 commit 静默失败）。
 
+### 8.1 隔离验证（强制性）
+
+任何会写 skillkit 状态（`~/.skillkit/`、`~/.agents/skills/`）的手工验证与实验，一律走统一入口，不走裸命令：
+
+```bash
+make iso ARGS="skillkit remove unmanaged/demo --json"   # 临时 HOME 全子 shell 隔离 + 出口污染核对
+# 参数含引号或管道时 make 会拆碎，直调脚本：scripts/iso.sh python3 -c '...'
+```
+
+- **禁止 `HOME=$TMP cmd` 单命令前缀做隔离**：前缀赋值只绑定一条简单命令，复合命令里的 python/node 等子进程继承真实 HOME（2026-11-26 registry 污染事故根因）。隔离必须 export 到整个子 shell——`make iso` 已处理。
+- **禁止手写 `~/.skillkit/` 下的状态文件**：构造测试场景（unmanaged 登记、孤儿目录等）一律在隔离 HOME 里用 skillkit 自身命令（`install --force`、`import` 等）造出来。
+- 脚本写 JSON 状态文件必须读-改-写，禁止整体覆盖；写前断言目标路径在预期根目录下。
+- `iso.sh` 出口自动核对真实 registry 与 skill 池未变，检测到污染保留现场并报错，不静默放行。
+
 ## 9. 常用命令
 
 日常统一入口走 Makefile（CI 与本地同规则），目标清单以 Makefile 为准——提交前 `make check` 一站式（toolchain + format + lint + test），改动 GUI 后另跑 `make e2e`。Makefile 未覆盖粒度的直跑命令：

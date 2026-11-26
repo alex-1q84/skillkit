@@ -1,6 +1,6 @@
 # skillkit Makefile（对标 Java monorepo Makefile：setup/format/lint/test/build 统一入口）
 # CI 与本地走同一套规则，避免「本地过 CI 不过」。
-.PHONY: setup toolchain format lint test build clean check run e2e e2e-cli
+.PHONY: setup toolchain format lint test build clean check run iso e2e e2e-cli
 
 ## 安装/拉取依赖
 setup:
@@ -47,6 +47,10 @@ check: toolchain format lint test
 ## 运行 CLI（最新源码，避免 make check 后拿到旧 bin）：make run ARGS="source list"
 run:
 	cargo run -p skillkit-cli -- $(ARGS)
+
+## 隔离验证：临时 HOME 全子 shell 隔离 + 出口核对真实 ~/.skillkit 未被污染（CLAUDE.md §8.1）
+iso:
+	scripts/iso.sh $(ARGS)
 
 # --- e2e（真实浏览器驱动 GUI，不进 check；需 chromium + pipx python playwright）---
 PY        ?= $(HOME)/.local/pipx/venvs/playwright/bin/python
