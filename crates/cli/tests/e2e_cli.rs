@@ -311,7 +311,8 @@ fn remove_yes_skips_confirm_and_json_implies_yes() {
     env.make_skill(".agents/skills", "legacy-e");
     env.skillkit().args(["import-existing"]).assert().success();
 
-    // --json 隐含跳过确认，输出 {id, removed_canonical:false}
+    // --json 隐含跳过确认，输出 {id, removed_canonical}
+    // import-existing 已把 canonical 入池迁址，remove 真实动作是送回收站 → true
     let out = env
         .skillkit()
         .args(["remove", "unmanaged/legacy-e", "--json"])
@@ -319,7 +320,7 @@ fn remove_yes_skips_confirm_and_json_implies_yes() {
         .success();
     let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert_eq!(v["id"], "unmanaged/legacy-e");
-    assert_eq!(v["removed_canonical"], false);
+    assert_eq!(v["removed_canonical"], true);
     assert!(registry_ids(&env).is_empty());
 }
 

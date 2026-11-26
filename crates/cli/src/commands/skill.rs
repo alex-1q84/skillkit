@@ -1,5 +1,7 @@
 //! skill 实体的查询与移除：find（搜 skills.sh）/ list（列已装）/ remove（卸载，替换 uninstall）。
 //! 复用 core 的 npx::find / Registry / uninstall，cli 只做薄壳与展示。
+use std::path::PathBuf;
+
 use clap::Args;
 use skillkit_core::{npx, paths::Paths, uninstall, Registry, Scope, SkillMeta};
 
@@ -130,17 +132,22 @@ pub struct RemoveCmd {
 pub fn run_remove(cmd: RemoveCmd) -> anyhow::Result<()> {
     let paths = Paths::production();
     // 先读 registry 判断 managed（决定 removed_canonical + 提示文案），与 uninstall 内部行为一致
-    let managed = {
+    let (managed, canon_in_pool) = {
         let reg = Registry::load(&paths)?;
-        reg.get(&cmd.id)?.computed_hash.is_some()
+        let meta = reg.get(&cmd.id)?;
+        let canon = PathBuf::from(&meta.canonical_path);
+        let in_pool = canon.starts_with(paths.skillkit_skills_dir()) && canon.is_dir();
+        (meta.computed_hash.is_some(), in_pool)
     };
 
     let skip_confirm = cmd.yes || cmd.json;
     if !skip_confirm {
         let note = if managed {
-            ""
+            "（canonical 送系统回收站，可从废纸篓找回）"
+        } else if canon_in_pool {
+            "（unmanaged 池内 canonical：送系统回收站，可从废纸篓找回，并摘登记）"
         } else {
-            "（unmanaged：仅删登记，保留目录）"
+            "（unmanaged 池外 canonical：仅删登记，目录保留）"
         };
         println!("将删除 {id}{note}，确认？(y/n)", id = cmd.id, note = note);
         let mut line = String::new();
@@ -156,10 +163,14 @@ pub fn run_remove(cmd: RemoveCmd) -> anyhow::Result<()> {
     if cmd.json {
         println!(
             "{}",
-            serde_json::json!({ "id": cmd.id, "removed_canonical": managed })
+            serde_json::json!({ "id": cmd.id, "removed_canonical": managed || canon_in_pool })
         );
     } else {
-        let note = if managed { "" } else { "（仅删登记）" };
+        let note = if managed || canon_in_pool {
+            "（canonical 已送回收站）"
+        } else {
+            "（仅删登记，目录保留）"
+        };
         println!("✓ 已卸载 {id}{note}", id = cmd.id, note = note);
     }
     Ok(())
